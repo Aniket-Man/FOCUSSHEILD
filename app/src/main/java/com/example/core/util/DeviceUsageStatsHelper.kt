@@ -51,29 +51,94 @@ object DeviceUsageStatsHelper {
         val now = System.currentTimeMillis()
 
         try {
-            // 1. Query aggregated usage stats
-            val aggregated = usageStatsManager.queryAndAggregateUsageStats(startOfDay, now)
-            if (!aggregated.isNullOrEmpty()) {
-                val totalTime = aggregated.values
-                    .filter { it.totalTimeInForeground > 0 && !isIgnoredSystemPackage(it.packageName) }
-                    .sumOf { it.totalTimeInForeground }
-                if (totalTime > 0) return totalTime
+            // 1. Try tracking exact screen on/off events (SCREEN_INTERACTIVE = 15, SCREEN_NON_INTERACTIVE = 16)
+            val events = usageStatsManager.queryEvents(startOfDay, now)
+            val event = android.app.usage.UsageEvents.Event()
+            
+            var totalScreenTime = 0L
+            var lastInteractiveTime = 0L
+            var isInteractive = false
+            var hasInteractiveEvents = false
+            
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val type = event.eventType
+                
+                if (type == 15) { // SCREEN_INTERACTIVE
+                    if (!isInteractive) {
+                        lastInteractiveTime = event.timeStamp
+                        isInteractive = true
+                        hasInteractiveEvents = true
+                    }
+                } else if (type == 16) { // SCREEN_NON_INTERACTIVE
+                    if (isInteractive) {
+                        totalScreenTime += (event.timeStamp - maxOf(lastInteractiveTime, startOfDay))
+                        isInteractive = false
+                        hasInteractiveEvents = true
+                    } else if (!hasInteractiveEvents && event.timeStamp > startOfDay) {
+                        totalScreenTime += (event.timeStamp - startOfDay)
+                        hasInteractiveEvents = true
+                    }
+                }
+            }
+            if (isInteractive) {
+                totalScreenTime += (now - maxOf(lastInteractiveTime, startOfDay))
+            }
+            
+            if (hasInteractiveEvents && totalScreenTime > 0L) {
+                return totalScreenTime
             }
 
-            // 2. Query interval daily usage stats
-            val stats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY,
-                startOfDay,
-                now
-            )
-            if (!stats.isNullOrEmpty()) {
-                val totalTime = stats
-                    .filter { it.totalTimeInForeground > 0 && !isIgnoredSystemPackage(it.packageName) }
-                    .sumOf { it.totalTimeInForeground }
-                if (totalTime > 0) return totalTime
+            // 2. Fallback: If device doesn't report screen state, build a timeline of ACTIVITY_RESUMED (1) / ACTIVITY_PAUSED (2)
+            val fallbackEvents = usageStatsManager.queryEvents(startOfDay, now)
+            val activePackages = mutableMapOf<String, Long>()
+            
+            class Interval(val start: Long, val end: Long)
+            val intervals = mutableListOf<Interval>()
+            
+            while (fallbackEvents.hasNextEvent()) {
+                fallbackEvents.getNextEvent(event)
+                val type = event.eventType
+                val pkg = event.packageName
+                
+                if (type == 1) { // ACTIVITY_RESUMED
+                    if (!activePackages.containsKey(pkg)) {
+                        activePackages[pkg] = event.timeStamp
+                    }
+                } else if (type == 2 || type == 23 || type == 24) { // ACTIVITY_PAUSED / STOPPED
+                    val startTime = activePackages.remove(pkg)
+                    if (startTime != null) {
+                        intervals.add(Interval(startTime, event.timeStamp))
+                    }
+                }
             }
-        } catch (_: Exception) {
-        }
+            activePackages.forEach { (_, startTime) ->
+                intervals.add(Interval(startTime, now))
+            }
+            
+            if (intervals.isNotEmpty()) {
+                intervals.sortBy { it.start }
+                var mergedTotal = 0L
+                var currentStart = maxOf(intervals[0].start, startOfDay)
+                var currentEnd = intervals[0].end
+                
+                for (i in 1 until intervals.size) {
+                    val interval = intervals[i]
+                    val start = maxOf(interval.start, startOfDay)
+                    val end = interval.end
+                    
+                    if (start <= currentEnd) {
+                        currentEnd = maxOf(currentEnd, end)
+                    } else {
+                        mergedTotal += (currentEnd - currentStart)
+                        currentStart = start
+                        currentEnd = end
+                    }
+                }
+                mergedTotal += (currentEnd - currentStart)
+                if (mergedTotal > 0L) return mergedTotal
+            }
+        } catch (_: Exception) {}
 
         return 0L
     }

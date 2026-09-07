@@ -91,7 +91,10 @@ fun ProfileRewardsSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 Box(
                     modifier = Modifier
                         .size(30.dp)
@@ -114,10 +117,12 @@ fun ProfileRewardsSection(
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         letterSpacing = 0.8.sp
-                    )
+                    ),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
-
+            Spacer(modifier = Modifier.width(8.dp))
             Surface(
                 shape = FocusShapes.pill,
                 color = FocusColors.CoralWarning.copy(alpha = 0.12f),
@@ -130,7 +135,9 @@ fun ProfileRewardsSection(
                         color = FocusColors.CoralWarning,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
-                    )
+                    ),
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }

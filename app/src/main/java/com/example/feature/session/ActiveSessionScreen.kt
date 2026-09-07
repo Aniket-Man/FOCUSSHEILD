@@ -126,13 +126,6 @@ fun ActiveSessionScreen(
         }
     }
 
-    // 2. Intercept hardware / system gesture Back when Level-3 Strict Mode is active (no dialogs open)
-    androidx.activity.compose.BackHandler(
-        enabled = !hasOpenDialog && uiState.isStrictModeEnabled && !uiState.isSessionCompleted && uiState.mode != SessionMode.STOPWATCH
-    ) {
-        showStrictLockDialog = true
-    }
-
     // Subtle breathing pulse animation for active focus ring
     val infiniteTransition = rememberInfiniteTransition(label = "focus_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -339,12 +332,8 @@ fun ActiveSessionScreen(
                     onClick = {
                         if (uiState.isSessionCompleted || (!uiState.isSessionRunning && !uiState.isBreakActive)) {
                             viewModel.resetToIdle()
-                            onNavigateBack()
-                        } else if (uiState.isStrictModeEnabled && uiState.mode != SessionMode.STOPWATCH) {
-                            showStrictLockDialog = true
-                        } else {
-                            showEndSessionDialog = true
                         }
+                        onNavigateBack()
                     },
                     modifier = Modifier.testTag("back_button")
                 ) {

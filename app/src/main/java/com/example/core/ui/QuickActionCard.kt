@@ -87,6 +87,25 @@ fun QuickActionCard(
     }
 
     val cardShape = RoundedCornerShape(18.dp)
+    
+    val glassBg = if (isDark) {
+        FocusColors.Surface.copy(alpha = 0.48f)
+    } else {
+        FocusColors.Surface.copy(alpha = 0.72f)
+    }
+    val glassBorderBrush = androidx.compose.ui.graphics.Brush.verticalGradient(
+        colors = if (isDark) {
+            listOf(
+                Color.White.copy(alpha = 0.22f),
+                FocusColors.CardBorder.copy(alpha = 0.45f)
+            )
+        } else {
+            listOf(
+                Color.White.copy(alpha = 0.80f),
+                FocusColors.CardBorder.copy(alpha = 0.35f)
+            )
+        }
+    )
 
     Box(
         modifier = modifier
@@ -97,8 +116,8 @@ fun QuickActionCard(
                 spotColor = Color.Black.copy(alpha = 0.04f)
             )
             .clip(cardShape)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, cardShape)
+            .background(glassBg)
+            .border(1.dp, glassBorderBrush, cardShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 13.dp)
             .testTag("quick_action_${item.id}")

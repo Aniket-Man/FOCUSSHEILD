@@ -699,13 +699,16 @@ private fun MasterShieldCard(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Notification Shield Engine",
                             color = textPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         if (isMasterEnabled) {
                             Spacer(modifier = Modifier.width(6.dp))
@@ -739,6 +742,16 @@ private fun MasterShieldCard(
             Switch(
                 checked = isMasterEnabled,
                 onCheckedChange = onToggle,
+                thumbContent = if (isMasterEnabled) {
+                    {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = FocusColors.EmeraldSuccess
+                        )
+                    }
+                } else null,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = FocusColors.Primary,
