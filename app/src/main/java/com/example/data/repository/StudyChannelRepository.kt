@@ -153,6 +153,15 @@ class StudyChannelRepository(
     }
 
     /**
+     * Deletes all study channels.
+     */
+    suspend fun clearAllChannels() {
+        studyChannelDao.deleteAllChannels()
+        cachedApprovedChannelIds.clear()
+        cachedApprovedNormalizedNames.clear()
+    }
+
+    /**
      * Enables or disables approval status for a channel.
      */
     suspend fun toggleChannelApproval(id: String, isApproved: Boolean) {
@@ -209,43 +218,9 @@ class StudyChannelRepository(
                 StudyChannelEntity(
                     id = "chan_pw",
                     channelId = "@PhysicsWallah",
-                    channelName = "Physics Wallah",
+                    channelName = "Physics Wallah - Alakh Pandey",
                     channelUrl = "https://www.youtube.com/@PhysicsWallah",
-                    isApproved = true
-                ),
-                StudyChannelEntity(
-                    id = "chan_khan",
-                    channelId = "@KhanAcademy",
-                    channelName = "Khan Academy",
-                    channelUrl = "https://www.youtube.com/@KhanAcademy",
-                    isApproved = true
-                ),
-                StudyChannelEntity(
-                    id = "chan_unacademy",
-                    channelId = "@UnacademyJEE",
-                    channelName = "Unacademy JEE",
-                    channelUrl = "https://www.youtube.com/@UnacademyJEE",
-                    isApproved = true
-                ),
-                StudyChannelEntity(
-                    id = "chan_3b1b",
-                    channelId = "@3blue1brown",
-                    channelName = "3Blue1Brown",
-                    channelUrl = "https://www.youtube.com/@3blue1brown",
-                    isApproved = true
-                ),
-                StudyChannelEntity(
-                    id = "chan_vedantu",
-                    channelId = "@VedantuJEE",
-                    channelName = "Vedantu JEE",
-                    channelUrl = "https://www.youtube.com/@VedantuJEE",
-                    isApproved = true
-                ),
-                StudyChannelEntity(
-                    id = "chan_mit",
-                    channelId = "@mitocw",
-                    channelName = "MIT OpenCourseWare",
-                    channelUrl = "https://www.youtube.com/@mitocw",
+                    thumbnailUrl = "https://yt3.googleusercontent.com/ytc/AIdro_k6P07VvjV81tP4z9K82vK9Y-xM5oA=s176-c-k-c0x00ffffff-no-rj",
                     isApproved = true
                 )
             )

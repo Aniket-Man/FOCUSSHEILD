@@ -98,19 +98,24 @@ object BrowserUrlDetector {
     private fun findTextByViewId(rootNode: AccessibilityNodeInfo, viewId: String): String? {
         return try {
             val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
+            var matchedText: String? = null
             if (!nodes.isNullOrEmpty()) {
                 for (node in nodes) {
-                    val text = node.text?.toString()
-                    if (!text.isNullOrBlank()) {
-                        return text
+                    if (matchedText == null) {
+                        val text = node.text?.toString()
+                        if (!text.isNullOrBlank()) {
+                            matchedText = text
+                        } else {
+                            val desc = node.contentDescription?.toString()
+                            if (!desc.isNullOrBlank() && isLikelyUrlOrDomain(desc)) {
+                                matchedText = desc
+                            }
+                        }
                     }
-                    val desc = node.contentDescription?.toString()
-                    if (!desc.isNullOrBlank() && isLikelyUrlOrDomain(desc)) {
-                        return desc
-                    }
+                    try { node.recycle() } catch (_: Exception) {}
                 }
             }
-            null
+            matchedText
         } catch (e: Exception) {
             null
         }
@@ -144,6 +149,7 @@ object BrowserUrlDetector {
         for (i in 0 until childCount) {
             val child = node.getChild(i) ?: continue
             val result = searchUrlNodeGeneric(child, maxDepth, currentDepth + 1)
+            try { child.recycle() } catch (_: Exception) {}
             if (!result.isNullOrBlank()) {
                 return result
             }

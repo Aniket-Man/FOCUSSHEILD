@@ -82,15 +82,20 @@ object ChannelLogoStorageManager {
             return "file://${localFile.absolutePath}"
         }
 
+        val normalizedThumb = when {
+            thumbnailUrl.startsWith("//") -> "https:$thumbnailUrl"
+            else -> thumbnailUrl
+        }
+
         // 2. Check if thumbnailUrl is already a valid file URI
-        if (thumbnailUrl.isNotBlank() && thumbnailUrl.startsWith("file://")) {
-            val path = thumbnailUrl.removePrefix("file://")
-            if (File(path).exists()) return thumbnailUrl
+        if (normalizedThumb.isNotBlank() && normalizedThumb.startsWith("file://")) {
+            val path = normalizedThumb.removePrefix("file://")
+            if (File(path).exists()) return normalizedThumb
         }
 
         // 3. Check if thumbnailUrl is a remote URL
-        if (thumbnailUrl.isNotBlank() && (thumbnailUrl.startsWith("http://") || thumbnailUrl.startsWith("https://"))) {
-            return thumbnailUrl
+        if (normalizedThumb.isNotBlank() && (normalizedThumb.startsWith("http://") || normalizedThumb.startsWith("https://"))) {
+            return normalizedThumb
         }
 
         // 4. Check handle or channel ID for fallback
@@ -125,8 +130,12 @@ object ChannelLogoStorageManager {
         }
 
         val candidateUrls = mutableListOf<String>()
-        if (remoteUrl.isNotBlank() && (remoteUrl.startsWith("http://") || remoteUrl.startsWith("https://"))) {
-            candidateUrls.add(remoteUrl)
+        val normalizedRemote = when {
+            remoteUrl.startsWith("//") -> "https:$remoteUrl"
+            else -> remoteUrl
+        }
+        if (normalizedRemote.isNotBlank() && (normalizedRemote.startsWith("http://") || normalizedRemote.startsWith("https://"))) {
+            candidateUrls.add(normalizedRemote)
         }
 
         val effectiveHandle = when {

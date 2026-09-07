@@ -45,6 +45,20 @@ class FocusAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val shortFormDetectionManager = ShortFormDetectionManager.instance
 
+    private val tamperPackages = setOf(
+        "com.google.android.packageinstaller",
+        "com.android.packageinstaller",
+        "com.android.settings",
+        "com.google.android.settings",
+        "com.miui.securitycenter",
+        "com.samsung.android.lool",
+        "com.coloros.safecenter",
+        "com.oppo.launcher",
+        "com.sec.android.app.launcher",
+        "com.google.android.apps.nexuslauncher",
+        "com.android.launcher3"
+    )
+
     private var currentPreferences = FocusPreferences()
 
     override fun onServiceConnected() {
@@ -60,8 +74,7 @@ class FocusAccessibilityService : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 80
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
         serviceInfo = info
         Log.d(tag, "FocusAccessibilityService connected safely and is active.")
@@ -121,6 +134,23 @@ class FocusAccessibilityService : AccessibilityService() {
         val rawPackageName = event.packageName?.toString() ?: return
         if (rawPackageName.isBlank()) return
 
+        val isOwnApp = rawPackageName == packageName ||
+                rawPackageName == applicationContext.packageName ||
+                rawPackageName.startsWith("com.example") ||
+                rawPackageName.startsWith("com.aistudio.focusshield")
+
+        if (isOwnApp) {
+            if (lastForegroundPackage != null &&
+                YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage)
+            ) {
+                YouTubeContentBlockEngine.reset()
+            }
+            lastForegroundPackage = rawPackageName
+            com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+            homeFeedPopupDismissed = false
+            return
+        }
+
         try {
             val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
             val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
@@ -149,21 +179,26 @@ class FocusAccessibilityService : AccessibilityService() {
             // Block Protection: while a focus session is RUNNING/PAUSED this guard is
             // ALWAYS active (preventing mid-session disable attempts like force stop,
             // uninstall, or clear data), independent of the 24/7 preference below.
-            if (currentPreferences.isBlockUninstallEnabled ||
-                com.example.feature.blocker.protection.BlockProtectionManager.isSessionProtectionActive
+            if ((currentPreferences.isBlockUninstallEnabled ||
+                com.example.feature.blocker.protection.BlockProtectionManager.isSessionProtectionActive) &&
+                tamperPackages.contains(rawPackageName)
             ) {
                 val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
-                if (isTamperOrUninstallAttempt(rootNode, rawPackageName)) {
-                    Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
-                    performGlobalAction(GLOBAL_ACTION_HOME)
-                    val toastMsg = "FocusShield Uninstall Protection is active"
-                    android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
-                    blockerManager?.handleBlockedPackage(
-                        packageName = rawPackageName,
-                        fallbackAppName = "Uninstall Protection",
-                        decision = ProtectionDecision.BLOCK_UNINSTALL
-                    )
-                    return
+                if (rootNode != null) {
+                    val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
+                    try { rootNode.recycle() } catch (_: Exception) {}
+                    if (isTamper) {
+                        Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
+                        performGlobalAction(GLOBAL_ACTION_HOME)
+                        val toastMsg = "FocusShield Uninstall Protection is active"
+                        android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
+                        blockerManager?.handleBlockedPackage(
+                            packageName = rawPackageName,
+                            fallbackAppName = "Uninstall Protection",
+                            decision = ProtectionDecision.BLOCK_UNINSTALL
+                        )
+                        return
+                    }
                 }
             }
 
@@ -209,6 +244,7 @@ class FocusAccessibilityService : AccessibilityService() {
                     } else {
                         shortFormDetectionManager.detectShortFormContent(rawPackageName, event, rootNode)
                     }
+                    try { rootNode?.recycle() } catch (_: Exception) {}
 
                     if (shortFormDetected) {
                         val shouldTrigger = if (isYT) {
@@ -276,6 +312,7 @@ class FocusAccessibilityService : AccessibilityService() {
 
                             // 1. Perform safe step-down inside the browser
                             navigateBrowserAwayFromBlockedSite(rawPackageName, rootNode)
+                            try { rootNode?.recycle() } catch (_: Exception) {}
 
                             // 2. Display non-intrusive alert HUD & system notification
                             if (siteDecision.engineType == "ADULT_AUTOMATIC") {
@@ -304,6 +341,7 @@ class FocusAccessibilityService : AccessibilityService() {
                             return
                         }
                     }
+                    try { rootNode?.recycle() } catch (_: Exception) {}
                 }
 
                 // If Browser Study Mode is active, allow normal browsing and searching
@@ -391,6 +429,8 @@ class FocusAccessibilityService : AccessibilityService() {
                             else -> ProtectionDecision.BLOCK
                         }
 
+                        try { rootNode?.recycle() } catch (_: Exception) {}
+
                         blockerManager.handleBlockedPackage(
                             packageName = rawPackageName,
                             fallbackAppName = null,
@@ -399,6 +439,7 @@ class FocusAccessibilityService : AccessibilityService() {
                         )
                         return
                     }
+                    try { rootNode?.recycle() } catch (_: Exception) {}
                 } else {
                     // Session no longer active while YouTube is open: remove any lingering Study Mode popup
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -447,6 +488,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 if (isYouTubePackage) {
                                     val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                     clickPauseButtonInNodeTree(currentRoot)
+                                    try { currentRoot?.recycle() } catch (_: Exception) {}
                                 }
                                 // We launch the overlay directly on top.
                                 val usedMins = kotlin.math.round(appLimitDecision.usedDailyMillis / 60000.0).toInt().coerceAtLeast(0)
@@ -469,6 +511,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 if (isYouTubePackage) {
                                     val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                     clickPauseButtonInNodeTree(currentRoot)
+                                    try { currentRoot?.recycle() } catch (_: Exception) {}
                                 }
                                 // We launch the overlay directly on top.
                                 appLimitManager.launchOverlay(
@@ -516,7 +559,7 @@ class FocusAccessibilityService : AccessibilityService() {
             }
             isIG -> currentPreferences.isInstagramReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
             isFB -> currentPreferences.isFacebookReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
-            else -> currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
+            else -> false
         }
     }
 
@@ -524,20 +567,6 @@ class FocusAccessibilityService : AccessibilityService() {
         if (rootNode == null) return false
         // Never block during onboarding or initial setup
         if (!currentPreferences.hasCompletedOnboarding) return false
-
-        val tamperPackages = setOf(
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller",
-            "com.android.settings",
-            "com.google.android.settings",
-            "com.miui.securitycenter",
-            "com.samsung.android.lool",
-            "com.coloros.safecenter",
-            "com.oppo.launcher",
-            "com.sec.android.app.launcher",
-            "com.google.android.apps.nexuslauncher",
-            "com.android.launcher3"
-        )
         if (!tamperPackages.contains(rawPackageName)) return false
 
         // Exclude legitimate permission setup, battery optimization, and accessibility setup screens
@@ -548,7 +577,9 @@ class FocusAccessibilityService : AccessibilityService() {
         )
         for (keyword in safeSetupKeywords) {
             val safeNodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-            if (!safeNodes.isNullOrEmpty()) {
+            val hasSafe = !safeNodes.isNullOrEmpty()
+            safeNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (hasSafe) {
                 return false
             }
         }
@@ -556,7 +587,9 @@ class FocusAccessibilityService : AccessibilityService() {
         // Search for references to FocusShield or our package in the settings/uninstaller UI
         val appMatches = rootNode.findAccessibilityNodeInfosByText("FocusShield")
         val packageMatches = rootNode.findAccessibilityNodeInfosByText(packageName)
-        val hasAppMatch = (appMatches != null && appMatches.isNotEmpty()) || (packageMatches != null && packageMatches.isNotEmpty())
+        val hasAppMatch = (!appMatches.isNullOrEmpty()) || (!packageMatches.isNullOrEmpty())
+        appMatches?.forEach { try { it.recycle() } catch (_: Exception) {} }
+        packageMatches?.forEach { try { it.recycle() } catch (_: Exception) {} }
 
         if (hasAppMatch) {
             // Check specifically for uninstallation or clear data/force stop actions
@@ -564,7 +597,9 @@ class FocusAccessibilityService : AccessibilityService() {
                 val uninstallKeywords = listOf("uninstall", "do you want to uninstall", "delete app", "clear storage", "clear data", "force stop", "deactivate")
                 for (kw in uninstallKeywords) {
                     val nodes = rootNode.findAccessibilityNodeInfosByText(kw)
-                    if (!nodes.isNullOrEmpty()) {
+                    val hasMatch = !nodes.isNullOrEmpty()
+                    nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+                    if (hasMatch) {
                         return true
                     }
                 }
@@ -572,7 +607,9 @@ class FocusAccessibilityService : AccessibilityService() {
 
             // In settings or launcher context menus
             val uninstallConfirmNodes = rootNode.findAccessibilityNodeInfosByText("Do you want to uninstall")
-            if (!uninstallConfirmNodes.isNullOrEmpty()) {
+            val hasConfirm = !uninstallConfirmNodes.isNullOrEmpty()
+            uninstallConfirmNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (hasConfirm) {
                 return true
             }
         }
@@ -691,10 +728,14 @@ class FocusAccessibilityService : AccessibilityService() {
             )
             for (id in pauseViewIds) {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                for (node in nodes) {
-                    val desc = node.contentDescription?.toString() ?: ""
-                    if (desc.contains("Pause", ignoreCase = true)) {
-                        if (performClickOnNodeOrParent(node)) {
+                if (nodes != null) {
+                    for (node in nodes) {
+                        val desc = node.contentDescription?.toString() ?: ""
+                        val clicked = if (desc.contains("Pause", ignoreCase = true)) {
+                            performClickOnNodeOrParent(node)
+                        } else false
+                        try { node.recycle() } catch (_: Exception) {}
+                        if (clicked) {
                             return
                         }
                     }
@@ -705,12 +746,16 @@ class FocusAccessibilityService : AccessibilityService() {
             val descKeywords = listOf("Pause video", "Pause")
             for (keyword in descKeywords) {
                 val nodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-                for (node in nodes) {
-                    val desc = node.contentDescription?.toString() ?: ""
-                    val text = node.text?.toString() ?: ""
-                    if (desc.equals("Pause video", ignoreCase = true) || desc.equals("Pause", ignoreCase = true) ||
-                        text.equals("Pause", ignoreCase = true)) {
-                        if (performClickOnNodeOrParent(node)) {
+                if (nodes != null) {
+                    for (node in nodes) {
+                        val desc = node.contentDescription?.toString() ?: ""
+                        val text = node.text?.toString() ?: ""
+                        val matches = desc.equals("Pause video", ignoreCase = true) ||
+                                desc.equals("Pause", ignoreCase = true) ||
+                                text.equals("Pause", ignoreCase = true)
+                        val clicked = if (matches) performClickOnNodeOrParent(node) else false
+                        try { node.recycle() } catch (_: Exception) {}
+                        if (clicked) {
                             return
                         }
                     }
@@ -739,7 +784,9 @@ class FocusAccessibilityService : AccessibilityService() {
                 val homeNodes = rootNode.findAccessibilityNodeInfosByViewId(id)
                 if (!homeNodes.isNullOrEmpty()) {
                     for (node in homeNodes) {
-                        if (performClickOnNodeOrParent(node)) {
+                        val clicked = performClickOnNodeOrParent(node)
+                        try { node.recycle() } catch (_: Exception) {}
+                        if (clicked) {
                             return true
                         }
                     }
@@ -751,10 +798,11 @@ class FocusAccessibilityService : AccessibilityService() {
                 for (node in textNodes) {
                     val desc = node.contentDescription?.toString() ?: ""
                     val txt = node.text?.toString() ?: ""
-                    if (desc.equals("Home", ignoreCase = true) || txt.equals("Home", ignoreCase = true)) {
-                        if (performClickOnNodeOrParent(node)) {
-                            return true
-                        }
+                    val matches = desc.equals("Home", ignoreCase = true) || txt.equals("Home", ignoreCase = true)
+                    val clicked = if (matches) performClickOnNodeOrParent(node) else false
+                    try { node.recycle() } catch (_: Exception) {}
+                    if (clicked) {
+                        return true
                     }
                 }
             }
@@ -784,7 +832,10 @@ class FocusAccessibilityService : AccessibilityService() {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
                 if (!nodes.isNullOrEmpty()) {
                     for (node in nodes) {
-                        if (performClickOnNodeOrParent(node)) {
+                        val clicked = performClickOnNodeOrParent(node)
+                        try { node.recycle() } catch (_: Exception) {}
+                        if (clicked) {
+                            try { rootNode.recycle() } catch (_: Exception) {}
                             return
                         }
                     }
@@ -798,14 +849,17 @@ class FocusAccessibilityService : AccessibilityService() {
                     for (node in nodes) {
                         val desc = node.contentDescription?.toString() ?: ""
                         val text = node.text?.toString() ?: ""
-                        if (desc.equals(keyword, ignoreCase = true) || text.equals(keyword, ignoreCase = true)) {
-                            if (performClickOnNodeOrParent(node)) {
-                                return
-                            }
+                        val matches = desc.equals(keyword, ignoreCase = true) || text.equals(keyword, ignoreCase = true)
+                        val clicked = if (matches) performClickOnNodeOrParent(node) else false
+                        try { node.recycle() } catch (_: Exception) {}
+                        if (clicked) {
+                            try { rootNode.recycle() } catch (_: Exception) {}
+                            return
                         }
                     }
                 }
             }
+            try { rootNode.recycle() } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
 
@@ -817,8 +871,11 @@ class FocusAccessibilityService : AccessibilityService() {
             }
             val parent = node.parent
             if (parent != null && parent.isClickable) {
-                return parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                val res = parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                try { parent.recycle() } catch (_: Exception) {}
+                return res
             }
+            try { parent?.recycle() } catch (_: Exception) {}
         } catch (_: Exception) {}
         return false
     }
@@ -847,9 +904,13 @@ class FocusAccessibilityService : AccessibilityService() {
             for (viewId in closeTabIds) {
                 try {
                     val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                    for (node in nodes) {
-                        if (performClickOnNodeOrParent(node)) {
-                            return
+                    if (nodes != null) {
+                        for (node in nodes) {
+                            val clicked = performClickOnNodeOrParent(node)
+                            try { node.recycle() } catch (_: Exception) {}
+                            if (clicked) {
+                                return
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -863,8 +924,9 @@ class FocusAccessibilityService : AccessibilityService() {
         serviceScope.launch {
             kotlinx.coroutines.delay(450L)
             try {
-                val currentRoot = rootInActiveWindow
+                val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                 val currentUrlInfo = com.example.core.detector.BrowserUrlDetector.extractUrlAndDomain(browserPackage, currentRoot, null)
+                try { currentRoot?.recycle() } catch (_: Exception) {}
                 val siteEngine = try { com.example.feature.websiteblocker.engine.WebsiteBlockerEngine.instance } catch (e: Exception) { null }
                 val stillBlocked = currentUrlInfo?.let { siteEngine?.evaluateDomain(it.rawUrl, it.domain) is com.example.feature.websiteblocker.engine.WebsiteBlockDecision.Blocked } ?: false
 

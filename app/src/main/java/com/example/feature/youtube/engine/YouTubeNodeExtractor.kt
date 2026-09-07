@@ -116,7 +116,9 @@ object YouTubeNodeExtractor {
                 }
             }
             val titleNodes = rootNode.findAccessibilityNodeInfosByViewId("$YT:id/watch_title_text")
-            titleNodes != null && titleNodes.isNotEmpty()
+            val hasTitle = titleNodes != null && titleNodes.isNotEmpty()
+            titleNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            hasTitle
         } catch (_: Exception) {
             false
         }
@@ -211,8 +213,11 @@ object YouTubeNodeExtractor {
         for (id in WATCH_PAGE_VIEW_IDS) {
             try {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (nodes != null && nodes.isNotEmpty()) {
+                if (!nodes.isNullOrEmpty()) {
                     watchContainer = nodes.first()
+                    for (i in 1 until nodes.size) {
+                        try { nodes[i].recycle() } catch (_: Exception) {}
+                    }
                     break
                 }
             } catch (_: Exception) {}
@@ -220,47 +225,58 @@ object YouTubeNodeExtractor {
 
         val searchRoot = watchContainer ?: rootNode
         val candidates = mutableListOf<String>()
+        val allocatedNodes = mutableListOf<AccessibilityNodeInfo>()
+        if (watchContainer != null) allocatedNodes.add(watchContainer)
         var found = false
 
         // Manual BFS limited to the watch player subtree
         var visited = 0
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
         queue.add(searchRoot to 0)
-        while (queue.isNotEmpty() && !found && visited < MAX_SCAN_NODES) {
-            val (node, depth) = queue.removeFirst()
-            visited++
+        try {
+            while (queue.isNotEmpty() && !found && visited < MAX_SCAN_NODES) {
+                val (node, depth) = queue.removeFirst()
+                visited++
 
-            val viewId = node.viewIdResourceName ?: ""
+                val viewId = node.viewIdResourceName ?: ""
 
-            // Skip nodes from recommendations, comments, description sheet, live chat
-            val isExcluded = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
-                viewId.contains(it, ignoreCase = true)
-            }
-            if (!isExcluded) {
-                val desc = node.contentDescription?.toString() ?: ""
+                // Skip nodes from recommendations, comments, description sheet, live chat
+                val isExcluded = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
+                    viewId.contains(it, ignoreCase = true)
+                }
+                if (!isExcluded) {
+                    val desc = node.contentDescription?.toString() ?: ""
 
-                // Subscribe button near the video — strongest signal for the video's own channel
-                val subscribePrefix = "Subscribe to "
-                if (desc.startsWith(subscribePrefix, ignoreCase = true) && desc.length > subscribePrefix.length) {
-                    candidates.add(desc.substring(subscribePrefix.length).trim())
-                    found = true
-                    break
+                    // Subscribe button near the video — strongest signal for the video's own channel
+                    val subscribePrefix = "Subscribe to "
+                    if (desc.startsWith(subscribePrefix, ignoreCase = true) && desc.length > subscribePrefix.length) {
+                        candidates.add(desc.substring(subscribePrefix.length).trim())
+                        found = true
+                        break
+                    }
+
+                    // Channel header / byline "Go to channel [Name]"
+                    val goPrefix = "Go to channel "
+                    if (desc.startsWith(goPrefix, ignoreCase = true) && desc.length > goPrefix.length) {
+                        candidates.add(desc.substring(goPrefix.length).trim())
+                        found = true
+                        break
+                    }
                 }
 
-                // Channel header / byline "Go to channel [Name]"
-                val goPrefix = "Go to channel "
-                if (desc.startsWith(goPrefix, ignoreCase = true) && desc.length > goPrefix.length) {
-                    candidates.add(desc.substring(goPrefix.length).trim())
-                    found = true
-                    break
+                if (depth >= MAX_SCAN_DEPTH) continue
+                for (i in 0 until node.childCount) {
+                    if (visited >= MAX_SCAN_NODES) break
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) {
+                        allocatedNodes.add(child)
+                        queue.add(child to depth + 1)
+                    }
                 }
             }
-
-            if (depth >= MAX_SCAN_DEPTH) continue
-            for (i in 0 until node.childCount) {
-                if (visited >= MAX_SCAN_NODES) break
-                val child = node.getChild(i)
-                if (child != null) queue.add(child to depth + 1)
+        } finally {
+            for (allocated in allocatedNodes) {
+                try { allocated.recycle() } catch (_: Exception) {}
             }
         }
 

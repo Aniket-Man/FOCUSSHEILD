@@ -48,4 +48,7 @@ interface StudyChannelDao {
 
     @Query("DELETE FROM study_channels WHERE id = :id")
     suspend fun deleteChannelById(id: String)
+
+    @Query("DELETE FROM study_channels")
+    suspend fun deleteAllChannels()
 }

@@ -113,7 +113,9 @@ object YouTubeShortsDetectionEngine {
         for (id in reelIds) {
             try {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (nodes.isNotEmpty()) {
+                val isFound = !nodes.isNullOrEmpty()
+                nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+                if (isFound) {
                     hasActiveReelPlayer = true
                     matchedSignals.add("fast_view_id:$id")
                     score += 4
@@ -244,6 +246,7 @@ object YouTubeShortsDetectionEngine {
             }
             if (child != null) {
                 scanNodes(child, currentDepth + 1, maxDepth, nodeCount, maxNodes, predicate)
+                try { child.recycle() } catch (_: Exception) {}
             }
         }
     }

@@ -36,13 +36,53 @@ object YouTubeChannelSearchEngine {
 
     // Comprehensive curated catalog for instant category browsing and offline fallback
     val CURATED_CATALOG: List<YouTubeChannelSearchResult> = listOf(
-        // JEE & NEET & Foundation
+        // Featured suggestions matching study mode
+        YouTubeChannelSearchResult(
+            channelId = "@PW-NEETWallah",
+            channelName = "Competition Wallah",
+            handle = "@PW-NEETWallah",
+            avatarUrl = "https://yt3.googleusercontent.com/auFETNLdBvWIYtdKgoe5AtcS97jQqOZlNd8ReklmIdMsXKCzVgKYBIIp7cuJlBiAwF06jurshoo=s176-c-k-c0x00ffffff-no-rj",
+            subscriberCount = "4.83M subscribers",
+            description = "Complete preparation for NEET and Medical Entrance by Physics Wallah faculties.",
+            isVerified = true,
+            category = "JEE / NEET"
+        ),
+        YouTubeChannelSearchResult(
+            channelId = "@PW-JEEWallah",
+            channelName = "JEE Wallah",
+            handle = "@PW-JEEWallah",
+            avatarUrl = "https://yt3.googleusercontent.com/nPzEKKijWN2BbaqxmX2200g5W-sI_H-324r3hYwGvdE5Uv8QkQn2_N-PqXvNqfP4-pQ=s176-c-k-c0x00ffffff-no-rj",
+            subscriberCount = "3.36M subscribers",
+            description = "Premier IIT JEE Main & Advanced lectures and problem solving.",
+            isVerified = true,
+            category = "JEE / NEET"
+        ),
+        YouTubeChannelSearchResult(
+            channelId = "@MagnetBrainsEducation",
+            channelName = "Magnet Brains",
+            handle = "@MagnetBrainsEducation",
+            avatarUrl = "https://yt3.googleusercontent.com/wU9D8106zYT1LX4uw60db8dK9S7kj3oBcdze6Qa-L6NF1rSrwZL72ChhoNYUWxfsTzeE1CvgIA=s176-c-k-c0x00ffffff-no-rj",
+            subscriberCount = "14.5M subscribers",
+            description = "100% free education from Kindergarten to 12th CBSE, NCERT, Olympiads.",
+            isVerified = true,
+            category = "Academics"
+        ),
+        YouTubeChannelSearchResult(
+            channelId = "@ExpHub",
+            channelName = "ExpHub - Prashant Kirad",
+            handle = "@ExpHub",
+            avatarUrl = "https://yt3.googleusercontent.com/LCXnXY0A69U56eqkmKkmdE_shtpyA6lNoxViNklDhVy1JNBf-9H6V1Pf8HokB7_Hd-5mEnqI=s176-c-k-c0x00ffffff-no-rj",
+            subscriberCount = "12.2M subscribers",
+            description = "Board exam strategy, notes, class 9th, 10th, 11th & 12th guidance.",
+            isVerified = true,
+            category = "Academics"
+        ),
         YouTubeChannelSearchResult(
             channelId = "@PhysicsWallah",
             channelName = "Physics Wallah - Alakh Pandey",
             handle = "@PhysicsWallah",
-            avatarUrl = "https://yt3.googleusercontent.com/ytc/AIdro_k6P07VvjV81tP4z9K82vK9Y-xM5oA=s176-c-k-c0x00ffffff-no-rj",
-            subscriberCount = "12.8M subscribers",
+            avatarUrl = "https://yt3.googleusercontent.com/0yuTL60JmgnwMzixAx9lhwLXlNKHjic3Q2bhiPuOj-b4qtUfoMbORdq0yKGEqix5Zo_DKXww=s176-c-k-c0x00ffffff-no-rj",
+            subscriberCount = "14.3M subscribers",
             description = "India's top online education platform for JEE, NEET, and CBSE board exams.",
             isVerified = true,
             category = "JEE / NEET"
@@ -371,6 +411,173 @@ object YouTubeChannelSearchEngine {
         )
     )
 
+    private var liveSuggestionsCache: List<YouTubeChannelSearchResult>? = null
+
+    /**
+     * Fast local search against the curated catalog.
+     */
+    fun searchLocalCatalog(query: String): List<YouTubeChannelSearchResult> {
+        val trimmed = query.trim().lowercase()
+        if (trimmed.isEmpty()) return CURATED_CATALOG
+        val terms = trimmed.split(" ").filter { it.isNotBlank() }
+        return CURATED_CATALOG.filter { channel ->
+            val name = channel.channelName.lowercase()
+            val handle = channel.handle.lowercase()
+            val cat = channel.category.lowercase()
+            val desc = channel.description.lowercase()
+            terms.all { term ->
+                name.contains(term) || handle.contains(term) || cat.contains(term) || desc.contains(term)
+            }
+        }
+    }
+
+    /**
+     * Fetches live channel metadata directly from the internet for the suggested study channels.
+     * Updates live subscribers, logo avatars, and handles.
+     */
+    suspend fun fetchSuggestedChannelsFromInternet(): List<YouTubeChannelSearchResult> = withContext(Dispatchers.IO) {
+        liveSuggestionsCache?.let { return@withContext it }
+
+        val handlesToFetch = listOf(
+            "@PW-NEETWallah",
+            "@PW-JEEWallah",
+            "@MagnetBrainsEducation",
+            "@ExpHub",
+            "@PhysicsWallah"
+        )
+
+        val fetchedList = mutableListOf<YouTubeChannelSearchResult>()
+        for (handle in handlesToFetch) {
+            try {
+                val live = fetchChannelByHandle(handle)
+                if (live != null) {
+                    fetchedList.add(live)
+                } else {
+                    val fallback = CURATED_CATALOG.find { it.handle.equals(handle, ignoreCase = true) }
+                    if (fallback != null) fetchedList.add(fallback)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error fetching suggested channel $handle: ${e.message}")
+                val fallback = CURATED_CATALOG.find { it.handle.equals(handle, ignoreCase = true) }
+                if (fallback != null) fetchedList.add(fallback)
+            }
+        }
+
+        if (fetchedList.isNotEmpty()) {
+            liveSuggestionsCache = fetchedList
+            return@withContext fetchedList
+        }
+        CURATED_CATALOG.take(5)
+    }
+
+    /**
+     * Fetches real channel information directly from YouTube by handle (e.g., @PW-NEETWallah).
+     */
+    suspend fun fetchChannelByHandle(handle: String): YouTubeChannelSearchResult? = withContext(Dispatchers.IO) {
+        try {
+            val cleanHandle = if (handle.startsWith("@")) handle else "@$handle"
+            val url = "https://www.youtube.com/$cleanHandle"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+            val html = response.body?.string() ?: return@withContext null
+
+            val jsonString = extractJsonFromHtml(html) ?: return@withContext null
+            val root = JSONObject(jsonString)
+
+            val headerObj = root.optJSONObject("header")
+            val pageHeaderViewModel = headerObj?.optJSONObject("pageHeaderRenderer")
+                ?.optJSONObject("content")
+                ?.optJSONObject("pageHeaderViewModel")
+
+            if (pageHeaderViewModel != null) {
+                val title = pageHeaderViewModel.optJSONObject("title")
+                    ?.optJSONObject("dynamicTextViewModel")
+                    ?.optJSONObject("text")
+                    ?.optString("content") ?: cleanHandle.removePrefix("@")
+
+                val avatarSources = pageHeaderViewModel.optJSONObject("image")
+                    ?.optJSONObject("decoratedAvatarViewModel")
+                    ?.optJSONObject("avatar")
+                    ?.optJSONObject("avatarViewModel")
+                    ?.optJSONObject("image")
+                    ?.optJSONArray("sources")
+
+                var avatarUrl = ""
+                if (avatarSources != null && avatarSources.length() > 0) {
+                    avatarUrl = avatarSources.optJSONObject(avatarSources.length() - 1)?.optString("url") ?: ""
+                }
+                if (avatarUrl.startsWith("//")) avatarUrl = "https:$avatarUrl"
+
+                val metadataRows = pageHeaderViewModel.optJSONObject("metadata")
+                    ?.optJSONObject("contentMetadataViewModel")
+                    ?.optJSONArray("metadataRows")
+
+                var subsText = ""
+                if (metadataRows != null) {
+                    for (r in 0 until metadataRows.length()) {
+                        val parts = metadataRows.optJSONObject(r)?.optJSONArray("metadataParts") ?: continue
+                        for (p in 0 until parts.length()) {
+                            val txt = parts.optJSONObject(p)?.optJSONObject("text")?.optString("content") ?: ""
+                            if (txt.contains("subscriber", ignoreCase = true)) {
+                                subsText = txt
+                                break
+                            }
+                        }
+                        if (subsText.isNotBlank()) break
+                    }
+                }
+
+                return@withContext YouTubeChannelSearchResult(
+                    channelId = cleanHandle,
+                    channelName = title,
+                    handle = cleanHandle,
+                    avatarUrl = avatarUrl,
+                    subscriberCount = if (subsText.isNotBlank()) subsText else "Study Channel",
+                    description = "Verified study channel on YouTube",
+                    isVerified = true,
+                    category = "JEE / NEET"
+                )
+            }
+
+            // Fallback for c4TabbedHeaderRenderer
+            val c4 = headerObj?.optJSONObject("c4TabbedHeaderRenderer")
+            if (c4 != null) {
+                val title = c4.optString("title").ifBlank { cleanHandle.removePrefix("@") }
+                val thumbs = c4.optJSONObject("avatar")?.optJSONArray("thumbnails")
+                var avatarUrl = ""
+                if (thumbs != null && thumbs.length() > 0) {
+                    avatarUrl = thumbs.optJSONObject(thumbs.length() - 1)?.optString("url") ?: ""
+                }
+                if (avatarUrl.startsWith("//")) avatarUrl = "https:$avatarUrl"
+                val subText = c4.optJSONObject("subscriberCountText")?.optString("simpleText") ?: ""
+
+                return@withContext YouTubeChannelSearchResult(
+                    channelId = cleanHandle,
+                    channelName = title,
+                    handle = cleanHandle,
+                    avatarUrl = avatarUrl,
+                    subscriberCount = subText.ifBlank { "Study Channel" },
+                    description = "Verified study channel on YouTube",
+                    isVerified = true,
+                    category = "Educational"
+                )
+            }
+
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching channel by handle $handle: ${e.message}")
+            null
+        }
+    }
+
     /**
      * Live search for YouTube channels by query.
      * Uses public YouTube search filter with fallback to curated library and query normalization.
@@ -390,35 +597,48 @@ object YouTubeChannelSearchEngine {
         val results = mutableListOf<YouTubeChannelSearchResult>()
         val seenIds = mutableSetOf<String>()
 
-        // 2. Perform live network YouTube Channel search (Direct In-App without API key)
+        // 2. If query looks like a handle, try direct fetch first
+        if (trimmed.startsWith("@") || trimmed.contains("youtube.com/@")) {
+            val directHandle = if (trimmed.contains("youtube.com/@")) {
+                "@" + trimmed.substringAfter("youtube.com/@").substringBefore("/")
+            } else {
+                trimmed
+            }
+            try {
+                val directResult = fetchChannelByHandle(directHandle)
+                if (directResult != null) {
+                    results.add(directResult)
+                    seenIds.add(directResult.handle.lowercase())
+                    seenIds.add(directResult.channelId.lowercase())
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct handle fetch failed: ${e.message}")
+            }
+        }
+
+        // 3. Perform live network YouTube Channel search (Direct In-App without API key)
         try {
             val liveNetworkResults = fetchYouTubeChannelsFromWeb(trimmed)
             for (res in liveNetworkResults) {
-                val key = res.channelId.lowercase()
+                val key = res.handle.ifBlank { res.channelId }.lowercase()
                 if (seenIds.add(key)) {
                     results.add(res)
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Live search web query encountered error, using local matcher: ${e.message}")
+            Log.w(TAG, "Live search web query encountered error: ${e.message}")
         }
 
-        // 3. Match against curated catalog for query keywords
-        val queryLower = trimmed.lowercase()
-        val localMatches = CURATED_CATALOG.filter {
-            it.channelName.lowercase().contains(queryLower) ||
-                    it.handle.lowercase().contains(queryLower) ||
-                    it.category.lowercase().contains(queryLower) ||
-                    it.description.lowercase().contains(queryLower)
-        }
+        // 4. Match against curated catalog for query keywords
+        val localMatches = searchLocalCatalog(trimmed)
         for (match in localMatches) {
-            val key = match.channelId.lowercase()
+            val key = match.handle.ifBlank { match.channelId }.lowercase()
             if (seenIds.add(key)) {
                 results.add(match)
             }
         }
 
-        // 4. Always provide an instant custom-add item if not already found
+        // 5. Always provide an instant custom-add item if not already found
         val isExactHandle = trimmed.startsWith("@") || trimmed.startsWith("UC")
         val cleanHandle = if (trimmed.startsWith("@")) trimmed else "@${trimmed.replace(" ", "")}"
         val hasExactHandleMatch = results.any { it.handle.equals(cleanHandle, ignoreCase = true) }
@@ -428,7 +648,7 @@ object YouTubeChannelSearchEngine {
                 channelId = cleanHandle,
                 channelName = if (isExactHandle) trimmed.removePrefix("@") else trimmed,
                 handle = cleanHandle,
-                avatarUrl = "https://unavatar.io/youtube/$cleanHandle",
+                avatarUrl = "",
                 subscriberCount = "Custom Study Channel",
                 description = "Custom whitelisted YouTube channel: $cleanHandle",
                 isVerified = false,
@@ -509,17 +729,32 @@ object YouTubeChannelSearchEngine {
                         ?: titleObj?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")
                         ?: "Channel"
 
-                    // Handle / Canonical URL
+                    // Handle & subscriber count
+                    val sub1 = channelRenderer.optJSONObject("subscriberCountText")?.optString("simpleText") ?: ""
+                    val sub2 = channelRenderer.optJSONObject("videoCountText")?.optString("simpleText") ?: ""
+                    val sub2Acc = channelRenderer.optJSONObject("videoCountText")
+                        ?.optJSONObject("accessibility")
+                        ?.optJSONObject("accessibilityData")
+                        ?.optString("label") ?: ""
+
                     val navUrl = channelRenderer.optJSONObject("navigationEndpoint")
                         ?.optJSONObject("commandMetadata")
                         ?.optJSONObject("webCommandMetadata")
                         ?.optString("url") ?: ""
+
                     val handle = when {
+                        sub1.startsWith("@") -> sub1
                         navUrl.contains("/@") -> "@" + navUrl.substringAfter("/@").substringBefore("/")
                         navUrl.startsWith("/channel/") -> "@" + title.replace(" ", "")
-                        channelRenderer.optJSONObject("subscriberCountText")?.optString("simpleText")?.startsWith("@") == true ->
-                            channelRenderer.optJSONObject("subscriberCountText")?.optString("simpleText") ?: "@$channelId"
                         else -> "@" + title.replace(" ", "")
+                    }
+
+                    val subscriberCount = when {
+                        sub2.contains("subscriber", ignoreCase = true) -> sub2
+                        sub2Acc.contains("subscriber", ignoreCase = true) -> sub2Acc
+                        sub1.contains("subscriber", ignoreCase = true) -> sub1
+                        sub2.isNotBlank() -> sub2
+                        else -> ""
                     }
 
                     // Avatar Thumbnail (choose the highest quality available)
@@ -529,14 +764,6 @@ object YouTubeChannelSearchEngine {
                         val lastThumb = thumbnails.optJSONObject(thumbnails.length() - 1)?.optString("url") ?: ""
                         avatarUrl = if (lastThumb.startsWith("//")) "https:$lastThumb" else lastThumb
                     }
-                    if (avatarUrl.isBlank() && handle.startsWith("@")) {
-                        avatarUrl = "https://unavatar.io/youtube/$handle"
-                    }
-
-                    // Subscriber count & video count
-                    val subCount = channelRenderer.optJSONObject("subscriberCountText")?.optString("simpleText")
-                        ?: channelRenderer.optJSONObject("videoCountText")?.optString("simpleText")
-                        ?: ""
 
                     // Description snippet
                     val descRuns = channelRenderer.optJSONObject("descriptionSnippet")?.optJSONArray("runs")
@@ -564,20 +791,20 @@ object YouTubeChannelSearchEngine {
 
                     results.add(
                         YouTubeChannelSearchResult(
-                            channelId = if (handle.startsWith("@")) handle else channelId,
+                            channelId = handle.ifBlank { channelId },
                             channelName = title,
                             handle = handle,
                             avatarUrl = avatarUrl,
-                            subscriberCount = subCount,
+                            subscriberCount = subscriberCount,
                             description = descBuilder.toString().trim(),
                             isVerified = isVerified,
                             category = "YouTube Search"
                         )
                     )
 
-                    if (results.size >= 15) break
+                    if (results.size >= 20) break
                 }
-                if (results.size >= 15) break
+                if (results.size >= 20) break
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed parsing ytInitialData: ${e.message}")
@@ -587,18 +814,25 @@ object YouTubeChannelSearchEngine {
     }
 
     private fun extractJsonFromHtml(html: String): String? {
-        val pattern = Pattern.compile("var ytInitialData\\s*=\\s*(\\{.+?\\});</script>", Pattern.DOTALL)
-        val matcher = pattern.matcher(html)
-        if (matcher.find()) {
-            return matcher.group(1)
+        val marker1 = "var ytInitialData = "
+        val marker2 = "window[\"ytInitialData\"] = "
+        var startIdx = html.indexOf(marker1)
+        if (startIdx != -1) {
+            startIdx += marker1.length
+        } else {
+            startIdx = html.indexOf(marker2)
+            if (startIdx != -1) {
+                startIdx += marker2.length
+            }
         }
+        if (startIdx == -1) return null
 
-        val patternAlt = Pattern.compile("window\\[\"ytInitialData\"\\]\\s*=\\s*(\\{.+?\\});</script>", Pattern.DOTALL)
-        val matcherAlt = patternAlt.matcher(html)
-        if (matcherAlt.find()) {
-            return matcherAlt.group(1)
+        var endIdx = html.indexOf(";</script>", startIdx)
+        if (endIdx == -1) {
+            endIdx = html.indexOf("</script>", startIdx)
         }
+        if (endIdx == -1 || endIdx <= startIdx) return null
 
-        return null
+        return html.substring(startIdx, endIdx).trim()
     }
 }

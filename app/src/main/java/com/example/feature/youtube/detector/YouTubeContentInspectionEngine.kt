@@ -385,7 +385,9 @@ object YouTubeContentInspectionEngine {
         // Check if in-app miniplayer / floaty bar is active
         for (miniId in YouTubeDetectionRules.MINIPLAYER_VIEW_IDS) {
             val miniNodes = rootNode.findAccessibilityNodeInfosByViewId(miniId)
-            if (miniNodes.isNotEmpty()) {
+            val isNotEmpty = !miniNodes.isNullOrEmpty()
+            miniNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (isNotEmpty) {
                 isMiniplayer = true
                 break
             }
@@ -403,7 +405,7 @@ object YouTubeContentInspectionEngine {
         for (id in watchPlayerIds) {
             try {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (nodes.isNotEmpty()) {
+                if (!nodes.isNullOrEmpty()) {
                     isPlayerFound = true
                     for (node in nodes) {
                         val text = node.text?.toString()?.trim()
@@ -413,6 +415,7 @@ object YouTubeContentInspectionEngine {
                         }
                     }
                 }
+                nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             } catch (_: Exception) {}
             if (isPlayerFound && videoTitle != null) break
         }
@@ -451,13 +454,16 @@ object YouTubeContentInspectionEngine {
             for (id in titleIds) {
                 try {
                     val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                    for (node in nodes) {
-                        val text = node.text?.toString()?.trim()
-                        if (!text.isNullOrBlank() && text.length > 3) {
-                            videoTitle = text
-                            break
+                    if (!nodes.isNullOrEmpty()) {
+                        for (node in nodes) {
+                            val text = node.text?.toString()?.trim()
+                            if (!text.isNullOrBlank() && text.length > 3) {
+                                videoTitle = text
+                                break
+                            }
                         }
                     }
+                    nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
                 } catch (_: Exception) {}
                 if (videoTitle != null) break
             }
@@ -523,16 +529,19 @@ object YouTubeContentInspectionEngine {
         for (id in fastChannelIds) {
             try {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                for (node in nodes) {
-                    val text = node.text?.toString()?.trim()
-                    if (!text.isNullOrBlank()) {
-                        val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
-                        if (validName != null) {
-                            channelName = validName
-                            break
+                if (!nodes.isNullOrEmpty()) {
+                    for (node in nodes) {
+                        val text = node.text?.toString()?.trim()
+                        if (!text.isNullOrBlank()) {
+                            val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
+                            if (validName != null) {
+                                channelName = validName
+                                break
+                            }
                         }
                     }
                 }
+                nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             } catch (_: Exception) {}
             if (!channelName.isNullOrBlank()) break
         }
@@ -711,6 +720,7 @@ object YouTubeContentInspectionEngine {
             }
             if (child != null) {
                 scanNodes(child, currentDepth + 1, maxDepth, nodeCount, maxNodes, predicate)
+                try { child.recycle() } catch (_: Exception) {}
             }
         }
     }
