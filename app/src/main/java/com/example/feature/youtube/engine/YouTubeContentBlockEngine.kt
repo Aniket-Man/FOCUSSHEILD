@@ -24,6 +24,9 @@ object YouTubeContentBlockEngine {
     /** Total budget for channel metadata to render before the video is treated as unknown. */
     private const val CHANNEL_METADATA_GRACE_MILLIS = 1000L
 
+    /** Time gap delay (in millis) after video playback starts before enforcing any blocking decision. */
+    private const val PLAYBACK_START_DELAY_MILLIS = 1500L
+
     private const val MIN_FUZZY_MATCH_LENGTH = 4
 
     @Volatile
@@ -31,6 +34,9 @@ object YouTubeContentBlockEngine {
 
     @Volatile
     private var currentVideoFirstSeenAt: Long = 0L
+
+    @Volatile
+    private var playbackStartedAt: Long = 0L
 
     @Volatile
     private var lastSeenChannelName: String? = null
@@ -69,11 +75,26 @@ object YouTubeContentBlockEngine {
                 YouTubeBlockDecision.ALLOW_NAVIGATION
             }
         }
+        
+        // 2.5 Detection is suspended when playback is explicitly paused
+        val isPaused = YouTubeNodeExtractor.isVideoPaused(rootNode)
 
-        // 3. CHANNEL-NAME-ONLY VERIFICATION
-        // The title is extracted purely as a per-video tracking key (to reset the
-        // metadata grace window and clear stale channels when a new video opens);
-        // it never participates in the allow/block decision.
+        if (isPaused) {
+            playbackStartedAt = 0L
+            return YouTubeBlockDecision(
+                verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+                reason = "Video is explicitly paused"
+            )
+        }
+
+        // 2.6 Video is actively playing! Record playback start timestamp
+        if (playbackStartedAt == 0L) {
+            playbackStartedAt = currentTime
+        }
+
+        val withinPlaybackDelay = (currentTime - playbackStartedAt) < PLAYBACK_START_DELAY_MILLIS
+
+        // 3. TITLE + CHANNEL MATCHING PIPELINE (Zenlock Classifier Pattern)
         val title = YouTubeNodeExtractor.extractVideoTitle(rootNode)
         val channel = YouTubeNodeExtractor.extractChannelName(rootNode)
             ?: resolveChannelFromText(rootNode)
@@ -84,20 +105,27 @@ object YouTubeContentBlockEngine {
         if (channel != null) lastSeenChannelName = channel
         val effectiveChannel = channel ?: lastSeenChannelName
 
-        if (effectiveChannel != null) {
-            return if (isChannelApproved(effectiveChannel, approvedChannelIds, approvedChannelNames)) {
-                YouTubeBlockDecision.approvedChannel(effectiveChannel)
-            } else {
-                YouTubeBlockDecision.blockedChannel(effectiveChannel)
+        val approved = isContentApproved(title, effectiveChannel, approvedChannelIds, approvedChannelNames)
+        if (approved) {
+            return YouTubeBlockDecision.approvedChannel(effectiveChannel ?: title ?: "Approved Channel")
+        } else {
+            if (withinPlaybackDelay) {
+                return YouTubeBlockDecision(
+                    verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+                    reason = "Playback delay in progress (verifying title + channel match)"
+                )
+            }
+            if (effectiveChannel != null || title != null) {
+                return YouTubeBlockDecision.blockedChannel(effectiveChannel ?: title ?: "Unapproved Content")
             }
         }
 
         // 4. Channel metadata not rendered yet: wait briefly, then treat as unknown.
-        val withinGrace = currentTime - currentVideoFirstSeenAt < CHANNEL_METADATA_GRACE_MILLIS
-        if (withinGrace) {
+        val withinGrace = (currentTime - currentVideoFirstSeenAt) < CHANNEL_METADATA_GRACE_MILLIS
+        if (withinGrace || withinPlaybackDelay) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                reason = "Waiting for channel metadata"
+                reason = "Waiting for channel handle metadata"
             )
         }
 
@@ -123,18 +151,22 @@ object YouTubeContentBlockEngine {
         return YouTubeNodeExtractor.cleanChannelName(handleMatch.value)
     }
 
-    private val HANDLE_REGEX = Regex("@[A-Za-z0-9_.\\-]{3,40}")
+    private val HANDLE_REGEX = Regex("@[A-Za-z0-9_.\\-]{2,50}")
 
     private fun extractWatchPanelText(rootNode: AccessibilityNodeInfo): String {
         val watchIds = listOf(
-            "com.google.android.youtube:id/watch_panel",
-            "com.google.android.youtube:id/watch_player",
-            "com.google.android.youtube:id/watch_title_text",
-            "com.google.android.youtube:id/watch_metadata_title",
+            "com.google.android.youtube:id/channel_handle",
+            "com.google.android.youtube:id/byline",
+            "com.google.android.youtube:id/byline_text",
+            "com.google.android.youtube:id/watch_metadata_byline",
+            "com.google.android.youtube:id/watch_metadata_subtitle",
+            "com.google.android.youtube:id/metadata_line",
             "com.google.android.youtube:id/watch_header_layout",
+            "com.google.android.youtube:id/owner_layout",
             "com.google.android.youtube:id/channel_name",
             "com.google.android.youtube:id/owner_text",
-            "com.google.android.youtube:id/owner_name"
+            "com.google.android.youtube:id/owner_name",
+            "com.google.android.youtube:id/channel_title"
         )
         val builder = StringBuilder()
         for (id in watchIds) {
@@ -169,6 +201,7 @@ object YouTubeContentBlockEngine {
     private fun resetVideoTracking() {
         currentVideoKey = null
         currentVideoFirstSeenAt = 0L
+        playbackStartedAt = 0L
     }
 
     /**
@@ -178,6 +211,60 @@ object YouTubeContentBlockEngine {
         resetVideoTracking()
         lastSeenChannelName = null
         lastSeenVideoTitle = null
+    }
+
+    /**
+     * Comprehensive content classifier (title + channel name + keywords) matching logic.
+     * Evaluates whether a video's title or channel matches approved study channels or keywords.
+     */
+    fun isContentApproved(
+        detectedTitle: String?,
+        detectedChannel: String?,
+        approvedChannelIds: Set<String>,
+        approvedChannelNames: Set<String>
+    ): Boolean {
+        if (approvedChannelIds.isEmpty() && approvedChannelNames.isEmpty()) return false
+
+        // 1. Direct channel name/handle match
+        if (detectedChannel != null && isChannelApproved(detectedChannel, approvedChannelIds, approvedChannelNames)) {
+            return true
+        }
+
+        // 2. Combined title + channel text search (Zenlock Classifier pattern)
+        val searchText = buildString {
+            detectedTitle?.let { append(it.lowercase(Locale.ROOT)) }
+            append(" ")
+            detectedChannel?.let { append(it.lowercase(Locale.ROOT)) }
+        }.trim()
+
+        if (searchText.isEmpty()) return false
+
+        // Check matching against approved channel handles and names
+        for (approved in approvedChannelIds + approvedChannelNames) {
+            val approvedNorm = approved.trim().lowercase(Locale.ROOT)
+            if (approvedNorm.isEmpty()) continue
+
+            // Exact or substring match in search text (e.g. "Khan Academy" or "Physics Wallah" in title)
+            if (searchText.contains(approvedNorm)) {
+                return true
+            }
+            
+            if (detectedChannel != null && detectedChannel.isNotBlank()) {
+                val channelNorm = detectedChannel.lowercase(Locale.ROOT)
+                if (approvedNorm.contains(channelNorm) || channelNorm.contains(approvedNorm)) {
+                    return true
+                }
+            }
+
+            // Clean handle match (e.g. "@physicswallah")
+            val cleanHandle = approvedNorm.removePrefix("@").filter { it.isLetterOrDigit() }
+            val cleanSearchText = searchText.filter { it.isLetterOrDigit() }
+            if (cleanHandle.length >= MIN_FUZZY_MATCH_LENGTH && cleanSearchText.contains(cleanHandle)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /**

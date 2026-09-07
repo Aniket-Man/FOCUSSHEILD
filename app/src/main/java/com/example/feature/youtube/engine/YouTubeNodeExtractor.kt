@@ -54,6 +54,31 @@ object YouTubeNodeExtractor {
         "$YT:id/subtitle"
     )
 
+    private val HANDLE_VIEW_IDS = listOf(
+        "$YT:id/channel_handle",
+        "$YT:id/byline",
+        "$YT:id/byline_text",
+        "$YT:id/byline_view",
+        "$YT:id/watch_metadata_subtitle",
+        "$YT:id/watch_metadata_byline",
+        "$YT:id/metadata_line",
+        "$YT:id/owner_text",
+        "$YT:id/owner_name",
+        "$YT:id/channel_name",
+        "$YT:id/channel_title"
+    )
+
+    private val EXCLUDED_TITLE_VIEW_KEYWORDS = listOf(
+        "watch_title_text",
+        "watch_metadata_title",
+        "video_title",
+        "compact_media_item_headline",
+        "title_text",
+        "header_title"
+    )
+
+    val HANDLE_REGEX = Regex("@[A-Za-z0-9_.\\-]{2,50}")
+
     private val HOME_FEED_VIEW_IDS = listOf(
         "$YT:id/home_feed"
     )
@@ -160,6 +185,67 @@ object YouTubeNodeExtractor {
     }
 
     /**
+     * Checks if the video is currently paused by searching for a Play button
+     * in the active player. If "Play video" is visible, the video is paused.
+     */
+    fun isVideoPaused(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+        try {
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 400) { // Limit search depth
+                val node = queue.removeFirst()
+                visited++
+                
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+                if (desc.equals("Play video", ignoreCase = true) || desc.equals("Play", ignoreCase = true)) {
+                    return true
+                }
+                
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
+     * Checks if the video is actively playing in the watch player (e.g. Pause control is present).
+     */
+    fun isVideoPlaying(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+        try {
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            var foundPause = false
+            var foundPlay = false
+            while (queue.isNotEmpty() && visited < 400) {
+                val node = queue.removeFirst()
+                visited++
+
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+                if (desc.equals("Pause video", ignoreCase = true) || desc.equals("Pause", ignoreCase = true)) {
+                    foundPause = true
+                } else if (desc.equals("Play video", ignoreCase = true) || desc.equals("Play", ignoreCase = true)) {
+                    foundPlay = true
+                }
+
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+            if (foundPlay) return false
+            if (foundPause) return true
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
      * Extracts the title of the video currently on the watch page.
      */
     fun extractVideoTitle(rootNode: AccessibilityNodeInfo?): String? {
@@ -180,32 +266,123 @@ object YouTubeNodeExtractor {
     }
 
     /**
-     * Extracts the channel name of the video currently on the watch page.
-     * First tries dedicated channel view IDs, then falls back to scanning
-     * only the watch player subtree for subscribe buttons.
+     * Extracts the channel handle (@name) specifically from the watch metadata area
+     * below the video title (as shown in modern YouTube watch layouts).
+     * This provides the most precise channel detection signal.
      */
-    fun extractChannelName(rootNode: AccessibilityNodeInfo?): String? {
+    fun extractChannelHandle(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
-        for (viewId in CHANNEL_VIEW_IDS) {
+
+        // 1. Direct view ID query on dedicated handle and byline containers
+        for (viewId in HANDLE_VIEW_IDS) {
             try {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
                 if (nodes != null) {
                     for (node in nodes) {
-                        val text = node.text?.toString()?.trim()
+                        val resId = node.viewIdResourceName ?: ""
+                        if (EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
+                            try { node.recycle() } catch (_: Exception) {}
+                            continue
+                        }
+                        val text = node.text?.toString()?.trim() ?: ""
+                        val desc = node.contentDescription?.toString()?.trim() ?: ""
                         try { node.recycle() } catch (_: Exception) {}
-                        val cleaned = cleanChannelName(text)
-                        if (cleaned != null) return cleaned
+
+                        val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
+                        if (handleMatch != null) {
+                            val cleaned = cleanChannelName(handleMatch.value)
+                            if (cleaned != null) return cleaned
+                        }
                     }
                 }
             } catch (_: Exception) {}
         }
-        return extractChannelFromWatchPlayer(rootNode)
+
+        // 2. Scan watch player / metadata subtree for @handle text nodes
+        return extractHandleFromWatchSubtree(rootNode)
+    }
+
+    /**
+     * Extracts ONLY the channel handle (@name) of the video currently on the watch page.
+     * Enforces the requirement that only @handles are used for detection.
+     */
+    fun extractChannelName(rootNode: AccessibilityNodeInfo?): String? {
+        if (rootNode == null) return null
+
+        // 1. Precise channel handle (@name) under the video title
+        val handle = extractChannelHandle(rootNode)
+        if (handle != null) return handle
+
+        return null
+    }
+
+    /**
+     * Scans specifically the watch player metadata subtree for @handle nodes.
+     */
+    private fun extractHandleFromWatchSubtree(rootNode: AccessibilityNodeInfo): String? {
+        var watchContainer: AccessibilityNodeInfo? = null
+        for (id in WATCH_PAGE_VIEW_IDS) {
+            try {
+                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
+                if (!nodes.isNullOrEmpty()) {
+                    watchContainer = nodes.first()
+                    for (i in 1 until nodes.size) {
+                        try { nodes[i].recycle() } catch (_: Exception) {}
+                    }
+                    break
+                }
+            } catch (_: Exception) {}
+        }
+
+        val searchRoot = watchContainer ?: rootNode
+        val allocatedNodes = mutableListOf<AccessibilityNodeInfo>()
+        if (watchContainer != null) allocatedNodes.add(watchContainer)
+
+        var visited = 0
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(searchRoot to 0)
+        try {
+            while (queue.isNotEmpty() && visited < MAX_SCAN_NODES) {
+                val (node, depth) = queue.removeFirst()
+                visited++
+
+                val viewId = node.viewIdResourceName ?: ""
+                val isTitleNode = EXCLUDED_TITLE_VIEW_KEYWORDS.any { viewId.contains(it, ignoreCase = true) }
+                val isExcluded = isTitleNode || YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
+                    viewId.contains(it, ignoreCase = true)
+                }
+                if (!isExcluded) {
+                    val text = node.text?.toString()?.trim() ?: ""
+                    val desc = node.contentDescription?.toString()?.trim() ?: ""
+
+                    val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
+                    if (handleMatch != null) {
+                        val cleaned = cleanChannelName(handleMatch.value)
+                        if (cleaned != null) return cleaned
+                    }
+                }
+
+                if (depth >= MAX_SCAN_DEPTH) continue
+                for (i in 0 until node.childCount) {
+                    if (visited >= MAX_SCAN_NODES) break
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) {
+                        allocatedNodes.add(child)
+                        queue.add(child to depth + 1)
+                    }
+                }
+            }
+        } finally {
+            for (allocated in allocatedNodes) {
+                try { allocated.recycle() } catch (_: Exception) {}
+            }
+        }
+        return null
     }
 
     /**
      * Extracts channel identity ONLY from the watch player subtree by locating
-     * "Subscribe to [Channel]" or "@handle" nodes that sit near the video
-     * controls — never from recommendations, comments, or description sheets.
+     * "Subscribe to [Channel]", "@handle", or "Go to channel [Name]" nodes.
      */
     private fun extractChannelFromWatchPlayer(rootNode: AccessibilityNodeInfo): String? {
         // Find the watch panel container so we only scan the active video area.
@@ -245,7 +422,16 @@ object YouTubeNodeExtractor {
                     viewId.contains(it, ignoreCase = true)
                 }
                 if (!isExcluded) {
-                    val desc = node.contentDescription?.toString() ?: ""
+                    val text = node.text?.toString()?.trim() ?: ""
+                    val desc = node.contentDescription?.toString()?.trim() ?: ""
+
+                    // Check for @handle first in subtree
+                    val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
+                    if (handleMatch != null) {
+                        candidates.add(handleMatch.value)
+                        found = true
+                        break
+                    }
 
                     // Subscribe button near the video — strongest signal for the video's own channel
                     val subscribePrefix = "Subscribe to "
@@ -295,9 +481,16 @@ object YouTubeNodeExtractor {
     fun cleanChannelName(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
         var name = raw.trim()
-        if (name.startsWith("@")) name = name.removePrefix("@").trim()
-        name = name.substringBefore(" • ").substringBefore(" · ").substringBefore(" | ").trim()
-        if (name.startsWith("By ", ignoreCase = true)) name = name.removePrefix("By ").trim()
+
+        // If raw contains an @handle, extract ONLY the handle token
+        val handleMatch = HANDLE_REGEX.find(name)
+        if (handleMatch != null) {
+            name = handleMatch.value.removePrefix("@").trim()
+        } else {
+            if (name.startsWith("@")) name = name.removePrefix("@").trim()
+            name = name.substringBefore(" • ").substringBefore(" · ").substringBefore(" | ").trim()
+            if (name.startsWith("By ", ignoreCase = true)) name = name.removePrefix("By ").trim()
+        }
 
         if (name.length < 2 || name.length > 70) return null
         if (!name.any { it.isLetter() }) return null

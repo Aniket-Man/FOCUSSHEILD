@@ -114,6 +114,7 @@ fun Modifier.dashedBorder(
 }
 
 fun getChannelSubscriberDisplay(channelName: String, channelId: String): String {
+    val handleText = if (channelId.startsWith("@")) channelId else "@$channelId"
     val curated = YouTubeChannelSearchEngine.CURATED_CATALOG.find {
         it.channelName.equals(channelName, ignoreCase = true) ||
             it.handle.equals(channelId, ignoreCase = true) ||

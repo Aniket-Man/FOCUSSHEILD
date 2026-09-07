@@ -1,0 +1,34 @@
+# Android
+.gradle/
+build/
+app/build/
+Android/.gradle/
+Android/build/
+Android/app/build/
+Android/local.properties
+Android/.idea/
+*.iml
+
+# IDE
+.idea/
+.DS_Store
+*.swp
+
+# Backend
+node_modules/
+.env
+Backend/node_modules/
+Backend/.env
+
+# Captures
+captures/
+
+# Assets & Design
+# (assets/ is no longer ignored globally so screenshots can be tracked)
+client_secret_*.json
+Backend/client_secret_*.json
+
+# assets
+assets/client_secret_*.json
+assets/zenlock-ui/
+

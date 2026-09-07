@@ -32,7 +32,13 @@ class StudyChannelRepository(
                 cachedApprovedNormalizedNames.clear()
                 channels.forEach { ch ->
                     if (ch.isApproved) {
-                        cachedApprovedChannelIds.add(ch.channelId.trim().lowercase(Locale.ROOT))
+                        val normId = ch.channelId.trim().lowercase(Locale.ROOT)
+                        cachedApprovedChannelIds.add(normId)
+                        if (normId.startsWith("@")) {
+                            cachedApprovedChannelIds.add(normId.removePrefix("@"))
+                        } else {
+                            cachedApprovedChannelIds.add("@$normId")
+                        }
                         val normName = normalizeChannelName(ch.channelName)
                         if (normName.isNotBlank()) {
                             cachedApprovedNormalizedNames.add(normName)
