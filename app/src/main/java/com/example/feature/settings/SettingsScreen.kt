@@ -311,7 +311,7 @@ fun SettingsScreen(
                             onCheckedChange = { viewModel.updateYouTubeShortsBlocking(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = Color(0xFFEF4444),
+                                checkedTrackColor = FocusColors.Primary,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -344,7 +344,7 @@ fun SettingsScreen(
                             onCheckedChange = { viewModel.updateInstagramReelsBlocking(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = Color(0xFFE1306C),
+                                checkedTrackColor = FocusColors.Primary,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -377,7 +377,7 @@ fun SettingsScreen(
                             onCheckedChange = { viewModel.updateFacebookReelsBlocking(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = Color(0xFF1877F2),
+                                checkedTrackColor = FocusColors.Primary,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),

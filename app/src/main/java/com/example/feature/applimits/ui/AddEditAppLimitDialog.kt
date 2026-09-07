@@ -448,7 +448,9 @@ fun AddEditAppLimitDialog(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.BlockedRed
+                                checkedTrackColor = FocusColors.Primary,
+                                uncheckedThumbColor = FocusColors.TextMuted,
+                                uncheckedTrackColor = FocusColors.SurfaceSubtle
                             )
                         )
                     }

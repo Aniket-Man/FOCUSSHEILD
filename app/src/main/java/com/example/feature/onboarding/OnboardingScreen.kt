@@ -930,7 +930,7 @@ private fun ProtectionRow(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = accent,
+                    checkedTrackColor = FocusColors.Primary,
                     uncheckedThumbColor = FocusColors.TextMuted,
                     uncheckedTrackColor = FocusColors.SurfaceSubtle,
                     uncheckedBorderColor = FocusColors.CardBorder
@@ -1007,7 +1007,7 @@ private fun InteractivePlatformShieldCard(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = brandColor,
+                    checkedTrackColor = FocusColors.Primary,
                     uncheckedThumbColor = Color(0xFF888888),
                     uncheckedTrackColor = Color(0xFF222530)
                 )

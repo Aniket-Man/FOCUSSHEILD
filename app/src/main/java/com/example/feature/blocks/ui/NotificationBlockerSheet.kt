@@ -63,6 +63,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.example.core.design.FocusColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -740,7 +741,7 @@ private fun MasterShieldCard(
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = if (isDark) Color(0xFF38A169) else Color(0xFF16A34A),
+                    checkedTrackColor = FocusColors.Primary,
                     uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
                     uncheckedTrackColor = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
                 ),

@@ -232,7 +232,9 @@ fun FocusScheduleCard(
                         onCheckedChange = onToggleEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
-                            checkedTrackColor = FocusColors.Primary
+                            checkedTrackColor = FocusColors.Primary,
+                            uncheckedThumbColor = FocusColors.TextMuted,
+                            uncheckedTrackColor = FocusColors.SurfaceSubtle
                         )
                     )
                 }

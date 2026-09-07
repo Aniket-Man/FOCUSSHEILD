@@ -163,7 +163,7 @@ fun FocusScheduleDialog(
     val dividerColor = if (isDark) Color(0xFF23262E) else Color(0xFFE2E8F0)
     val saveBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
     val saveBtnText = if (isDark) Color.Black else Color.White
-    val switchTrackChecked = if (isDark) FocusColors.Primary else Color(0xFF22C55E)
+    val switchTrackChecked = FocusColors.Primary
     val switchTrackUnchecked = if (isDark) Color(0xFF2C2F36) else Color(0xFFCBD5E1)
 
     Dialog(

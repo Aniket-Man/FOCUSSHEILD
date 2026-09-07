@@ -469,7 +469,9 @@ private fun AppLimitCard(
                     onCheckedChange = onToggle,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = FocusColors.TextOnDark,
-                        checkedTrackColor = FocusColors.Primary
+                        checkedTrackColor = FocusColors.Primary,
+                        uncheckedThumbColor = FocusColors.TextMuted,
+                        uncheckedTrackColor = FocusColors.SurfaceSubtle
                     )
                 )
 
