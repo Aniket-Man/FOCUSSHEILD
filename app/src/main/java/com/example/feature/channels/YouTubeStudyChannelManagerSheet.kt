@@ -67,10 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -404,21 +401,7 @@ fun YouTubeChannelCard(
         modifier = modifier
             .fillMaxWidth()
             .height(134.dp)
-            .drawBehind {
-                val strokeWidth = 1.5.dp.toPx()
-                val radius = 16.dp.toPx()
-                drawRoundRect(
-                    color = sheetBorder,
-                    style = Stroke(
-                        width = strokeWidth,
-                        pathEffect = PathEffect.dashPathEffect(
-                            floatArrayOf(12.dp.toPx(), 10.dp.toPx()),
-                            0f
-                        )
-                    ),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius)
-                )
-            }
+            .border(1.dp, sheetBorder, RoundedCornerShape(16.dp))
             .padding(horizontal = 34.dp, vertical = 20.dp)
     ) {
         val avatarModel = remember(channel.avatarUrl, channel.handle, channel.channelId) {
