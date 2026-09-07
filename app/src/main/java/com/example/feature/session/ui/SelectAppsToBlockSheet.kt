@@ -42,6 +42,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +82,7 @@ import com.example.core.util.InstalledAppsProvider
 import com.example.core.util.InstalledAppsProvider.toImageBitmap
 import com.example.feature.session.SpecialAppOption
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SelectAppsToBlockSheet(
     youtubeOption: SpecialAppOption,
@@ -119,14 +121,27 @@ fun SelectAppsToBlockSheet(
     var isSpecialAppsExpanded by remember { mutableStateOf(true) }
     var isDistractingExpanded by remember { mutableStateOf(true) }
     var showYouTubeChannelsDialog by remember { mutableStateOf(false) }
+    var showWebsiteBlockerDialog by remember { mutableStateOf(false) }
 
-    // Nested BackHandler: step back dismisses YouTube dialog first before returning to setup
-    androidx.activity.compose.BackHandler(enabled = showYouTubeChannelsDialog) {
-        showYouTubeChannelsDialog = false
+    // Nested BackHandler: step back dismisses sub-dialogs first before returning to setup
+    androidx.activity.compose.BackHandler(enabled = showYouTubeChannelsDialog || showWebsiteBlockerDialog) {
+        if (showYouTubeChannelsDialog) {
+            showYouTubeChannelsDialog = false
+        } else if (showWebsiteBlockerDialog) {
+            showWebsiteBlockerDialog = false
+        }
     }
 
     if (showYouTubeChannelsDialog) {
         ManageYouTubeChannelsDialog(onDismiss = { showYouTubeChannelsDialog = false })
+    }
+
+    if (showWebsiteBlockerDialog) {
+        val websiteSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        com.example.feature.websiteblocker.ui.WebsiteBlockerSheet(
+            sheetState = websiteSheetState,
+            onDismiss = { showWebsiteBlockerDialog = false }
+        )
     }
 
     LaunchedEffect(Unit) {
@@ -365,7 +380,8 @@ fun SelectAppsToBlockSheet(
                                     },
                                     selectedOption = browserOption,
                                     onOptionSelect = onBrowserOptionChange,
-                                    studyModeSubtext = "Blocks adult sites & manually added sites in browser >"
+                                    studyModeSubtext = "Blocks adult sites & manually added sites in browser >",
+                                    onSubtextClick = { showWebsiteBlockerDialog = true }
                                 )
                             }
                         }

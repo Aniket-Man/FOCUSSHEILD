@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -46,7 +47,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,16 +100,37 @@ fun FocusSessionSetupSheet(
         }
     }
 
+    val coroutineScope = rememberCoroutineScope()
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (activeSubView != SetupSubView.MAIN) {
+                activeSubView = SetupSubView.MAIN
+            } else {
+                onDismiss()
+            }
+        },
         sheetState = sheetState,
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = false
+        ),
         containerColor = FocusColors.Surface,
         contentColor = FocusColors.TextPrimary,
         dragHandle = null,
         modifier = modifier
     ) {
-        androidx.activity.compose.BackHandler(enabled = activeSubView != SetupSubView.MAIN) {
-            activeSubView = SetupSubView.MAIN
+        androidx.activity.compose.BackHandler(enabled = true) {
+            if (activeSubView != SetupSubView.MAIN) {
+                activeSubView = SetupSubView.MAIN
+            } else {
+                coroutineScope.launch {
+                    try {
+                        sheetState.hide()
+                    } finally {
+                        onDismiss()
+                    }
+                }
+            }
         }
 
         when (activeSubView) {
