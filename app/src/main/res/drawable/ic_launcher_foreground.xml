@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Inner subtle glow -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M54,22 C67,22 78,28 78,28 C78,54 66,74 54,84 C42,74 30,54 30,28 C30,28 41,22 54,22 Z" />
+    <!-- Main White Shield -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26 C64,26 74,31 74,31 C74,53 64,69 54,78 C44,69 34,53 34,31 C34,31 44,26 54,26 Z" />
+    <!-- Purple Core Check / Focus Spark -->
+    <path
+        android:fillColor="#6C5CE7"
+        android:pathData="M48.5,58.5 L40.5,50.5 L43.5,47.5 L48.5,52.5 L60.5,40.5 L63.5,43.5 Z" />
+</vector>

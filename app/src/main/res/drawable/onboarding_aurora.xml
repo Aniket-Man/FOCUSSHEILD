@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Aurora hero backdrop for the first onboarding page. Vector so it ships weightlessly and scales
+    to any screen: a dark night-sky gradient up top melting into layered green aurora curtains and a
+    darker frozen foreground along the bottom. Tuned to read well behind white headline text with
+    the scrim the screen draws on top.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="800dp"
+    android:viewportWidth="360"
+    android:viewportHeight="800">
+
+    <!-- Night sky base -->
+    <path android:pathData="M0,0 h360 v800 h-360 z">
+        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+            <gradient
+                android:type="linear"
+                android:startX="180" android:startY="0"
+                android:endX="180" android:endY="800">
+                <item android:offset="0.0" android:color="#FF041B12" />
+                <item android:offset="0.35" android:color="#FF06301D" />
+                <item android:offset="0.62" android:color="#FF0A3F22" />
+                <item android:offset="0.80" android:color="#FF072616" />
+                <item android:offset="1.0" android:color="#FF02100A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Deep aurora glow band -->
+    <path android:pathData="M-20,300 C80,240 140,360 210,320 C280,280 330,360 380,330 L380,540 C300,520 240,560 170,540 C100,520 40,560 -20,540 Z">
+        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+            <gradient
+                android:type="linear"
+                android:startX="180" android:startY="300"
+                android:endX="180" android:endY="560">
+                <item android:offset="0.0" android:color="#8028E070" />
+                <item android:offset="1.0" android:color="#0028E070" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Bright aurora curtain -->
+    <path android:pathData="M-20,360 C70,300 130,420 200,380 C270,340 320,430 380,400 L380,470 C310,500 250,430 180,470 C110,510 50,440 -20,470 Z">
+        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+            <gradient
+                android:type="linear"
+                android:startX="180" android:startY="360"
+                android:endX="180" android:endY="480">
+                <item android:offset="0.0" android:color="#B368F576" />
+                <item android:offset="1.0" android:color="#0068F576" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Frozen dark foreground -->
+    <path android:pathData="M0,600 C70,560 120,600 180,590 C240,580 300,610 360,585 L360,800 L0,800 Z">
+        <aapt:attr name="android:fillColor" xmlns:aapt="http://schemas.android.com/aapt">
+            <gradient
+                android:type="linear"
+                android:startX="180" android:startY="580"
+                android:endX="180" android:endY="800">
+                <item android:offset="0.0" android:color="#FF08160E" />
+                <item android:offset="1.0" android:color="#FF010805" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

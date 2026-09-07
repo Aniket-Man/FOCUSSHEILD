@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FocusShield onboarding mascot: a friendly green companion that delivers the permission
+    request in a speech bubble. Drawn as a vector so it stays crisp at every density and adds
+    no APK weight.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+
+    <!-- Body: a small torso tucked under the head, clipped visually by the avatar circle -->
+    <path
+        android:fillColor="#7FB544"
+        android:pathData="M72,138 L128,138 L136,190 C136,195 132,198 127,198 L73,198 C68,198 64,195 64,190 Z" />
+
+    <!-- Head: a rounded dome with a soft flat chin -->
+    <path
+        android:fillColor="#A6D765"
+        android:pathData="M34,116 C34,72 63,40 100,40 C137,40 166,72 166,116 C166,134 157,145 140,145 L60,145 C43,145 34,134 34,116 Z" />
+
+    <!-- Head highlight along the top-left, giving the dome a little volume -->
+    <path
+        android:fillColor="#B8E27C"
+        android:pathData="M52,104 C52,74 72,50 100,50 C86,54 70,72 64,96 C61,108 58,116 52,116 Z" />
+
+    <!-- Eyes -->
+    <path
+        android:fillColor="#1F3116"
+        android:pathData="M70,103 A11,14 0 0 1 92,103 A11,14 0 0 1 70,103 Z" />
+    <path
+        android:fillColor="#1F3116"
+        android:pathData="M108,103 A11,14 0 0 1 130,103 A11,14 0 0 1 108,103 Z" />
+
+    <!-- Eye glints -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M81,96 A4,4 0 0 1 89,96 A4,4 0 0 1 81,96 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M119,96 A4,4 0 0 1 127,96 A4,4 0 0 1 119,96 Z" />
+
+    <!-- Blush cheeks -->
+    <path
+        android:fillColor="#EE9C93"
+        android:fillAlpha="0.85"
+        android:pathData="M48,122 A10,6.5 0 0 1 68,122 A10,6.5 0 0 1 48,122 Z" />
+    <path
+        android:fillColor="#EE9C93"
+        android:fillAlpha="0.85"
+        android:pathData="M132,122 A10,6.5 0 0 1 152,122 A10,6.5 0 0 1 132,122 Z" />
+
+    <!-- Smile -->
+    <path
+        android:pathData="M88,124 Q100,134 112,124"
+        android:strokeColor="#1F3116"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+</vector>

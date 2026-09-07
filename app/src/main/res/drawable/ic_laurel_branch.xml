@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A single laurel branch: a curved stem with leaves stepping up one side. Mirror it
+     horizontally to form the matching right-hand branch of a wreath. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="72dp"
+    android:viewportWidth="24"
+    android:viewportHeight="72"
+    android:tint="?attr/colorControlNormal">
+
+    <!-- Stem -->
+    <path
+        android:pathData="M20,6 C10,20 8,40 14,66"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round" />
+
+    <!-- Leaves, top to bottom -->
+    <path android:fillColor="#FFFFFF" android:pathData="M18,10 C13,11 10,15 11,20 C16,19 19,15 18,10 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M14,20 C9,21 6,25 7,30 C12,29 15,25 14,20 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M11,30 C6,31 4,35 5,40 C10,39 12,35 11,30 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M10,40 C5,41 3,45 5,50 C10,49 12,45 10,40 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M11,50 C7,52 5,56 7,61 C12,59 13,55 11,50 Z" />
+</vector>

@@ -1,0 +1,6 @@
+{
+  "name": "FocusShield",
+  "description": "Premium Android study-focus application for JEE/NEET aspirants to track focus sessions, modes, and progress.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

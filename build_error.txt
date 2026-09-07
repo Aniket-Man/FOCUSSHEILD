@@ -1,0 +1,40 @@
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+The message received from the daemon indicates that the daemon has disappeared.
+Build request sent: Build{id=dc0a6b13-ee6b-4dee-ba36-f434933ddce4, currentDir=C:\Users\Aniket Man\Desktop\FOCUSSHEILD}
+Attempting to read last messages from the daemon log...
+Daemon pid: 1392
+  log file: C:\Users\Aniket Man\.gradle\daemon\9.3.1\daemon-1392.out.log
+----- Last 20 lines from daemon log file - daemon-1392.out.log -----
+2026-09-05T23:26:29.261-0700 [INFO] [org.gradle.launcher.daemon.server.DaemonRegistryUpdater] Marking the daemon as busy, address: [254f3c86-7b4d-4aa3-af10-e1629cef7ffa port:50669, addresses:[localhost/127.0.0.1]]
+2026-09-05T23:26:29.262-0700 [DEBUG] [org.gradle.launcher.daemon.registry.PersistentDaemonRegistry] Marking busy by address: [254f3c86-7b4d-4aa3-af10-e1629cef7ffa port:50669, addresses:[localhost/127.0.0.1]]
+2026-09-05T23:26:29.269-0700 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Waiting to acquire exclusive lock on daemon addresses registry.
+2026-09-05T23:26:29.271-0700 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Lock acquired on daemon addresses registry.
+2026-09-05T23:26:29.281-0700 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Releasing lock on daemon addresses registry.
+2026-09-05T23:26:29.284-0700 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] resetting idle timer
+2026-09-05T23:26:29.285-0700 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon is running. Sleeping until state changes.
+2026-09-05T23:26:29.290-0700 [INFO] [org.gradle.launcher.daemon.server.exec.StartBuildOrRespondWithBusy] Daemon is about to start building Build{id=dc0a6b13-ee6b-4dee-ba36-f434933ddce4, currentDir=C:\Users\Aniket Man\Desktop\FOCUSSHEILD}. Dispatching build started information...
+2026-09-05T23:26:29.291-0700 [DEBUG] [org.gradle.launcher.daemon.server.SynchronizedDispatchConnection] thread 23: dispatching org.gradle.launcher.daemon.protocol.BuildStarted@6354bff6
+2026-09-05T23:26:29.302-0700 [DEBUG] [org.gradle.launcher.daemon.server.exec.EstablishBuildEnvironment] Configuring env variables: [USERDOMAIN_ROAMINGPROFILE, PROCESSOR_LEVEL, STORE_PASSWORD, KEYSTORE_PATH, HERMES_GIT_BASH_PATH, HERMES_HOME, CLAUDE_CODE_GIT_BASH_PATH, SESSIONNAME, ALLUSERSPROFILE, PROCESSOR_ARCHITECTURE, OPENCODE_PID, PSModulePath, SystemDrive, DIRNAME, USERNAME, ProgramFiles(x86), APP_HOME, DEFAULT_JVM_OPTS, PATHEXT, DriverData, dp0, OPENCODE, ProgramData, ProgramW6432, HOMEPATH, PROCESSOR_IDENTIFIER, ProgramFiles, PUBLIC, ANTHROPIC_BASE_URL, windir, LOCALAPPDATA, USERDOMAIN, LOGONSERVER, JAVA_HOME, PROMPT, AGENT, OneDrive, =C:, APPDATA, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_AUTH_TOKEN, ANTHROPIC_MODEL, KEY_PASSWORD, JAVA_EXE, CommonProgramFiles, Path, OS, COMPUTERNAME, npm_config_user_agent, PROCESSOR_REVISION, CommonProgramW6432, ComSpec, APP_BASE_NAME, SystemRoot, TEMP, HOMEDRIVE, USERPROFILE, TMP, CommonProgramFiles(x86), NUMBER_OF_PROCESSORS]
+2026-09-05T23:26:29.329-0700 [DEBUG] [org.gradle.launcher.daemon.server.exec.LogToClient] About to start relaying all logs to the client via the connection.
+2026-09-05T23:26:29.332-0700 [INFO] [org.gradle.launcher.daemon.server.exec.LogToClient] The client will now receive all logging from the daemon (pid: 1392). The daemon log file: C:\Users\Aniket Man\.gradle\daemon\9.3.1\daemon-1392.out.log
+2026-09-05T23:26:29.341-0700 [DEBUG] [org.gradle.launcher.daemon.server.exec.RequestStopIfSingleUsedDaemon] Requesting daemon stop after processing Build{id=dc0a6b13-ee6b-4dee-ba36-f434933ddce4, currentDir=C:\Users\Aniket Man\Desktop\FOCUSSHEILD}
+2026-09-05T23:26:29.342-0700 [LIFECYCLE] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Daemon will be stopped at the end of the build 
+2026-09-05T23:26:29.343-0700 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Stop as soon as idle requested. The daemon is busy
+2026-09-05T23:26:29.346-0700 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon stop has been requested. Sleeping until state changes.
+2026-09-05T23:26:29.383-0700 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] The daemon has started executing the build.
+2026-09-05T23:26:29.385-0700 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] Executing build with daemon context: DefaultDaemonContext[uid=52defd9c-e137-44ec-88ea-3ddcdb3f2960,javaHome=C:\Program Files\ojdkbuild\java-17-openjdk-17.0.3.0.6-1,javaVersion=17,javaVendor=ojdkbuild,daemonRegistryDir=C:\Users\Aniket Man\.gradle\daemon,pid=1392,idleTimeout=120000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=-Xmx4g,-Dfile.encoding=UTF-8,-Duser.country=IN,-Duser.language=en,-Duser.variant]
+Reusing configuration cache.
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.----- End of the daemon log -----
+
+JVM crash log found: file:///C:/Users/Aniket%20Man/Desktop/FOCUSSHEILD/hs_err_pid1392.log
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon disappeared unexpectedly (it may have been killed or may have crashed)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.

@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">FocusShield</string>
+    <string name="accessibility_service_label">FocusShield App Blocker</string>
+    <string name="accessibility_service_description">FocusShield needs accessibility access to detect when distracting apps are opened during an active focus study session.</string>
+    <string name="focus_widget_label">Focus &amp; Streak</string>
+    <string name="focus_widget_description">Shows your active session, today\'s focus time, and study streak.</string>
+    <string name="usage_widget_label">Today\'s Focus</string>
+    <string name="usage_widget_description">Tracks today\'s focus time progress toward your daily study goal.</string>
+    <string name="unlock_widget_label">Phone Unlocks</string>
+    <string name="unlock_widget_description">Counts today\'s phone unlocks compared to your weekly average.</string>
+</resources>
