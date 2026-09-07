@@ -148,6 +148,7 @@ fun FocusNavGraph(
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
                 onNavigateToBlockedApps = { navController.navigate(Screen.BlockedApps.route) },
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
+                onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onStartPlanSession = { planItem ->
                     sessionViewModel.configureForStudyPlan(
                         subjectName = planItem.subject,

@@ -109,10 +109,24 @@ class AppLimitOverlayActivity : ComponentActivity() {
                                 appName = data.appName,
                                 durationMinutes = durationMinutes
                             )
+                            try {
+                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                                    startActivity(launchIntent)
+                                }
+                            } catch (_: Exception) {}
                             finish()
                         },
                         onUseEmergency = {
                             AppLimitManager.instance.startEmergencySession(data.packageName, data.appName)
+                            try {
+                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                                    startActivity(launchIntent)
+                                }
+                            } catch (_: Exception) {}
                             finish()
                         },
                         onEnableStrictMode = {
@@ -127,6 +141,13 @@ class AppLimitOverlayActivity : ComponentActivity() {
                         onTurnOffAndResetStreak = {
                             AppLimitStrictModeEngine.instance.onUserQuitLimit(data.packageName)
                             AppLimitManager.instance.leaveBlockForToday(data.packageName)
+                            try {
+                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                                    startActivity(launchIntent)
+                                }
+                            } catch (_: Exception) {}
                             finish()
                         },
                         onGoToHome = {

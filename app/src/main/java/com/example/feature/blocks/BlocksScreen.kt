@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -87,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.design.FocusCardStyle
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -243,22 +245,21 @@ fun BlocksScreen(
                 }
             }
         },
-        bottomBar = {
-            FocusBottomNavigation(
-                selectedTab = BottomTab.BLOCKS,
-                onTabSelected = onTabSelected
-            )
-        },
         containerColor = FocusColors.Background,
         modifier = modifier.testTag("blocks_screen")
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = FocusSpacing.screenHorizontal),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+                .padding(top = innerPadding.calculateTopPadding())
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = FocusSpacing.screenHorizontal),
+                contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp),
+                verticalArrangement = Arrangement.spacedBy(22.dp)
+            ) {
             // 1. App Limits Section
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -582,7 +583,14 @@ fun BlocksScreen(
                 Spacer(modifier = Modifier.height(FocusSpacing.base))
             }
         }
+
+        FocusBottomNavigation(
+            selectedTab = BottomTab.BLOCKS,
+            onTabSelected = onTabSelected,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
+}
 
     // Bottom Sheet: Select an App to Add Limit (Image 3)
     if (showAppSelectionSheet) {

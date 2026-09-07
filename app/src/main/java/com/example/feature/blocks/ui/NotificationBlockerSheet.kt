@@ -10,6 +10,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,8 +29,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
@@ -53,19 +57,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -75,18 +74,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.core.design.FocusColors
+import com.example.core.design.LocalFocusColors
 import com.example.feature.notificationblocker.domain.NotificationBlockMode
 import com.example.feature.notificationblocker.domain.SilencedNotificationRecord
 import com.example.feature.notificationblocker.ui.InstalledAppItem
@@ -94,6 +104,32 @@ import com.example.feature.notificationblocker.ui.NotificationBlockerViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * Clean dashed border around rounded rectangle matching the YouTube Channel popup specification.
+ */
+private fun Modifier.sheetDashedBorder(
+    strokeWidth: Dp = 1.2.dp,
+    color: Color,
+    cornerRadius: Dp = 16.dp,
+    dashLength: Dp = 7.dp,
+    gapLength: Dp = 5.dp
+): Modifier = this.drawBehind {
+    val widthPx = strokeWidth.toPx()
+    val radiusPx = cornerRadius.toPx()
+    val dashPx = dashLength.toPx()
+    val gapPx = gapLength.toPx()
+
+    val pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashPx, gapPx), 0f)
+    val stroke = Stroke(width = widthPx, pathEffect = pathEffect)
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(widthPx / 2f, widthPx / 2f),
+        size = Size(size.width - widthPx, size.height - widthPx),
+        cornerRadius = CornerRadius(radiusPx, radiusPx),
+        style = stroke
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +141,17 @@ fun NotificationBlockerSheet(
     viewModel: NotificationBlockerViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    val isDark = LocalFocusColors.current.isDark
+    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val dragHandleColor = if (isDark) Color(0xFF4E4E52) else Color(0xFFCBD5E1)
+    val doneBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
+    val doneBtnText = if (isDark) Color.Black else Color(0xFFFFFFFF)
+
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -123,522 +170,497 @@ fun NotificationBlockerSheet(
         )
     }
 
-    androidx.activity.compose.BackHandler(enabled = true) {
+    val handleDismiss: () -> Unit = {
+        focusManager.clearFocus()
+        keyboardController?.hide()
         onDismiss()
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
+
+    androidx.activity.compose.BackHandler(enabled = true) {
+        handleDismiss()
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = handleDismiss,
         sheetState = sheetState,
-        containerColor = FocusColors.Surface,
-        contentColor = FocusColors.TextPrimary,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 10.dp, bottom = 4.dp)
-                    .width(40.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(FocusColors.TextMuted.copy(alpha = 0.4f))
-            )
-        },
+        containerColor = sheetBg,
+        contentColor = textPrimary,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        tonalElevation = 0.dp,
+        dragHandle = null,
         modifier = modifier
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.82f)
-                .padding(horizontal = 20.dp)
+                .fillMaxHeight()
+                .background(sheetBg)
+                .testTag("notification_blocker_sheet")
         ) {
-            // Header Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.AmberOrange.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.NotificationsOff,
-                            contentDescription = null,
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Notification Blocker Engine",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                color = FocusColors.TextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
-                        )
-                        Text(
-                            text = if (uiState.isSessionActive) {
-                                "⚡ Focus Session ACTIVE — Silencing alerts"
-                            } else {
-                                "${uiState.blockedPackages.size} apps configured to stay silent"
-                            },
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = if (uiState.isSessionActive) FocusColors.AmberOrange else FocusColors.TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = if (uiState.isSessionActive) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        )
-                    }
-                }
+            // Drag handle matching YouTube channels popup
+            Box(
+                modifier = Modifier
+                    .padding(top = 14.dp, bottom = 18.dp)
+                    .width(44.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(dragHandleColor)
+                    .align(Alignment.CenterHorizontally)
+            )
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = FocusColors.TextSecondary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Master Toggle Card
-            Row(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(FocusColors.Surface)
-                    .border(
-                        1.dp,
-                        if (uiState.isMasterEnabled) FocusColors.AmberOrange.copy(alpha = 0.4f) else FocusColors.CardBorderSubtle,
-                        RoundedCornerShape(14.dp)
-                    )
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .weight(1f),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Real-time Notification Shield",
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                color = FocusColors.TextPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                // Header Title matching YouTube channels popup styling
+                item {
+                    Text(
+                        text = "Silence distracting app notifications\nduring your study",
+                        color = textPrimary,
+                        fontSize = 22.sp,
+                        lineHeight = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 18.dp)
+                    )
+                }
+
+                // Permission Warning Banner with Stone-colored Grant button
+                if (!uiState.isPermissionGranted) {
+                    item {
+                        StonePermissionBanner(
+                            isDark = isDark,
+                            onRequestPermission = onRequestPermission,
+                            modifier = Modifier.padding(bottom = 16.dp)
                         )
-                        if (uiState.isMasterEnabled) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = FocusColors.EmeraldSuccess.copy(alpha = 0.15f)
+                    }
+                }
+
+                // Master Shield Toggle Card
+                item {
+                    MasterShieldCard(
+                        isDark = isDark,
+                        isMasterEnabled = uiState.isMasterEnabled,
+                        isSessionActive = uiState.isSessionActive,
+                        blockedAppsCount = uiState.blockedPackages.size,
+                        onToggle = { viewModel.toggleMaster(it) },
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                }
+
+                // Tab Selector: Blocked Apps vs Silenced Vault
+                item {
+                    NotificationTabSelector(
+                        selectedTab = selectedTab,
+                        vaultCount = uiState.silencedVault.size,
+                        blockedAppsCount = uiState.blockedPackages.size,
+                        isDark = isDark,
+                        onTabSelect = { selectedTab = it },
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                }
+
+                if (selectedTab == 0) {
+                    // Search bar matching YouTube popup
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9))
+                                .border(1.dp, if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "ACTIVE",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = FocusColors.EmeraldSuccess,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 9.sp
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = "Search",
+                                    tint = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(20.dp)
                                 )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (searchQuery.isEmpty()) {
+                                        Text(
+                                            text = "Search apps to silence (e.g. WhatsApp, Insta)",
+                                            color = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8),
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    BasicTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(
+                                            color = textPrimary,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Normal
+                                        ),
+                                        cursorBrush = SolidColor(textPrimary),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("notification_app_search_field")
+                                    )
+                                }
+                                if (searchQuery.isNotEmpty()) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear",
+                                        tint = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clickable { searchQuery = "" }
+                                    )
+                                }
                             }
                         }
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
-                    Text(
-                        text = if (uiState.isMasterEnabled) {
-                            "Silences banners, rings, and popups from selected apps"
-                        } else {
-                            "Shield paused (Turn ON to silence alerts)"
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = if (uiState.isMasterEnabled) FocusColors.TextSecondary else FocusColors.TextMuted,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
 
-                Switch(
-                    checked = uiState.isMasterEnabled,
-                    onCheckedChange = { viewModel.toggleMaster(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = FocusColors.AmberOrange,
-                        uncheckedThumbColor = FocusColors.TextSecondary,
-                        uncheckedTrackColor = FocusColors.SurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("notification_blocker_master_switch")
-                )
-            }
-
-            // Permission Warning Banner (if not granted)
-            if (!uiState.isPermissionGranted) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(FocusColors.CoralWarning.copy(alpha = 0.12f))
-                        .border(1.dp, FocusColors.CoralWarning.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Security,
-                        contentDescription = null,
-                        tint = FocusColors.CoralWarning,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Notification Access Required",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = FocusColors.TextPrimary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
-                        )
-                        Text(
-                            text = "Enable listener access so FocusShield can intercept and cancel distracting alerts.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = onRequestPermission,
-                        colors = ButtonDefaults.buttonColors(containerColor = FocusColors.CoralWarning),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text("Grant", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Tab Navigation: Apps & Rules vs Silenced Vault
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color.Transparent,
-                contentColor = FocusColors.AmberOrange,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = FocusColors.AmberOrange,
-                        height = 3.dp
-                    )
-                },
-                divider = {}
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = {
-                        Text(
-                            text = "Apps & Modes (${uiState.blockedPackages.size})",
-                            fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedTab == 0) FocusColors.TextPrimary else FocusColors.TextSecondary,
-                            fontSize = 13.sp
-                        )
-                    }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Silenced Vault",
-                                fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedTab == 1) FocusColors.TextPrimary else FocusColors.TextSecondary,
-                                fontSize = 13.sp
-                            )
-                            if (uiState.silencedVault.isNotEmpty()) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = CircleShape,
-                                    color = FocusColors.AmberOrange
-                                ) {
-                                    Text(
-                                        text = "${uiState.silencedVault.size}",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = Color.Black,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 10.sp
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                    // Preset Quick Action Chips
+                    item {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp)
+                        ) {
+                            item {
+                                QuickPresetChip(
+                                    label = "Silence All (${uiState.installedApps.size})",
+                                    icon = Icons.Rounded.Shield,
+                                    isDark = isDark,
+                                    onClick = {
+                                        val all = uiState.installedApps.map { it.packageName }.toSet()
+                                        viewModel.setAllAppsBlocked(all)
+                                    }
+                                )
+                            }
+                            item {
+                                QuickPresetChip(
+                                    label = "Social & Messaging",
+                                    icon = Icons.Rounded.Apps,
+                                    isDark = isDark,
+                                    onClick = {
+                                        val socialKeywords = listOf("whatsapp", "instagram", "facebook", "snapchat", "telegram", "tiktok", "twitter", "x.corp", "reddit", "threads", "discord")
+                                        val social = uiState.installedApps.filter { app ->
+                                            socialKeywords.any { kw -> app.packageName.contains(kw, ignoreCase = true) || app.appName.contains(kw, ignoreCase = true) }
+                                        }.map { it.packageName }.toSet()
+                                        viewModel.setAllAppsBlocked(uiState.blockedPackages + social)
+                                    }
+                                )
+                            }
+                            item {
+                                QuickPresetChip(
+                                    label = "Entertainment & Games",
+                                    icon = Icons.Rounded.NotificationsOff,
+                                    isDark = isDark,
+                                    onClick = {
+                                        val entKeywords = listOf("youtube", "netflix", "prime", "twitch", "game", "spotify", "disney", "hotstar")
+                                        val ent = uiState.installedApps.filter { app ->
+                                            entKeywords.any { kw -> app.packageName.contains(kw, ignoreCase = true) || app.appName.contains(kw, ignoreCase = true) }
+                                        }.map { it.packageName }.toSet()
+                                        viewModel.setAllAppsBlocked(uiState.blockedPackages + ent)
+                                    }
+                                )
+                            }
+                            if (uiState.blockedPackages.isNotEmpty()) {
+                                item {
+                                    QuickPresetChip(
+                                        label = "Clear All",
+                                        icon = Icons.Rounded.Close,
+                                        isDark = isDark,
+                                        isDestructive = true,
+                                        onClick = { viewModel.setAllAppsBlocked(emptySet()) }
                                     )
                                 }
                             }
                         }
                     }
-                )
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (selectedTab == 0) {
-                // TAB 0: APPS & BLOCKING MODES
-                AppsAndModesTabContent(
-                    uiState = uiState,
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { searchQuery = it },
-                    filteredApps = filteredApps,
-                    onToggleApp = { pkg, blocked -> viewModel.toggleApp(pkg, blocked) },
-                    onToggleAlwaysSilent = { pkg, always -> viewModel.toggleAlwaysSilent(pkg, always) },
-                    onSelectPreset = { pkgs -> viewModel.setAllAppsBlocked(pkgs) },
-                    onSetMode = { mode -> viewModel.setBlockMode(mode) },
-                    onTestSimulate = { viewModel.simulateTestNotification() }
-                )
-            } else {
-                // TAB 1: SILENCED NOTIFICATION VAULT
-                SilencedVaultTabContent(
-                    vaultItems = uiState.silencedVault,
-                    onClearVault = { viewModel.clearVault() },
-                    onDeleteItem = { id -> viewModel.deleteVaultItem(id) },
-                    onTestSimulate = { viewModel.simulateTestNotification() }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppsAndModesTabContent(
-    uiState: com.example.feature.notificationblocker.ui.NotificationBlockerUiState,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    filteredApps: List<InstalledAppItem>,
-    onToggleApp: (String, Boolean) -> Unit,
-    onToggleAlwaysSilent: (String, Boolean) -> Unit,
-    onSelectPreset: (Set<String>) -> Unit,
-    onSetMode: (NotificationBlockMode) -> Unit,
-    onTestSimulate: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Mode Selector: Session Only vs Always Silent
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(FocusColors.SurfaceSubtle)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            ModeButton(
-                title = "⚡ In Focus Sessions",
-                subtitle = "Silent during study; normal outside",
-                isSelected = uiState.blockMode == NotificationBlockMode.SESSION_ONLY,
-                onClick = { onSetMode(NotificationBlockMode.SESSION_ONLY) },
-                modifier = Modifier.weight(1f)
-            )
-            ModeButton(
-                title = "🔒 Always Silent",
-                subtitle = "Silenced 24/7 continuously",
-                isSelected = uiState.blockMode == NotificationBlockMode.ALWAYS_SILENT,
-                onClick = { onSetMode(NotificationBlockMode.ALWAYS_SILENT) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Preset Chips Row
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            item {
-                PresetChip(
-                    label = "Silence All (${uiState.installedApps.size})",
-                    icon = Icons.Rounded.Shield,
-                    onClick = {
-                        val all = uiState.installedApps.map { it.packageName }.toSet()
-                        onSelectPreset(all)
+                    // Section Title
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "Search Results" else "Installed Apps",
+                                color = textPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${uiState.blockedPackages.size} silenced",
+                                color = textSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
-                )
-            }
-            item {
-                PresetChip(
-                    label = "Social Media",
-                    icon = Icons.Rounded.Apps,
-                    onClick = {
-                        val socialKeywords = listOf("instagram", "facebook", "snapchat", "tiktok", "twitter", "x.corp", "reddit", "threads")
-                        val social = uiState.installedApps.filter { app ->
-                            socialKeywords.any { kw -> app.packageName.contains(kw, ignoreCase = true) || app.appName.contains(kw, ignoreCase = true) }
-                        }.map { it.packageName }.toSet()
-                        onSelectPreset(uiState.blockedPackages + social)
-                    }
-                )
-            }
-            item {
-                PresetChip(
-                    label = "Entertainment & Games",
-                    icon = Icons.Rounded.NotificationsOff,
-                    onClick = {
-                        val entKeywords = listOf("youtube", "netflix", "prime", "twitch", "game", "spotify", "disney")
-                        val ent = uiState.installedApps.filter { app ->
-                            entKeywords.any { kw -> app.packageName.contains(kw, ignoreCase = true) || app.appName.contains(kw, ignoreCase = true) }
-                        }.map { it.packageName }.toSet()
-                        onSelectPreset(uiState.blockedPackages + ent)
-                    }
-                )
-            }
-            if (uiState.blockedPackages.isNotEmpty()) {
-                item {
-                    PresetChip(
-                        label = "Clear All",
-                        icon = Icons.Rounded.Close,
-                        isDestructive = true,
-                        onClick = { onSelectPreset(emptySet()) }
-                    )
-                }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Search Bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange,
-            placeholder = {
-                Text("Search installed phone apps...", color = FocusColors.TextMuted, fontSize = 13.sp)
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = "Search",
-                    tint = FocusColors.TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Clear",
-                            tint = FocusColors.TextSecondary,
-                            modifier = Modifier.size(16.dp)
+                    if (uiState.isLoadingApps) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.5.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Scanning installed device apps...",
+                                        color = textSecondary,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    } else if (filteredApps.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (searchQuery.isNotEmpty()) "No apps matching \"$searchQuery\"" else "No installed apps found",
+                                    color = textSecondary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    } else {
+                        items(filteredApps, key = { it.packageName }) { appItem ->
+                            val isChecked = uiState.blockedPackages.contains(appItem.packageName)
+                            ThemedAppBlockCard(
+                                appItem = appItem,
+                                isBlocked = isChecked,
+                                isDark = isDark,
+                                onToggle = {
+                                    viewModel.toggleApp(appItem.packageName, !isChecked)
+                                },
+                                modifier = Modifier.padding(bottom = 10.dp)
+                            )
+                        }
+                    }
+                } else {
+                    // TAB 1: SILENCED VAULT
+                    item {
+                        SilencedVaultHeaderRow(
+                            vaultCount = uiState.silencedVault.size,
+                            isDark = isDark,
+                            onClearVault = { viewModel.clearVault() },
+                            onTestSimulate = { viewModel.simulateTestNotification() },
+                            modifier = Modifier.padding(bottom = 14.dp)
                         )
                     }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = FocusColors.AmberOrange,
-                unfocusedBorderColor = FocusColors.CardBorderSubtle,
-                focusedContainerColor = FocusColors.Surface,
-                unfocusedContainerColor = FocusColors.Surface,
-                focusedTextColor = FocusColors.TextPrimary,
-                unfocusedTextColor = FocusColors.TextPrimary
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 2.dp)
-        )
 
-        // App List
-        if (uiState.isLoadingApps) {
-            Box(
+                    if (uiState.silencedVault.isEmpty()) {
+                        item {
+                            EmptySilencedVaultCard(
+                                isDark = isDark,
+                                onTestSimulate = { viewModel.simulateTestNotification() },
+                                modifier = Modifier.padding(vertical = 20.dp)
+                            )
+                        }
+                    } else {
+                        items(uiState.silencedVault, key = { it.id }) { record ->
+                            // Find corresponding installed app item for real logo
+                            val installed = uiState.installedApps.find { it.packageName == record.packageName }
+                            ThemedSilencedVaultItemCard(
+                                record = record,
+                                installedApp = installed,
+                                isDark = isDark,
+                                onDelete = { viewModel.deleteVaultItem(record.id) },
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom "Done" button matching YouTube popup
+            Surface(
+                color = sheetBg,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
+                    .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = FocusColors.AmberOrange,
-                        modifier = Modifier.size(32.dp),
-                        strokeWidth = 3.dp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = handleDismiss,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = doneBtnBg,
+                        contentColor = doneBtnText
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .testTag("done_notification_blocker_button")
+                ) {
                     Text(
-                        text = "Scanning installed apps on your device...",
-                        style = MaterialTheme.typography.bodySmall.copy(color = FocusColors.TextSecondary)
-                    )
-                }
-            }
-        } else if (filteredApps.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (searchQuery.isNotEmpty()) "No apps matching \"$searchQuery\"" else "No installed apps found",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextMuted)
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(filteredApps, key = { it.packageName }) { appItem ->
-                    val isChecked = uiState.blockedPackages.contains(appItem.packageName)
-                    val isAlwaysSilent = uiState.alwaysBlockedPackages.contains(appItem.packageName)
-
-                    AppNotificationRowItem(
-                        appItem = appItem,
-                        isChecked = isChecked,
-                        isAlwaysSilent = isAlwaysSilent,
-                        blockMode = uiState.blockMode,
-                        onToggle = { onToggleApp(appItem.packageName, !isChecked) },
-                        onToggleAlwaysSilent = { onToggleAlwaysSilent(appItem.packageName, !isAlwaysSilent) }
+                        text = "Done",
+                        color = doneBtnText,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
                     )
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
     }
 }
 
+/**
+ * Permission request banner with Stone-like colored button matching user styling request.
+ */
 @Composable
-private fun AppNotificationRowItem(
-    appItem: InstalledAppItem,
-    isChecked: Boolean,
-    isAlwaysSilent: Boolean,
-    blockMode: NotificationBlockMode,
-    onToggle: () -> Unit,
-    onToggleAlwaysSilent: () -> Unit
+private fun StonePermissionBanner(
+    isDark: Boolean,
+    onRequestPermission: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val borderColor by animateColorAsState(
-        if (isChecked || isAlwaysSilent) FocusColors.AmberOrange.copy(alpha = 0.4f) else FocusColors.CardBorderSubtle,
-        label = "border"
-    )
+    val bannerBg = if (isDark) Color(0xFF1E2124) else Color(0xFFF1F5F9)
+    val bannerBorder = if (isDark) Color(0xFF33383F) else Color(0xFFCBD5E1)
+    val stoneBtnBg = if (isDark) Color(0xFF475569) else Color(0xFF64748B) // Stone slate tone
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = if (isChecked || isAlwaysSilent) FocusColors.SurfaceVariant else FocusColors.Surface,
-        border = BorderStroke(1.dp, borderColor),
-        modifier = Modifier
+    Box(
+        modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bannerBg)
+            .sheetDashedBorder(
+                strokeWidth = 1.2.dp,
+                color = bannerBorder,
+                cornerRadius = 16.dp,
+                dashLength = 7.dp,
+                gapLength = 5.dp
+            )
+            .padding(14.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(stoneBtnBg.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Security,
+                    contentDescription = "Permission Required",
+                    tint = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Notification Access Required",
+                    color = textPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Allow FocusShield to intercept distracting alerts during sessions.",
+                    color = textSecondary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Stone-like styled button
+            Button(
+                onClick = onRequestPermission,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = stoneBtnBg,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+            ) {
+                Text(
+                    text = "Grant",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Master real-time notification shield card with dashed border styling.
+ */
+@Composable
+private fun MasterShieldCard(
+    isDark: Boolean,
+    isMasterEnabled: Boolean,
+    isSessionActive: Boolean,
+    blockedAppsCount: Int,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
+    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
+            .sheetDashedBorder(
+                strokeWidth = 1.2.dp,
+                color = dashedBorderColor,
+                cornerRadius = 16.dp,
+                dashLength = 7.dp,
+                gapLength = 5.dp
+            )
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -646,24 +668,19 @@ private fun AppNotificationRowItem(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                // App Icon
-                if (appItem.icon != null) {
-                    val bitmap = remember(appItem.packageName) {
-                        try { appItem.icon.toBitmap(80, 80).asImageBitmap() } catch (e: Exception) { null }
-                    }
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = appItem.appName,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    } else {
-                        DefaultAppIcon(isChecked = isChecked)
-                    }
-                } else {
-                    DefaultAppIcon(isChecked = isChecked)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(if (isMasterEnabled) (if (isDark) Color(0xFF1E3A2F) else Color(0xFFDCFCE7)) else (if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isMasterEnabled) Icons.Rounded.NotificationsOff else Icons.Rounded.Notifications,
+                        contentDescription = null,
+                        tint = if (isMasterEnabled) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -671,413 +688,670 @@ private fun AppNotificationRowItem(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = appItem.appName,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = FocusColors.TextPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "Notification Shield Engine",
+                            color = textPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        if (isAlwaysSilent) {
+                        if (isMasterEnabled) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = FocusColors.Primary.copy(alpha = 0.15f)
+                                color = if (isDark) Color(0xFF1E3A2F) else Color(0xFFDCFCE7)
                             ) {
                                 Text(
-                                    text = "24/7 SILENT",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = FocusColors.Primary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 8.sp
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    text = if (isSessionActive) "SESSION ACTIVE" else "ACTIVE",
+                                    color = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                 )
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (isAlwaysSilent) {
-                            "Silenced always (24/7)"
-                        } else if (isChecked) {
-                            if (blockMode == NotificationBlockMode.SESSION_ONLY) "Silenced during focus sessions" else "Silenced always"
+                        text = if (isMasterEnabled) {
+                            "$blockedAppsCount apps selected to stay silent"
                         } else {
-                            "Allowed (ring & notify normally)"
+                            "Shield paused (Turn ON to silence alerts)"
                         },
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = if (isChecked || isAlwaysSilent) FocusColors.AmberOrange else FocusColors.TextMuted,
-                            fontSize = 11.sp
-                        )
+                        color = textSecondary,
+                        fontSize = 12.sp
                     )
                 }
             }
 
             Switch(
-                checked = isChecked || isAlwaysSilent,
-                onCheckedChange = { onToggle() },
+                checked = isMasterEnabled,
+                onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.AmberOrange,
-                    uncheckedThumbColor = FocusColors.TextSecondary,
-                    uncheckedTrackColor = FocusColors.SurfaceVariant
-                )
+                    checkedTrackColor = if (isDark) Color(0xFF38A169) else Color(0xFF16A34A),
+                    uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
+                    uncheckedTrackColor = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
+                ),
+                modifier = Modifier.testTag("notification_blocker_master_switch")
             )
         }
     }
 }
 
+/**
+ * Tab switcher between Apps and Silenced Vault.
+ */
 @Composable
-private fun DefaultAppIcon(isChecked: Boolean) {
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.05f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.Apps,
-            contentDescription = null,
-            tint = if (isChecked) FocusColors.AmberOrange else FocusColors.TextSecondary,
-            modifier = Modifier.size(20.dp)
-        )
-    }
-}
-
-@Composable
-private fun ModeButton(
-    title: String,
-    subtitle: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
+private fun NotificationTabSelector(
+    selectedTab: Int,
+    vaultCount: Int,
+    blockedAppsCount: Int,
+    isDark: Boolean,
+    onTabSelect: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (isSelected) FocusColors.AmberOrange.copy(alpha = 0.15f) else Color.Transparent,
-        border = BorderStroke(
-            1.dp,
-            if (isSelected) FocusColors.AmberOrange else Color.Transparent
-        ),
-        modifier = modifier.clickable(onClick = onClick)
+    val tabBg = if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
+    val activeBg = if (isDark) Color.White else Color(0xFF0F172A)
+    val activeText = if (isDark) Color.Black else Color.White
+    val inactiveText = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(50))
+            .background(tabBg)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.Start
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSelected) FocusColors.AmberOrange else FocusColors.TextPrimary,
-                    fontSize = 12.sp
-                )
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    color = if (isSelected) FocusColors.TextPrimary else FocusColors.TextMuted,
-                    fontSize = 9.sp
+        // Tab 0: Apps
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(50))
+                .background(if (selectedTab == 0) activeBg else Color.Transparent)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { onTabSelect(0) }
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun PresetChip(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    isDestructive: Boolean = false
-) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = if (isDestructive) FocusColors.BlockedRed.copy(alpha = 0.12f) else FocusColors.Surface,
-        border = BorderStroke(
-            1.dp,
-            if (isDestructive) FocusColors.BlockedRed.copy(alpha = 0.3f) else FocusColors.CardBorderSubtle
-        ),
-        modifier = Modifier.clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isDestructive) FocusColors.BlockedRed else FocusColors.AmberOrange,
-                modifier = Modifier.size(13.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    color = if (isDestructive) FocusColors.BlockedRed else FocusColors.TextPrimary,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 11.sp
-                )
+                text = "Blocked Apps ($blockedAppsCount)",
+                color = if (selectedTab == 0) activeText else inactiveText,
+                fontSize = 13.sp,
+                fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Medium
             )
         }
-    }
-}
 
-@Composable
-private fun SilencedVaultTabContent(
-    vaultItems: List<SilencedNotificationRecord>,
-    onClearVault: () -> Unit,
-    onDeleteItem: (String) -> Unit,
-    onTestSimulate: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Top action bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Tab 1: Silenced Vault
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(50))
+                .background(if (selectedTab == 1) activeBg else Color.Transparent)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { onTabSelect(1) }
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Silenced Notification Vault",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 15.sp
-                    )
+                    text = "Silenced Vault",
+                    color = if (selectedTab == 1) activeText else inactiveText,
+                    fontSize = 13.sp,
+                    fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Medium
                 )
-                Text(
-                    text = "Review all notifications intercepted during focus sessions",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 11.sp
-                    )
-                )
-            }
-
-            if (vaultItems.isNotEmpty()) {
-                TextButton(onClick = onClearVault) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = "Clear Vault",
-                        tint = FocusColors.BlockedRed,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Clear Vault",
-                        color = FocusColors.BlockedRed,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (vaultItems.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(24.dp)
-                ) {
+                if (vaultCount > 0) {
+                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
+                            .size(18.dp)
                             .clip(CircleShape)
-                            .background(FocusColors.AmberOrange.copy(alpha = 0.1f)),
+                            .background(if (selectedTab == 1) (if (isDark) Color.Black else Color.White) else (if (isDark) Color.White else Color(0xFF0F172A))),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.NotificationsOff,
-                            contentDescription = null,
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "No Silenced Notifications Yet",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "When you start a Focus Session, incoming notifications from selected distracting apps will be safely caught and logged here without interrupting your study flow.",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            lineHeight = 16.sp
-                        ),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    OutlinedButton(
-                        onClick = onTestSimulate,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, FocusColors.AmberOrange.copy(alpha = 0.5f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FlashOn,
-                            contentDescription = null,
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Test Simulate Interception",
-                            color = FocusColors.AmberOrange,
-                            fontSize = 12.sp,
+                            text = "$vaultCount",
+                            color = if (selectedTab == 1) (if (isDark) Color.White else Color(0xFF0F172A)) else (if (isDark) Color.Black else Color.White),
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(vaultItems, key = { it.id }) { item ->
-                    SilencedItemCard(item = item, onDelete = { onDeleteItem(item.id) })
-                }
-            }
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
     }
 }
 
+/**
+ * Individual App card in the "Blocked Apps" tab styled like YouTube channel cards with dashed borders and Add/Blocked buttons.
+ */
 @Composable
-private fun SilencedItemCard(
-    item: SilencedNotificationRecord,
-    onDelete: () -> Unit
+private fun ThemedAppBlockCard(
+    appItem: InstalledAppItem,
+    isBlocked: Boolean,
+    isDark: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    val formattedTime = remember(item.timestamp) { timeFormat.format(Date(item.timestamp)) }
+    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
+    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
 
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = FocusColors.Surface,
-        border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
-        modifier = Modifier.fillMaxWidth()
+    val addBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
+    val addBtnText = if (isDark) Color.Black else Color.White
+    val addedBtnBg = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
+    val addedBtnText = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
+            .sheetDashedBorder(
+                strokeWidth = 1.2.dp,
+                color = dashedBorderColor,
+                cornerRadius = 16.dp,
+                dashLength = 7.dp,
+                gapLength = 5.dp
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
+            // App Logo
+            if (appItem.icon != null) {
+                val bitmap = remember(appItem.packageName) {
+                    try { appItem.icon.toBitmap(80, 80).asImageBitmap() } catch (e: Exception) { null }
+                }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = appItem.appName,
                         modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(FocusColors.AmberOrange.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.NotificationsOff,
-                            contentDescription = null,
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = item.appName,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 13.sp
-                        )
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(10.dp))
                     )
-                    if (item.wasDuringSession) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = FocusColors.AmberOrange.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = "STUDY SESSION",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusColors.AmberOrange,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 8.sp
-                                ),
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
+                } else {
+                    DefaultAppLogoFallback(appName = appItem.appName, isDark = isDark)
                 }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = formattedTime,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextMuted,
-                            fontSize = 11.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Dismiss",
-                            tint = FocusColors.TextSecondary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
+            } else {
+                DefaultAppLogoFallback(appName = appItem.appName, isDark = isDark)
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.width(14.dp))
 
-            if (item.title.isNotBlank()) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = FocusColors.TextPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp
-                    ),
+                    text = appItem.appName,
+                    color = textPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = if (isBlocked) "Notifications will be silenced" else "Notifications allowed",
+                    color = if (isBlocked) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            if (item.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+
+            if (!isBlocked) {
+                // "Silence" / "Add" button matching YouTube sheet Add button
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(addBtnBg)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onToggle
+                        )
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Silence",
+                            color = addBtnText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = "Silence app",
+                            tint = addBtnText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            } else {
+                // "Silenced" check button matching YouTube sheet Added button
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(addedBtnBg)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onToggle
+                        )
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Silenced",
+                            color = addedBtnText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = "Silenced",
+                            tint = addedBtnText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Silenced Notification item in Vault with the blocked app logo, sender name visibility (e.g. Alex Rivera for WhatsApp), message text, and dismiss action.
+ */
+@Composable
+private fun ThemedSilencedVaultItemCard(
+    record: SilencedNotificationRecord,
+    installedApp: InstalledAppItem?,
+    isDark: Boolean,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
+    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+
+    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val formattedTime = remember(record.timestamp) { timeFormat.format(Date(record.timestamp)) }
+
+    // Sender name display logic: prioritize senderName, fallback to title if non-empty
+    val displaySender = record.senderName ?: record.title
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
+            .sheetDashedBorder(
+                strokeWidth = 1.2.dp,
+                color = dashedBorderColor,
+                cornerRadius = 16.dp,
+                dashLength = 7.dp,
+                gapLength = 5.dp
+            )
+            .padding(14.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Header with App Logo, App Name, Sender/Channel badge, and time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // Blocked App Logo
+                    if (installedApp?.icon != null) {
+                        val bitmap = remember(installedApp.packageName) {
+                            try { installedApp.icon.toBitmap(72, 72).asImageBitmap() } catch (e: Exception) { null }
+                        }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = record.appName,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                        } else {
+                            DefaultAppLogoFallback(appName = record.appName, isDark = isDark, size = 36.dp)
+                        }
+                    } else {
+                        DefaultAppLogoFallback(appName = record.appName, isDark = isDark, size = 36.dp)
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = record.appName,
+                                color = textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
+                            ) {
+                                Text(
+                                    text = "SILENCED",
+                                    color = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B),
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = formattedTime,
+                            color = textSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Dismiss from vault",
+                        tint = textSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Sender Name Row with Person icon (e.g. WhatsApp sender name)
+            if (!displaySender.isNullOrBlank() && displaySender != record.appName) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        tint = if (isDark) Color(0xFFA78BFA) else Color(0xFF7C3AED),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Sender: $displaySender",
+                        color = textPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Message text content
+            if (record.text.isNotBlank()) {
                 Text(
-                    text = item.text,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    ),
-                    maxLines = 2,
+                    text = record.text,
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+/**
+ * Vault header with Delete All / Test Simulate actions.
+ */
+@Composable
+private fun SilencedVaultHeaderRow(
+    vaultCount: Int,
+    isDark: Boolean,
+    onClearVault: () -> Unit,
+    onTestSimulate: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            Text(
+                text = "Silenced Notification Vault",
+                color = textPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Interceptions preserved quietly while studying",
+                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
+                fontSize = 12.sp
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (vaultCount > 0) {
+                Text(
+                    text = "Clear all",
+                    color = Color(0xFFFF6D2C),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(onClick = onClearVault)
+                )
+            } else {
+                Text(
+                    text = "Test sample",
+                    color = if (isDark) Color(0xFFA78BFA) else Color(0xFF7C3AED),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(onClick = onTestSimulate)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Empty state for Silenced Vault.
+ */
+@Composable
+private fun EmptySilencedVaultCard(
+    isDark: Boolean,
+    onTestSimulate: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
+    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
+            .sheetDashedBorder(
+                strokeWidth = 1.2.dp,
+                color = dashedBorderColor,
+                cornerRadius = 16.dp,
+                dashLength = 7.dp,
+                gapLength = 5.dp
+            )
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFE2E8F0)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.NotificationsOff,
+                    contentDescription = null,
+                    tint = if (isDark) Color.White else Color(0xFF0F172A),
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = "No Silenced Notifications Yet",
+                color = textPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "When you start a Focus Session, incoming notifications from selected apps will be caught and displayed with their logo and sender here.",
+                color = textSecondary,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onTestSimulate,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isDark) Color.White else Color(0xFF0F172A),
+                    contentColor = if (isDark) Color.Black else Color.White
+                ),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.FlashOn,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Test WhatsApp Interception",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Fallback app logo container when drawable isn't available.
+ */
+@Composable
+private fun DefaultAppLogoFallback(
+    appName: String,
+    isDark: Boolean,
+    size: Dp = 46.dp
+) {
+    val initial = appName.firstOrNull()?.uppercase() ?: "A"
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = initial,
+            color = if (isDark) Color.White else Color(0xFF0F172A),
+            fontSize = (size.value * 0.42f).sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/**
+ * Quick action preset chip.
+ */
+@Composable
+private fun QuickPresetChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    isDestructive: Boolean = false
+) {
+    val bg = if (isDestructive) {
+        Color(0xFFEF4444).copy(alpha = 0.12f)
+    } else {
+        if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
+    }
+    val border = if (isDestructive) {
+        Color(0xFFEF4444).copy(alpha = 0.3f)
+    } else {
+        if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
+    }
+    val textColor = if (isDestructive) {
+        Color(0xFFEF4444)
+    } else {
+        if (isDark) Color.White else Color(0xFF0F172A)
+    }
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = textColor,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = label,
+                color = textColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

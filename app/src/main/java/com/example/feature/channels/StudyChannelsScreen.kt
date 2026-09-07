@@ -196,18 +196,19 @@ fun StudyChannelsScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Info Card explaining Study Mode
+            val isDark = com.example.core.design.LocalFocusColors.current.isDark
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(FocusShapes.medium)
-                    .background(Color(0xFFEDE9FE))
+                    .background(if (isDark) Color(0xFF1E1B4B) else Color(0xFFEDE9FE))
                     .padding(14.dp)
             ) {
                 Row(verticalAlignment = Alignment.Top) {
                     Icon(
                         imageVector = Icons.Rounded.Shield,
                         contentDescription = null,
-                        tint = FocusColors.Primary,
+                        tint = if (isDark) Color(0xFFA78BFA) else FocusColors.Primary,
                         modifier = Modifier
                             .size(20.dp)
                             .padding(top = 2.dp)
@@ -218,14 +219,14 @@ fun StudyChannelsScreen(
                             text = "Focus Protection Rule",
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = FocusColors.Primary
+                                color = if (isDark) Color(0xFFDDD6FE) else FocusColors.Primary
                             )
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Only approved channels play during Focus Sessions. YouTube Shorts are strictly blocked at all times.",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color(0xFF4C1D95),
+                                color = if (isDark) Color(0xFFC4B5FD) else Color(0xFF4C1D95),
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp
                             )

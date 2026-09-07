@@ -150,6 +150,38 @@ class AppLimitRepository(
         }
     }
 
+    /**
+     * Synchronizes usage with actual system usage if the system usage is higher than DB.
+     */
+    suspend fun syncSystemUsage(
+        packageName: String,
+        appName: String,
+        systemUsageMillis: Long,
+        dateString: String = getTodayDateString()
+    ) {
+        if (systemUsageMillis <= 0L) return
+        val existing = dailyAppUsageDao.getUsage(packageName, dateString)
+        if (existing == null) {
+            val newRecord = DailyAppUsageEntity(
+                packageName = packageName,
+                dateString = dateString,
+                appName = appName,
+                usedMillis = systemUsageMillis,
+                emergencyUsedMillis = 0L,
+                emergencyUsesCount = 0,
+                isBypassedForToday = false,
+                lastActiveTimestamp = System.currentTimeMillis()
+            )
+            dailyAppUsageDao.insertOrUpdate(newRecord)
+        } else if (existing.usedMillis < systemUsageMillis) {
+            val updated = existing.copy(
+                usedMillis = systemUsageMillis,
+                lastActiveTimestamp = System.currentTimeMillis()
+            )
+            dailyAppUsageDao.insertOrUpdate(updated)
+        }
+    }
+
     suspend fun setEmergencyUsesCount(packageName: String, dateString: String = getTodayDateString(), count: Int) {
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
         if (existing == null) {

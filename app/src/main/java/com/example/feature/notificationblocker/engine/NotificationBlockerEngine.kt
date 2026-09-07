@@ -179,7 +179,23 @@ class NotificationBlockerEngine private constructor(
                 ?: extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
                 ?: ""
 
+            val conversationTitle = extras?.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
+            val senderPerson = extras?.getCharSequence("android.messagingUser")?.toString()
+                ?: extras?.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()
+
             val appName = getAppName(rawPkg)
+
+            // For messaging apps like WhatsApp, Telegram, Signal, Messages: title is usually sender name or group name
+            val senderName = when {
+                !conversationTitle.isNullOrBlank() -> conversationTitle
+                !senderPerson.isNullOrBlank() -> senderPerson
+                rawPkg.contains("whatsapp", ignoreCase = true) -> title.ifBlank { "WhatsApp Contact" }
+                rawPkg.contains("telegram", ignoreCase = true) -> title.ifBlank { "Telegram Contact" }
+                rawPkg.contains("messaging", ignoreCase = true) || rawPkg.contains("mms", ignoreCase = true) -> title.ifBlank { "Sender" }
+                rawPkg.contains("instagram", ignoreCase = true) -> title.ifBlank { "Instagram Direct" }
+                else -> if (title.isNotBlank() && title != appName) title else null
+            }
+
             val sessionActive = _isSessionActive.value
             val currentSession = sessionManager.activeSession.value
 
@@ -189,6 +205,7 @@ class NotificationBlockerEngine private constructor(
                 appName = appName,
                 title = title,
                 text = text,
+                senderName = senderName,
                 timestamp = System.currentTimeMillis(),
                 wasDuringSession = sessionActive,
                 sessionId = currentSession?.id
@@ -323,13 +340,19 @@ class NotificationBlockerEngine private constructor(
     /**
      * Simulates a test silenced notification to verify engine and vault UI.
      */
-    fun simulateTestNotification(packageName: String = "com.google.android.youtube", appName: String = "YouTube") {
+    fun simulateTestNotification(
+        packageName: String = "com.whatsapp",
+        appName: String = "WhatsApp",
+        senderName: String = "Alex Rivera",
+        messageText: String = "Hey, let's review the chapter notes together when you finish your study session!"
+    ) {
         val record = SilencedNotificationRecord(
             id = UUID.randomUUID().toString(),
             packageName = packageName,
             appName = appName,
-            title = "Trending: Focus Beats for Deep Study",
-            text = "Check out this top recommended study mix to stay productive!",
+            title = senderName,
+            text = messageText,
+            senderName = senderName,
             timestamp = System.currentTimeMillis(),
             wasDuringSession = _isSessionActive.value,
             sessionId = sessionManager.activeSession.value?.id

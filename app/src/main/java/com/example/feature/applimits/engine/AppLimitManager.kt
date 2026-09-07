@@ -3,6 +3,7 @@ package com.example.feature.applimits.engine
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.MediaPauseHelper
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.AppLimitSessionEntity
@@ -144,10 +145,20 @@ class AppLimitManager private constructor(
             return AppLimitDecision.ALLOW_ACTIVE_SESSION
         }
 
-        // Check remaining daily allowance
+        // Check remaining daily allowance from system usage stats and database
         val dailyLimitMinutes = limit.dailyLimitMinutes
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
-        val accumulatedUsed = usage?.usedMillis ?: 0L
+        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, packageName)
+        val dbUsage = usage?.usedMillis ?: 0L
+        val accumulatedUsed = maxOf(systemUsage, dbUsage)
+
+        // Asynchronously sync system usage to repository if higher
+        if (systemUsage > dbUsage) {
+            scope.launch {
+                appLimitRepository.syncSystemUsage(packageName, limit.appName, systemUsage, todayDate)
+            }
+        }
+
         val usedMinutes = kotlin.math.round(accumulatedUsed / 60000.0).toInt().coerceAtLeast(0)
         val remainingDailyMinutes = (dailyLimitMinutes - usedMinutes).coerceAtLeast(0)
         val remainingDailyMillis = (dailyLimitMillis - accumulatedUsed).coerceAtLeast(0L)
@@ -251,6 +262,7 @@ class AppLimitManager private constructor(
         val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
 
         // 1. Synchronously set active session in memory immediately so no window-change race condition occurs
+        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, packageName)
         val initialSession = ActiveAppUsageSession(
             packageName = packageName,
             appName = appName,
@@ -259,7 +271,7 @@ class AppLimitManager private constructor(
             elapsedMillis = 0L,
             isEmergency = isEmergency,
             dailyLimitMinutes = dailyLimitMinutes,
-            initialDailyUsedMillis = 0L,
+            initialDailyUsedMillis = systemUsage,
             isStrict = limit?.isStrictOverride ?: false,
             isPaused = false,
             totalPausedMillis = 0L,
@@ -270,11 +282,16 @@ class AppLimitManager private constructor(
         lastForegroundTimestamp = System.currentTimeMillis()
         startTicker()
 
-        // 2. Asynchronously sync precise daily usage remaining from database
+        // 2. Asynchronously sync precise daily usage remaining from database and system stats
         scope.launch {
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
-            val usedMillis = usage?.usedMillis ?: 0L
+            val dbUsedMillis = usage?.usedMillis ?: 0L
+            val usedMillis = maxOf(systemUsage, dbUsedMillis)
+
+            if (systemUsage > dbUsedMillis) {
+                appLimitRepository.syncSystemUsage(packageName, appName, systemUsage, todayDate)
+            }
 
             val dailyRemaining = (dailyLimitMinutes * 60 * 1000L - usedMillis).coerceAtLeast(0L)
             val actualDuration = if (isEmergency) durationMillis else minOf(durationMillis, dailyRemaining)
@@ -286,7 +303,7 @@ class AppLimitManager private constructor(
                     initialDailyUsedMillis = usedMillis
                 )
             }
-            Log.i(tag, "Started temporary usage session for $appName: $durationMinutes min ($durationMillis ms, isEmergency=$isEmergency)")
+            Log.i(tag, "Started temporary usage session for $appName: $durationMinutes min ($actualDuration ms, isEmergency=$isEmergency)")
         }
     }
 
@@ -396,11 +413,23 @@ class AppLimitManager private constructor(
             _activeSession.value = null
             stopTicker()
 
-            // Query updated total daily usage from database
+            // 1. Immediately minimize app to home and pause media
+            val service = com.example.core.accessibility.FocusAccessibilityService.instance
+            service?.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+            MediaPauseHelper.pauseMedia(appContext)
+
+            // 2. Query updated total daily usage from system and database
             val limit = appLimitRepository.getLimitByPackage(session.packageName)
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(session.packageName, todayDate)
-            val totalDailyUsedMillis = usage?.usedMillis ?: 0L
+            val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, session.packageName)
+            val dbUsage = usage?.usedMillis ?: 0L
+            val totalDailyUsedMillis = maxOf(systemUsage, dbUsage)
+
+            if (systemUsage > dbUsage) {
+                appLimitRepository.syncSystemUsage(session.packageName, session.appName, systemUsage, todayDate)
+            }
+
             val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
             val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
 
@@ -408,7 +437,7 @@ class AppLimitManager private constructor(
             val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
             val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
 
-            // Trigger overlay popup with mathematically consistent cumulative daily usage
+            // 3. Trigger overlay popup with forceLaunch
             launchOverlay(
                 packageName = session.packageName,
                 appName = session.appName,

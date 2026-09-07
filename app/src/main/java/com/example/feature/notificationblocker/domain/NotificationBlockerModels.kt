@@ -21,6 +21,7 @@ data class SilencedNotificationRecord(
     val appName: String,
     val title: String,
     val text: String,
+    val senderName: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val wasDuringSession: Boolean = false,
     val sessionId: String? = null

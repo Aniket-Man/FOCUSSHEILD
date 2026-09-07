@@ -51,6 +51,12 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                                 else -> SessionMode.TIMER
                             }
 
+                            val blockedAppsSet = schedule.blockedAppPackages
+                                .split(",")
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                                .toSet()
+
                             sessionManager.startSession(
                                 mode = sessionMode,
                                 subject = schedule.subjectName.ifBlank { schedule.title },
@@ -59,7 +65,10 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                                 plannedDurationMillis = durationMins * 60 * 1000L,
                                 isAppBlocking = true,
                                 isStrictMode = false,
-                                isStudyChannels = true
+                                isStudyChannels = true,
+                                blockedAppPackages = blockedAppsSet,
+                                blockNotifications = schedule.blockNotifications,
+                                defaultBreakMinutes = schedule.breakMinutes
                             )
 
                             FocusSessionForegroundService.start(context)

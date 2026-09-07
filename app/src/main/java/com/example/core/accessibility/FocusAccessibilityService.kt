@@ -60,6 +60,7 @@ class FocusAccessibilityService : AccessibilityService() {
     )
 
     private var currentPreferences = FocusPreferences()
+    private var lastAppLimitCheckTimestamp: Long = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -166,8 +167,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 }
                 lastForegroundPackage = rawPackageName
                 
-                if (!ProtectionPolicy.SAFE_SYSTEM_PACKAGES.contains(rawPackageName) &&
-                    !rawPackageName.startsWith("com.example") &&
+                if (!rawPackageName.startsWith("com.example") &&
                     !rawPackageName.startsWith("com.aistudio.focusshield") &&
                     rawPackageName != applicationContext.packageName
                 ) {
@@ -465,7 +465,7 @@ class FocusAccessibilityService : AccessibilityService() {
             }
 
             // 4. Timed App Limit System (Priority 3 - evaluated when no Focus Session is actively blocking the app)
-            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && appLimitManager != null) {
+            if (appLimitManager != null) {
                 val isYouTubePackage = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
                 val isBrowserPackage = com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
                 val protectionState = blockerManager?.getCurrentProtectionState(now)
@@ -480,54 +480,65 @@ class FocusAccessibilityService : AccessibilityService() {
                     !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
                     !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
                 ) {
-                    serviceScope.launch {
-                        when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
-                            is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
-                                Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName}")
-                                MediaPauseHelper.pauseMedia(applicationContext)
-                                if (isYouTubePackage) {
-                                    val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
-                                    clickPauseButtonInNodeTree(currentRoot)
-                                    try { currentRoot?.recycle() } catch (_: Exception) {}
+                    val isLimited = appLimitManager.isPackageLimited(rawPackageName)
+                    val isSessionActive = appLimitManager.isSessionActiveFor(rawPackageName)
+
+                    val shouldCheck = (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) ||
+                            (isLimited && !isSessionActive && (now - lastAppLimitCheckTimestamp > 800L))
+
+                    if (shouldCheck) {
+                        lastAppLimitCheckTimestamp = now
+                        serviceScope.launch {
+                            when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
+                                is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
+                                    Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName}")
+                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                    MediaPauseHelper.pauseMedia(applicationContext)
+                                    if (isYouTubePackage) {
+                                        val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
+                                        clickPauseButtonInNodeTree(currentRoot)
+                                        try { currentRoot?.recycle() } catch (_: Exception) {}
+                                    }
+                                    val usedMins = kotlin.math.round(appLimitDecision.usedDailyMillis / 60000.0).toInt().coerceAtLeast(0)
+                                    val remMins = (appLimitDecision.dailyLimitMinutes - usedMins).coerceAtLeast(0)
+                                    appLimitManager.launchOverlay(
+                                        packageName = appLimitDecision.packageName,
+                                        appName = appLimitDecision.appName,
+                                        mode = AppLimitOverlayMode.AWAITING_SELECTION,
+                                        usedMinutes = usedMins,
+                                        remainingDailyMinutes = remMins,
+                                        dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
+                                        emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
+                                        isStrict = appLimitDecision.isStrict,
+                                        streakDays = appLimitDecision.streakDays,
+                                        forceLaunch = true
+                                    )
                                 }
-                                // We launch the overlay directly on top.
-                                val usedMins = kotlin.math.round(appLimitDecision.usedDailyMillis / 60000.0).toInt().coerceAtLeast(0)
-                                val remMins = (appLimitDecision.dailyLimitMinutes - usedMins).coerceAtLeast(0)
-                                appLimitManager.launchOverlay(
-                                    packageName = appLimitDecision.packageName,
-                                    appName = appLimitDecision.appName,
-                                    mode = AppLimitOverlayMode.AWAITING_SELECTION,
-                                    usedMinutes = usedMins,
-                                    remainingDailyMinutes = remMins,
-                                    dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
-                                    emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
-                                    isStrict = appLimitDecision.isStrict,
-                                    streakDays = appLimitDecision.streakDays
-                                )
-                            }
-                            is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
-                                Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName}. Enforcing blocker.")
-                                MediaPauseHelper.pauseMedia(applicationContext)
-                                if (isYouTubePackage) {
-                                    val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
-                                    clickPauseButtonInNodeTree(currentRoot)
-                                    try { currentRoot?.recycle() } catch (_: Exception) {}
+                                is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
+                                    Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName}. Enforcing blocker.")
+                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                    MediaPauseHelper.pauseMedia(applicationContext)
+                                    if (isYouTubePackage) {
+                                        val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
+                                        clickPauseButtonInNodeTree(currentRoot)
+                                        try { currentRoot?.recycle() } catch (_: Exception) {}
+                                    }
+                                    appLimitManager.launchOverlay(
+                                        packageName = appLimitDecision.packageName,
+                                        appName = appLimitDecision.appName,
+                                        mode = AppLimitOverlayMode.DAILY_LIMIT_REACHED,
+                                        usedMinutes = appLimitDecision.dailyLimitMinutes,
+                                        remainingDailyMinutes = 0,
+                                        dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
+                                        emergencyUsesCount = appLimitDecision.emergencyUsesCount,
+                                        emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
+                                        isStrict = appLimitDecision.isStrict,
+                                        streakDays = appLimitDecision.streakDays,
+                                        forceLaunch = true
+                                    )
                                 }
-                                // We launch the overlay directly on top.
-                                appLimitManager.launchOverlay(
-                                    packageName = appLimitDecision.packageName,
-                                    appName = appLimitDecision.appName,
-                                    mode = AppLimitOverlayMode.DAILY_LIMIT_REACHED,
-                                    usedMinutes = appLimitDecision.dailyLimitMinutes,
-                                    remainingDailyMinutes = 0,
-                                    dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
-                                    emergencyUsesCount = appLimitDecision.emergencyUsesCount,
-                                    emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
-                                    isStrict = appLimitDecision.isStrict,
-                                    streakDays = appLimitDecision.streakDays
-                                )
+                                else -> {}
                             }
-                            else -> {}
                         }
                     }
                 }

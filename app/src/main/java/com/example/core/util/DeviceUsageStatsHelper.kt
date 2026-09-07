@@ -85,6 +85,93 @@ object DeviceUsageStatsHelper {
     }
 
     /**
+     * Queries foreground usage time today (from 00:00:00 to now) for a specific app package.
+     */
+    fun getTodayAppUsageMillis(context: Context, packageName: String): Long {
+        if (!hasUsageStatsPermission(context)) return 0L
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return 0L
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = calendar.timeInMillis
+        val now = System.currentTimeMillis()
+
+        try {
+            // 1. Query aggregated usage stats for today
+            val aggregated = usageStatsManager.queryAndAggregateUsageStats(startOfDay, now)
+            val stat = aggregated[packageName]
+            if (stat != null && stat.totalTimeInForeground > 0L) {
+                return stat.totalTimeInForeground
+            }
+
+            // 2. Query interval daily usage stats as fallback
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startOfDay,
+                now
+            )
+            val item = stats?.find { it.packageName == packageName }
+            if (item != null && item.totalTimeInForeground > 0L) {
+                return item.totalTimeInForeground
+            }
+        } catch (_: Exception) {
+        }
+
+        return 0L
+    }
+
+    /**
+     * Queries foreground usage time today (from 00:00:00 to now) for all apps.
+     */
+    fun getTodayAllAppsUsageMillis(context: Context): Map<String, Long> {
+        if (!hasUsageStatsPermission(context)) return emptyMap()
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return emptyMap()
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = calendar.timeInMillis
+        val now = System.currentTimeMillis()
+
+        val result = mutableMapOf<String, Long>()
+        try {
+            val aggregated = usageStatsManager.queryAndAggregateUsageStats(startOfDay, now)
+            if (!aggregated.isNullOrEmpty()) {
+                aggregated.forEach { (pkg, stat) ->
+                    if (stat.totalTimeInForeground > 0L) {
+                        result[pkg] = stat.totalTimeInForeground
+                    }
+                }
+                return result
+            }
+
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startOfDay,
+                now
+            )
+            if (!stats.isNullOrEmpty()) {
+                stats.forEach { stat ->
+                    if (stat.totalTimeInForeground > 0L) {
+                        result[stat.packageName] = maxOf(result[stat.packageName] ?: 0L, stat.totalTimeInForeground)
+                    }
+                }
+                return result
+            }
+        } catch (_: Exception) {
+        }
+
+        return result
+    }
+
+    /**
      * Formats milliseconds into human-readable duration (e.g., "3h 45m" or "42m").
      */
     fun formatDurationHoursMins(millis: Long): String {

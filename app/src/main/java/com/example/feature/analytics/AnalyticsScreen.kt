@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.design.FocusCardStyle
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -119,21 +121,17 @@ fun AnalyticsScreen(
     val context = LocalContext.current
     val shareScope = rememberCoroutineScope()
 
-    Scaffold(
-        bottomBar = {
-            FocusBottomNavigation(
-                selectedTab = BottomTab.STATS,
-                onTabSelected = onTabSelected
-            )
-        },
-        containerColor = FocusColors.Background,
-        modifier = modifier.testTag("analytics_screen")
-    ) { innerPadding ->
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(FocusColors.Background)
+            .testTag("analytics_screen")
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .statusBarsPadding(),
+            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
             // 1. Header Section
@@ -313,6 +311,12 @@ fun AnalyticsScreen(
                 }
             }
         }
+
+        FocusBottomNavigation(
+            selectedTab = BottomTab.STATS,
+            onTabSelected = onTabSelected,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     if (isGoalDialogOpen) {

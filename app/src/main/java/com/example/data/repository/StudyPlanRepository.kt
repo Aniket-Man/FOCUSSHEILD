@@ -230,9 +230,9 @@ class StudyPlanRepository(
                 ),
                 StudyPlanEntity(
                     id = "default-plan-2",
-                    subjectId = "chemistry",
-                    subjectName = "Chemistry",
-                    topicName = "Chemical Bonding",
+                    subjectId = "mathematics",
+                    subjectName = "Mathematics",
+                    topicName = "Differential Equations",
                     plannedDurationMinutes = 90,
                     targetDate = now,
                     dateString = dateStr,
@@ -243,41 +243,24 @@ class StudyPlanRepository(
                     isCompleted = false,
                     status = "PLANNED",
                     colorHex = "#F59E0B",
-                    notes = "VSEPR theory and hybridization"
+                    notes = "First-order differential equations and integrating factors"
                 ),
                 StudyPlanEntity(
                     id = "default-plan-3",
-                    subjectId = "mathematics",
-                    subjectName = "Mathematics",
-                    topicName = "Calculus",
-                    plannedDurationMinutes = 120,
+                    subjectId = "chemistry",
+                    subjectName = "Chemistry",
+                    topicName = "Chemical Bonding",
+                    plannedDurationMinutes = 180,
                     targetDate = now,
                     dateString = dateStr,
                     startTime = "16:00",
-                    endTime = "18:00",
+                    endTime = "19:00",
                     startMinutes = 960,
-                    endMinutes = 1080,
+                    endMinutes = 1140,
                     isCompleted = false,
                     status = "PLANNED",
-                    colorHex = "#22C55E",
-                    notes = "Definite integrals and area under curve"
-                ),
-                StudyPlanEntity(
-                    id = "default-plan-4",
-                    subjectId = "physics",
-                    subjectName = "Physics",
-                    topicName = "Current Electricity",
-                    plannedDurationMinutes = 60,
-                    targetDate = now,
-                    dateString = dateStr,
-                    startTime = "20:00",
-                    endTime = "21:00",
-                    startMinutes = 1200,
-                    endMinutes = 1260,
-                    isCompleted = false,
-                    status = "PLANNED",
-                    colorHex = "#7C3AED",
-                    notes = "Kirchhoff's laws revision"
+                    colorHex = "#10B981",
+                    notes = "VSEPR theory and hybridization"
                 )
             )
             studyPlanDao.insertAll(defaultPlans)

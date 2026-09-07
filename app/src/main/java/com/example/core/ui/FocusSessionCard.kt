@@ -45,7 +45,7 @@ import com.example.core.design.FocusSpacing
 fun FocusSessionCard(
     modifier: Modifier = Modifier,
     isActive: Boolean = true,
-    timeString: String = "01:25:30",
+    timeString: String = "00:00:00",
     subjectName: String = "Physics",
     subtitleText: String? = null,
     isPaused: Boolean = false,
@@ -53,112 +53,89 @@ fun FocusSessionCard(
     onCardClick: () -> Unit = {},
     onStartSessionClick: () -> Unit = {}
 ) {
+    val heroShape = RoundedCornerShape(26.dp)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .shadow(
                 elevation = 8.dp,
-                shape = FocusShapes.extraLarge,
-                ambientColor = FocusColors.Primary.copy(alpha = 0.25f),
-                spotColor = FocusColors.PrimaryDark.copy(alpha = 0.35f)
+                shape = heroShape,
+                ambientColor = Color(0xFF6B36F6).copy(alpha = 0.35f),
+                spotColor = Color(0xFF9E48FF).copy(alpha = 0.30f)
             )
-            .clip(FocusShapes.extraLarge)
+            .clip(heroShape)
             .background(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        FocusColors.GradientStart,
-                        FocusColors.PrimaryDark
+                        Color(0xFF6832F6),
+                        Color(0xFF8641F8),
+                        Color(0xFF9D49FF)
                     )
                 )
             )
             .clickable(onClick = onCardClick)
             .testTag("focus_session_card")
     ) {
-        // Decorative ambient background circles (Clean Minimalism detail)
+        // Decorative ambient background glow circles
         Box(
             modifier = Modifier
-                .size(160.dp)
-                .offset(x = (-30).dp, y = (-40).dp)
+                .size(200.dp)
+                .offset(x = (-40).dp, y = (-60).dp)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.08f))
         )
         Box(
             modifier = Modifier
-                .size(180.dp)
+                .size(220.dp)
                 .align(Alignment.BottomEnd)
-                .offset(x = 40.dp, y = 50.dp)
+                .offset(x = 50.dp, y = 60.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.06f))
+                .background(Color.White.copy(alpha = 0.07f))
+        )
+        Box(
+            modifier = Modifier
+                .size(160.dp)
+                .align(Alignment.BottomStart)
+                .offset(x = (-30).dp, y = 40.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.05f))
         )
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = FocusSpacing.xl, vertical = 24.dp)
+                .padding(horizontal = 24.dp, vertical = 26.dp)
         ) {
-            // Top Row: Title + Status Pill Badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isActive) "Focus Session • $subjectName" else "Ready to Focus",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
-                        color = Color.White.copy(alpha = 0.95f),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp
-                    )
+            // Top Label
+            Text(
+                text = if (isActive) "FOCUS SESSION • ${subjectName.uppercase()}" else "READY TO FOCUS",
+                style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                    color = Color.White.copy(alpha = 0.88f),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.8.sp
                 )
+            )
 
-                // Status Badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.White.copy(alpha = 0.20f))
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (!isActive) "Ready" else if (isPaused) "Paused" else "Active",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Main Large Countdown Timer Display
             Text(
                 text = timeString,
                 style = androidx.compose.material3.MaterialTheme.typography.displayLarge.copy(
                     color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 46.sp,
                     letterSpacing = 1.sp
                 ),
                 modifier = Modifier.testTag("session_timer_display")
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Subtitle
-            Text(
-                text = subtitleText ?: if (isActive) "Time remaining" else "Ready for your next $subjectName session",
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                    color = FocusColors.TextOnDarkMuted,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Bottom Action Pill Button (White with Purple Text & Icon)
+            // White Action Pill Button
             Button(
                 onClick = {
                     if (isActive) {
@@ -169,13 +146,19 @@ fun FocusSessionCard(
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
-                    contentColor = FocusColors.PrimaryDark
+                    contentColor = Color(0xFF6B36F6)
                 ),
-                shape = FocusShapes.pill,
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
+                shape = CircleShape,
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 4.dp,
+                    pressedElevation = 2.dp
+                ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 24.dp,
+                    vertical = 12.dp
+                ),
                 modifier = Modifier
-                    .width(160.dp)
-                    .height(44.dp)
+                    .height(46.dp)
                     .testTag("session_action_button")
             ) {
                 Row(
@@ -183,9 +166,9 @@ fun FocusSessionCard(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = if (!isActive || isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        imageVector = if (!isActive || isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                         contentDescription = if (isActive && !isPaused) "Pause" else "Start",
-                        tint = FocusColors.PrimaryDark,
+                        tint = Color(0xFF6B36F6),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -193,7 +176,7 @@ fun FocusSessionCard(
                         text = if (!isActive) "Start Session" else if (isPaused) "Resume" else "Pause",
                         style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = FocusColors.PrimaryDark,
+                            color = Color(0xFF6B36F6),
                             fontSize = 14.sp
                         )
                     )

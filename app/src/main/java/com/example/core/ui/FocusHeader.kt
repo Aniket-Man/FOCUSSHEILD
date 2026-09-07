@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
@@ -34,11 +36,12 @@ import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.design.LocalFocusColors
 import com.example.feature.profile.ui.UserProfileAvatar
 
 /**
  * Top App Header matching the FocusShield Clean Minimalism design.
- * Features the brand shield logo badge, title, slogan, notification bell with badge, and user avatar.
+ * Features brand shield logo badge, title, quick Light/Dark theme switcher, notification bell, and user avatar.
  */
 @Composable
 fun FocusHeader(
@@ -47,8 +50,11 @@ fun FocusHeader(
     photoUri: String? = null,
     avatarPresetId: String = "SHIELD",
     onNotificationClick: () -> Unit = {},
-    onProfileClick: () -> Unit = {}
+    onProfileClick: () -> Unit = {},
+    onThemeToggle: () -> Unit = {}
 ) {
+    val isDark = LocalFocusColors.current.isDark
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -108,16 +114,36 @@ fun FocusHeader(
             }
         }
 
-        // Right: Notification Bell + Student Avatar
+        // Right: Theme Mode Switcher + Notification Bell + Purple Shield Button
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Notification with dot
+            // Theme Mode Toggle button (Light / Dark)
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .shadow(1.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.03f))
+                    .shadow(if (isDark) 0.dp else 2.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
+                    .clip(CircleShape)
+                    .background(FocusColors.Surface)
+                    .border(1.dp, FocusColors.CardBorderSubtle, CircleShape)
+                    .clickable(onClick = onThemeToggle)
+                    .testTag("theme_toggle_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isDark) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+                    contentDescription = if (isDark) "Switch to Light Theme" else "Switch to Dark Theme",
+                    tint = if (isDark) FocusColors.AmberOrange else FocusColors.Primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Notification button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .shadow(if (isDark) 0.dp else 2.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
                     .clip(CircleShape)
                     .background(FocusColors.Surface)
                     .border(1.dp, FocusColors.CardBorderSubtle, CircleShape)
@@ -128,28 +154,29 @@ fun FocusHeader(
                 Icon(
                     imageVector = Icons.Outlined.Notifications,
                     contentDescription = "Notifications",
-                    tint = FocusColors.TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
-                // Orange badge dot
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .align(Alignment.TopEnd)
-                        .padding(top = 8.dp, end = 8.dp)
-                        .clip(CircleShape)
-                        .background(FocusColors.CoralWarning)
+                    tint = FocusColors.TextPrimary,
+                    modifier = Modifier.size(19.dp)
                 )
             }
 
-            // Student Avatar
-            UserProfileAvatar(
-                photoUri = photoUri,
-                avatarPresetId = avatarPresetId,
-                size = 40.dp,
-                onEditClick = onProfileClick,
-                modifier = Modifier.testTag("profile_avatar")
-            )
+            // Purple Shield Action Button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .shadow(3.dp, CircleShape, ambientColor = FocusColors.Primary.copy(alpha = 0.3f))
+                    .clip(CircleShape)
+                    .background(FocusColors.Primary)
+                    .clickable(onClick = onProfileClick)
+                    .testTag("profile_avatar"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Shield,
+                    contentDescription = "Protection Status & Profile",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

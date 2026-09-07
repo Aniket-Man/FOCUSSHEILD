@@ -1,5 +1,6 @@
 package com.example.feature.channels
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -76,6 +77,8 @@ import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.FocusShieldApp
+import com.example.core.design.FocusColors
+import com.example.core.design.LocalFocusColors
 import com.example.core.util.ChannelLogoStorageManager
 import com.example.core.util.YouTubeChannelSearchEngine
 import com.example.core.util.YouTubeChannelSearchResult
@@ -137,6 +140,10 @@ fun YouTubeStudyChannelManagerSheet(
     val keyboardController = LocalSoftwareKeyboardController.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val isDark = LocalFocusColors.current.isDark
+    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+
     val handleDismiss: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
@@ -153,8 +160,8 @@ fun YouTubeStudyChannelManagerSheet(
     ModalBottomSheet(
         onDismissRequest = handleDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF121212),
-        contentColor = Color.White,
+        containerColor = sheetBg,
+        contentColor = textPrimary,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         tonalElevation = 0.dp,
         dragHandle = null,
@@ -174,6 +181,17 @@ fun YouTubeStudyChannelContent(
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    val isDark = LocalFocusColors.current.isDark
+    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
+    val dragHandleColor = if (isDark) Color(0xFF4E4E52) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val searchBg = if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
+    val searchBorder = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
+    val searchPlaceholder = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8)
+    val doneBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
+    val doneBtnText = if (isDark) Color.Black else Color.White
 
     val repo = try { FocusShieldApp.instance.studyChannelRepository } catch (e: Exception) { null }
     val approvedChannelsState = repo?.allChannels?.collectAsState(initial = emptyList())
@@ -225,7 +243,7 @@ fun YouTubeStudyChannelContent(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .background(Color(0xFF121212))
+            .background(sheetBg)
             .testTag("youtube_channel_manager_sheet")
     ) {
         // Drag handle matching screenshot
@@ -235,7 +253,7 @@ fun YouTubeStudyChannelContent(
                 .width(44.dp)
                 .height(4.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(Color(0xFF4E4E52))
+                .background(dragHandleColor)
                 .align(Alignment.CenterHorizontally)
         )
 
@@ -246,11 +264,11 @@ fun YouTubeStudyChannelContent(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // Main title matching screenshot
+            // Main title
             item {
                 Text(
                     text = "Add channels you study from and\nblock the rest",
-                    color = Color.White,
+                    color = textPrimary,
                     fontSize = 22.sp,
                     lineHeight = 28.sp,
                     fontWeight = FontWeight.Bold,
@@ -258,14 +276,15 @@ fun YouTubeStudyChannelContent(
                 )
             }
 
-            // Search bar matching screenshot
+            // Search bar
             item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1E1E20))
+                        .background(searchBg)
+                        .border(1.dp, searchBorder, RoundedCornerShape(14.dp))
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -276,7 +295,7 @@ fun YouTubeStudyChannelContent(
                         Icon(
                             imageVector = Icons.Rounded.Search,
                             contentDescription = "Search",
-                            tint = Color(0xFF7E7E82),
+                            tint = searchPlaceholder,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -284,7 +303,7 @@ fun YouTubeStudyChannelContent(
                             if (searchQuery.isEmpty()) {
                                 Text(
                                     text = "Search channel to add",
-                                    color = Color(0xFF7E7E82),
+                                    color = searchPlaceholder,
                                     fontSize = 15.sp
                                 )
                             }
@@ -293,10 +312,10 @@ fun YouTubeStudyChannelContent(
                                 onValueChange = { searchQuery = it },
                                 singleLine = true,
                                 textStyle = TextStyle(
-                                    color = Color.White,
+                                    color = textPrimary,
                                     fontSize = 15.sp
                                 ),
-                                cursorBrush = SolidColor(Color.White),
+                                cursorBrush = SolidColor(if (isDark) Color.White else FocusColors.Primary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(
                                     onSearch = {
@@ -312,7 +331,7 @@ fun YouTubeStudyChannelContent(
                         if (isSearching) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(18.dp),
-                                color = Color.White,
+                                color = textPrimary,
                                 strokeWidth = 2.dp
                             )
                         } else if (searchQuery.isNotEmpty()) {
@@ -323,7 +342,7 @@ fun YouTubeStudyChannelContent(
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
                                     contentDescription = "Clear",
-                                    tint = Color(0xFF7E7E82),
+                                    tint = searchPlaceholder,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -344,7 +363,7 @@ fun YouTubeStudyChannelContent(
                     ) {
                         Text(
                             text = "Your Study Mode Channels",
-                            color = Color.White,
+                            color = textPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -369,7 +388,7 @@ fun YouTubeStudyChannelContent(
                     item {
                         Text(
                             text = "No study channels added yet",
-                            color = Color(0xFF7E7E82),
+                            color = textSecondary,
                             fontSize = 14.sp,
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
@@ -391,7 +410,7 @@ fun YouTubeStudyChannelContent(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "Suggested for you",
-                        color = Color.White,
+                        color = textPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(bottom = 14.dp)
@@ -433,7 +452,7 @@ fun YouTubeStudyChannelContent(
                     ) {
                         Text(
                             text = "Results for \"$searchQuery\"",
-                            color = Color.White,
+                            color = textPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(bottom = 14.dp)
@@ -451,14 +470,14 @@ fun YouTubeStudyChannelContent(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 CircularProgressIndicator(
-                                    color = Color.White,
+                                    color = textPrimary,
                                     modifier = Modifier.size(28.dp),
                                     strokeWidth = 2.5.dp
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
                                     text = "Searching YouTube channels...",
-                                    color = Color(0xFF8E8E93),
+                                    color = textSecondary,
                                     fontSize = 14.sp
                                 )
                             }
@@ -475,7 +494,7 @@ fun YouTubeStudyChannelContent(
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
                                     text = "No channels found matching \"$searchQuery\"",
-                                    color = Color(0xFF8E8E93),
+                                    color = textSecondary,
                                     fontSize = 14.sp
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
@@ -493,15 +512,15 @@ fun YouTubeStudyChannelContent(
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF242426),
-                                        contentColor = Color.White
+                                        containerColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0),
+                                        contentColor = textPrimary
                                     ),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
                                         text = "Whitelist \"$searchQuery\" anyway",
                                         fontSize = 13.sp,
-                                        color = Color.White
+                                        color = textPrimary
                                     )
                                 }
                             }
@@ -540,7 +559,7 @@ fun YouTubeStudyChannelContent(
 
         // Bottom "Done" button matching screenshot
         Surface(
-            color = Color(0xFF121212),
+            color = sheetBg,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
@@ -549,8 +568,8 @@ fun YouTubeStudyChannelContent(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
+                    containerColor = doneBtnBg,
+                    contentColor = doneBtnText
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -559,7 +578,7 @@ fun YouTubeStudyChannelContent(
             ) {
                 Text(
                     text = "Done",
-                    color = Color.Black,
+                    color = doneBtnText,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp
                 )
@@ -578,17 +597,28 @@ fun YouTubeChannelCard(
     onAdd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalFocusColors.current.isDark
+    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
+    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val addBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
+    val addBtnText = if (isDark) Color.Black else Color.White
+    val addedBtnBg = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
+    val addedBtnText = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardBg)
             .dashedBorder(
                 strokeWidth = 1.2.dp,
-                color = Color(0xFF333336),
+                color = dashedBorderColor,
                 cornerRadius = 16.dp,
                 dashLength = 7.dp,
                 gapLength = 5.dp
             )
-            .clip(RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 13.dp)
     ) {
         Row(
@@ -607,7 +637,7 @@ fun YouTubeChannelCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = channel.channelName,
-                    color = Color.White,
+                    color = textPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -616,7 +646,7 @@ fun YouTubeChannelCard(
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = channel.subscriberCount.ifBlank { channel.handle },
-                    color = Color(0xFF8E8E93),
+                    color = textSecondary,
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -630,7 +660,7 @@ fun YouTubeChannelCard(
                     modifier = Modifier
                         .height(36.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(Color.White)
+                        .background(addBtnBg)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -642,7 +672,7 @@ fun YouTubeChannelCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Add",
-                            color = Color.Black,
+                            color = addBtnText,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -650,7 +680,7 @@ fun YouTubeChannelCard(
                         Icon(
                             imageVector = Icons.Rounded.Add,
                             contentDescription = "Add",
-                            tint = Color.Black,
+                            tint = addBtnText,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -660,14 +690,14 @@ fun YouTubeChannelCard(
                     modifier = Modifier
                         .height(36.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF242426))
+                        .background(addedBtnBg)
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Added",
-                            color = Color(0xFF9E9EA3),
+                            color = addedBtnText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -675,7 +705,7 @@ fun YouTubeChannelCard(
                         Icon(
                             imageVector = Icons.Rounded.Check,
                             contentDescription = "Added",
-                            tint = Color(0xFF9E9EA3),
+                            tint = addedBtnText,
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -686,7 +716,7 @@ fun YouTubeChannelCard(
 }
 
 /**
- * Approved channel item card with solid dark surface background matching screenshot
+ * Approved channel item card with solid surface background matching theme
  */
 @Composable
 fun ApprovedChannelItemRow(
@@ -694,9 +724,17 @@ fun ApprovedChannelItemRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalFocusColors.current.isDark
+    val rowBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)
+    val rowBorder = if (isDark) Color(0xFF2A2A2E) else Color(0xFFE2E8F0)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val deleteIconTint = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8)
+
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1C1C1E),
+        color = rowBg,
+        border = BorderStroke(1.dp, rowBorder),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
@@ -717,7 +755,7 @@ fun ApprovedChannelItemRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = channel.channelName,
-                    color = Color.White,
+                    color = textPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -726,7 +764,7 @@ fun ApprovedChannelItemRow(
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = getChannelSubscriberDisplay(channel.channelName, channel.channelId),
-                    color = Color(0xFF8E8E93),
+                    color = textSecondary,
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -740,7 +778,7 @@ fun ApprovedChannelItemRow(
                 Icon(
                     imageVector = Icons.Rounded.Delete,
                     contentDescription = "Delete",
-                    tint = Color(0xFF7E7E82),
+                    tint = deleteIconTint,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -760,18 +798,30 @@ fun StudyChannelAvatar(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val isDark = LocalFocusColors.current.isDark
     val normalizedName = name.trim().lowercase()
 
     val (bgColor, monogram, isSpecialLogo) = when {
-        normalizedName.contains("competition wallah") -> Triple(Color(0xFF111111), "CW", true)
-        normalizedName.contains("jee wallah") -> Triple(Color(0xFF111111), "JW", true)
-        normalizedName.contains("physics wallah") || handle.equals("@PhysicsWallah", true) -> Triple(Color(0xFF111111), "PW", true)
+        normalizedName.contains("competition wallah") -> Triple(if (isDark) Color(0xFF111111) else Color(0xFF0F172A), "CW", true)
+        normalizedName.contains("jee wallah") -> Triple(if (isDark) Color(0xFF111111) else Color(0xFF0F172A), "JW", true)
+        normalizedName.contains("physics wallah") || handle.equals("@PhysicsWallah", true) -> Triple(if (isDark) Color(0xFF111111) else Color(0xFF0F172A), "PW", true)
         normalizedName.contains("magnet brains") -> Triple(Color(0xFF166534), "mb", false)
         normalizedName.contains("exphub") || normalizedName.contains("prashant") -> Triple(Color(0xFFD97706), "EH", false)
         normalizedName.contains("khan academy") -> Triple(Color(0xFF0D9488), "KA", false)
         normalizedName.contains("unacademy") -> Triple(Color(0xFF059669), "U", false)
         normalizedName.contains("vedantu") -> Triple(Color(0xFFEA580C), "V", false)
-        else -> Triple(Color(0xFF262628), name.take(1).uppercase(), false)
+        else -> Triple(if (isDark) Color(0xFF262628) else Color(0xFFE2E8F0), name.take(1).uppercase(), false)
+    }
+
+    val textColor = when {
+        isSpecialLogo -> Color.White
+        normalizedName.contains("magnet brains") ||
+            normalizedName.contains("exphub") ||
+            normalizedName.contains("prashant") ||
+            normalizedName.contains("khan academy") ||
+            normalizedName.contains("unacademy") ||
+            normalizedName.contains("vedantu") -> Color.White
+        else -> if (isDark) Color.White else Color(0xFF0F172A)
     }
 
     val fallbackContent: @Composable () -> Unit = {
@@ -793,7 +843,7 @@ fun StudyChannelAvatar(
         } else {
             Text(
                 text = monogram,
-                color = Color.White,
+                color = textColor,
                 fontWeight = FontWeight.Bold,
                 fontSize = (size.value * 0.38f).sp
             )
@@ -834,3 +884,4 @@ fun StudyChannelAvatar(
         }
     }
 }
+

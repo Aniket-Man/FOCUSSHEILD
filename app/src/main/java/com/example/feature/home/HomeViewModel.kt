@@ -35,10 +35,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private val DEFAULT_QUICK_ACTIONS = listOf(
-    QuickActionItem("1", "Start Pomodoro", "Focus timer", QuickActionType.START_POMODORO),
-    QuickActionItem("2", "Study Channels", "Educational videos", QuickActionType.STUDY_CHANNELS),
+    QuickActionItem("1", "Start", "Focus timer", QuickActionType.START_POMODORO),
+    QuickActionItem("2", "Study", "Educational videos", QuickActionType.STUDY_CHANNELS),
     QuickActionItem("3", "Blocked Apps", "Manage blocking", QuickActionType.BLOCKED_APPS),
-    QuickActionItem("4", "Session History", "View analytics", QuickActionType.SESSION_HISTORY)
+    QuickActionItem("4", "App Limits", "Daily budgets", QuickActionType.APP_LIMITS),
+    QuickActionItem("5", "Strict Mode", "Anti-cheating", QuickActionType.STRICT_MODE),
+    QuickActionItem("6", "Sessions", "View analytics", QuickActionType.SESSION_HISTORY)
 )
 
 private val DEFAULT_WEEKLY_BARS = listOf(0.04f, 0.04f, 0.04f, 0.04f, 0.04f, 0.04f, 0.04f)
@@ -443,6 +445,23 @@ class HomeViewModel(
     fun deleteFocusSchedule(id: String) {
         viewModelScope.launch {
             app.focusScheduleRepository.deleteSchedule(id)
+        }
+    }
+
+    val themeModeFlow: StateFlow<String> = app.preferencesRepository.preferencesFlow
+        .map { it.themeMode }
+        .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = "SYSTEM"
+        )
+
+    fun toggleThemeMode() {
+        viewModelScope.launch {
+            val current = themeModeFlow.value
+            val next = if (current == "DARK") "LIGHT" else "DARK"
+            app.preferencesRepository.updateThemeMode(next)
         }
     }
 }

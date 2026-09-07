@@ -1,16 +1,14 @@
 package com.example.core.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,23 +18,27 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
@@ -46,34 +48,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
-import com.example.core.design.FocusShapes
-import com.example.core.design.FocusSpacing
-import com.example.core.design.FocusType
 import com.example.data.model.StudyPlanItem
 
-/**
- * A study block's lifecycle state, which drives its entire color treatment. Deriving one enum up
- * front — rather than scattering `if (isCompleted)` / `if (hasOverlap)` checks through the layout —
- * is what lets completed, overdue, in-progress and upcoming blocks read as a coherent color system
- * instead of four unrelated special cases.
- */
-private enum class PlanState { COMPLETED, OVERDUE, IN_PROGRESS, UPCOMING }
-
-private fun StudyPlanItem.planState(): PlanState = when {
-    isCompleted -> PlanState.COMPLETED
-    hasOverlap -> PlanState.OVERDUE
-    status.equals("ACTIVE", ignoreCase = true) ||
-        status.equals("IN_PROGRESS", ignoreCase = true) -> PlanState.IN_PROGRESS
-    else -> PlanState.UPCOMING
-}
+private val PlanCardShape = RoundedCornerShape(18.dp)
 
 /**
- * Premium study-block card.
- *
- * The left edge carries a rounded accent rail whose color is the block's own accent, dimmed once the
- * block is done. A single state pill (Done / Overdue / In progress / Upcoming) in the top-right is
- * the one place status is expressed, so the row never says the same thing three ways. Time range and
- * target duration read as quiet metadata; the subject is the loudest thing in the card.
+ * Pixel-accurate Study Plan Row matching the reference screenshot:
+ * Left colored vertical accent strip, clean Time / Subject / Topic column,
+ * light purple "▶ Start" pill button, and 3-dots overflow menu.
  */
 @Composable
 fun StudyPlanRow(
@@ -84,200 +66,179 @@ fun StudyPlanRow(
     onDeleteClick: () -> Unit = {},
     onToggleComplete: () -> Unit = {}
 ) {
-    val state = item.planState()
-    val accent = when (state) {
-        PlanState.COMPLETED -> FocusColors.EmeraldSuccess
-        PlanState.OVERDUE -> FocusColors.CoralWarning
-        PlanState.IN_PROGRESS -> FocusColors.Primary
-        PlanState.UPCOMING -> item.accentColor
-    }
-    val cardBackground by animateColorAsState(
-        targetValue = if (item.isCompleted) FocusColors.SurfaceVariant.copy(alpha = 0.5f) else FocusColors.Surface,
-        label = "card_bg"
-    )
-    val borderColor = if (state == PlanState.OVERDUE) {
-        FocusColors.CoralWarning.copy(alpha = 0.5f)
-    } else {
-        FocusColors.CardBorderSubtle
-    }
+    var menuExpanded by remember { mutableStateOf(false) }
 
-    Row(
+    val isDark = com.example.core.design.LocalFocusColors.current.isDark
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = if (isDark) 0.dp else 2.dp,
+                shape = PlanCardShape,
+                ambientColor = Color.Black.copy(alpha = 0.03f),
+                spotColor = Color.Black.copy(alpha = 0.04f)
+            )
             .clip(PlanCardShape)
-            .background(cardBackground)
-            .border(1.dp, borderColor, PlanCardShape)
+            .background(FocusColors.Surface)
+            .border(1.dp, FocusColors.CardBorderSubtle, PlanCardShape)
             .height(IntrinsicSize.Min)
             .testTag("study_plan_${item.id}")
     ) {
-        // Accent rail
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(5.dp)
-                .background(if (item.isCompleted) accent.copy(alpha = 0.4f) else accent)
-        )
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = FocusSpacing.base, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Top Row: time range + target, and the single status pill
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Left Accent Strip
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(5.dp)
+                    .background(item.accentColor)
+            )
+
+            // Middle Column: Time / Subject / Topic
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Schedule,
-                        contentDescription = null,
-                        tint = FocusColors.TextSecondary,
-                        modifier = Modifier.size(13.dp)
+                Text(
+                    text = "${item.startTime} – ${item.endTime}",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                        color = FocusColors.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
-                    Text(
-                        text = "${item.startTime} – ${item.endTime}",
-                        style = FocusType.secondary.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(3.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.TextMuted)
-                    )
-                    Text(
-                        text = item.targetTime,
-                        style = FocusType.caption
-                    )
-                }
+                )
 
-                PlanStatePill(state)
-            }
+                Spacer(modifier = Modifier.height(2.dp))
 
-            // Middle: subject + topic
-            Column {
                 Text(
                     text = item.subject,
-                    style = FocusType.primary.copy(
+                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                        color = FocusColors.TextPrimary,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (item.isCompleted) FocusColors.TextSecondary else FocusColors.TextPrimary,
                         textDecoration = if (item.isCompleted) TextDecoration.LineThrough else TextDecoration.None
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
                 if (item.topic.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(1.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = item.topic,
-                        style = FocusType.secondary,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                            color = FocusColors.TextSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal
+                        ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            if (item.notes.isNotBlank()) {
-                Text(
-                    text = item.notes,
-                    style = FocusType.caption,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Bottom action bar: complete toggle · edit · delete · start
+            // Right Controls: Pill "▶ Start" button + 3-dots menu
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.padding(end = 6.dp)
             ) {
-                // Complete toggle
+                // Light purple Pill Button "▶ Start"
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
                         .clip(CircleShape)
-                        .background(
-                            if (item.isCompleted) FocusColors.EmeraldSuccess else FocusColors.SurfaceVariant
-                        )
-                        .border(
-                            1.dp,
-                            if (item.isCompleted) FocusColors.EmeraldSuccess else FocusColors.CardBorderSubtle,
-                            CircleShape
-                        )
-                        .clickable(onClick = onToggleComplete)
-                        .testTag("toggle_complete_${item.id}"),
+                        .background(if (isDark) Color(0xFF26183C) else Color(0xFFEDE8FF))
+                        .clickable(onClick = onStartClick)
+                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                        .testTag("start_plan_${item.id}"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (item.isCompleted) {
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = "Completed",
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onEditClick,
-                    modifier = Modifier.size(30.dp).testTag("edit_plan_${item.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Edit,
-                        contentDescription = "Edit Plan",
-                        tint = FocusColors.TextSecondary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onDeleteClick,
-                    modifier = Modifier.size(30.dp).testTag("delete_plan_${item.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = "Delete Plan",
-                        tint = FocusColors.CoralWarning.copy(alpha = 0.85f),
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                if (!item.isCompleted) {
-                    FilledTonalButton(
-                        onClick = onStartClick,
-                        shape = FocusShapes.pill,
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = FocusColors.Primary,
-                            contentColor = Color.White
-                        ),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = 16.dp,
-                            vertical = 6.dp
-                        ),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .testTag("start_plan_${item.id}")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.PlayArrow,
                             contentDescription = null,
+                            tint = FocusColors.Primary,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Start",
-                            style = FocusType.secondary.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
+                            style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                                color = FocusColors.Primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
                             )
+                        )
+                    }
+                }
+
+                // 3-dots Menu Button
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("plan_menu_${item.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Options",
+                            tint = FocusColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(if (item.isCompleted) "Mark as Incomplete" else "Mark as Complete") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = FocusColors.EmeraldSuccess
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onToggleComplete()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit Plan") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Edit,
+                                    contentDescription = null,
+                                    tint = FocusColors.Primary
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onEditClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete Plan") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = FocusColors.CoralWarning
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onDeleteClick()
+                            }
                         )
                     }
                 }
@@ -287,38 +248,9 @@ fun StudyPlanRow(
 }
 
 /**
- * The single source of status truth for a plan row.
- */
-@Composable
-private fun PlanStatePill(state: PlanState) {
-    val (label, color) = when (state) {
-        PlanState.COMPLETED -> "Done" to FocusColors.EmeraldSuccess
-        PlanState.OVERDUE -> "Overdue" to FocusColors.CoralWarning
-        PlanState.IN_PROGRESS -> "In progress" to FocusColors.Primary
-        PlanState.UPCOMING -> "Upcoming" to FocusColors.TextSecondary
-    }
-    Box(
-        modifier = Modifier
-            .clip(FocusShapes.pill)
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = label,
-            style = FocusType.caption.copy(
-                color = color,
-                fontWeight = FontWeight.Bold
-            ),
-            maxLines = 1,
-            softWrap = false
-        )
-    }
-}
-
-private val PlanCardShape = RoundedCornerShape(18.dp)
-
-/**
- * Summary Card displaying Planned vs Completed vs Remaining study blocks and plan completion rate.
+ * Pixel-accurate Summary Card matching the reference screenshot:
+ * Circular percentage badge on the left, completed vs planned duration + progress bar in the center,
+ * and chevron right arrow on the right. Supports Daylight and Dark themes.
  */
 @Composable
 fun TodayPlanSummaryCard(
@@ -326,69 +258,110 @@ fun TodayPlanSummaryCard(
     totalCompletedTime: String,
     remainingTime: String,
     completionPercentage: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = PlanCardShape,
-        color = FocusColors.Surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.CardBorderSubtle)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Column {
-                    Text(
-                        text = "TODAY'S PLAN PROGRESS",
-                        style = FocusType.sectionLabel
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "$totalCompletedTime of $totalPlannedTime",
-                        style = FocusType.statNumber
-                    )
-                    Text(
-                        text = "$remainingTime remaining",
-                        style = FocusType.caption
-                    )
-                }
+    val isDark = com.example.core.design.LocalFocusColors.current.isDark
 
-                Box(
-                    modifier = Modifier
-                        .clip(FocusShapes.pill)
-                        .background(FocusColors.Primary.copy(alpha = 0.14f))
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = if (isDark) 0.dp else 2.dp,
+                shape = PlanCardShape,
+                ambientColor = Color.Black.copy(alpha = 0.03f),
+                spotColor = Color.Black.copy(alpha = 0.04f)
+            )
+            .clip(PlanCardShape)
+            .background(FocusColors.Surface)
+            .border(1.dp, FocusColors.CardBorderSubtle, PlanCardShape)
+            .clickable(onClick = onClick)
+            .padding(16.dp)
+            .testTag("today_plan_summary_card")
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Circular Percentage Badge
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(if (isDark) FocusColors.SurfaceSubtle else Color(0xFFF1F5F9)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$completionPercentage%",
+                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                        color = FocusColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            // Duration & Progress Bar Column
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "$completionPercentage%",
-                        style = FocusType.primary.copy(
-                            color = FocusColors.Primary,
-                            fontWeight = FontWeight.Bold
+                        text = totalCompletedTime,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+                            color = FocusColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    )
+                    Text(
+                        text = " / ",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+                            color = FocusColors.TextMuted,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 14.sp
+                        )
+                    )
+                    Text(
+                        text = totalPlannedTime,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+                            color = FocusColors.TextSecondary,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp
                         )
                     )
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                LinearProgressIndicator(
+                    progress = { (completionPercentage / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = FocusColors.Primary,
+                    trackColor = if (isDark) Color(0xFF26183C) else Color(0xFFEDE8FF),
+                    strokeCap = StrokeCap.Round
+                )
             }
 
-            LinearProgressIndicator(
-                progress = { (completionPercentage / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = FocusColors.Primary,
-                trackColor = FocusColors.SurfaceVariant,
-                strokeCap = StrokeCap.Round
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Right Chevron Arrow
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = "View Planner Details",
+                tint = FocusColors.TextMuted,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
 }
+
 
 

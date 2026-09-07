@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -57,7 +58,9 @@ enum class BottomTab(
 }
 
 /**
- * iOS-style Floating Frosted Glass Dock with separate main pill and Blocks squircle.
+ * Modern floating translucent glass navigation bar.
+ * Designed with optical glass layering, specular top-edge highlighting,
+ * and adaptive opacity across Dark (48%) and Light (72%) themes.
  */
 @Composable
 fun FocusBottomNavigation(
@@ -65,6 +68,31 @@ fun FocusBottomNavigation(
     onTabSelected: (BottomTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = com.example.core.design.LocalFocusColors.current.isDark
+
+    // Modern translucent glass surface:
+    // Dark mode: ~48% opacity with subtle highlight reflection.
+    // Light mode: ~72% opacity for crisp content legibility and soft refraction.
+    val glassBg = if (isDark) {
+        FocusColors.Surface.copy(alpha = 0.48f)
+    } else {
+        FocusColors.Surface.copy(alpha = 0.72f)
+    }
+
+    val glassBorderBrush = Brush.verticalGradient(
+        colors = if (isDark) {
+            listOf(
+                Color.White.copy(alpha = 0.22f), // Specular top sheen
+                FocusColors.CardBorder.copy(alpha = 0.45f)
+            )
+        } else {
+            listOf(
+                Color.White.copy(alpha = 0.80f), // Crisp top light bounce
+                FocusColors.CardBorder.copy(alpha = 0.35f)
+            )
+        }
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -79,28 +107,21 @@ fun FocusBottomNavigation(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Main Glass Pill: Focus, Planner, Stats
-            val isDark = com.example.core.design.LocalFocusColors.current.isDark
-            // Translucent glass dock: the screen/wallpaper remains visible beneath it.
-            val glassBg = FocusColors.Surface.copy(alpha = if (isDark) 0.46f else 0.72f)
-            val glassBorder = FocusColors.CardBorder.copy(
-                alpha = if (isDark) 0.72f else 0.85f
-            )
-
             Box(
                 modifier = Modifier
                     .weight(3.2f)
                     .height(64.dp)
                     .shadow(
-                        elevation = 10.dp,
+                        elevation = 12.dp,
                         shape = RoundedCornerShape(32.dp),
-                        ambientColor = Color.Black.copy(alpha = 0.25f),
-                        spotColor = Color.Black.copy(alpha = 0.35f)
+                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.12f),
+                        spotColor = Color.Black.copy(alpha = if (isDark) 0.45f else 0.18f)
                     )
                     .clip(RoundedCornerShape(32.dp))
                     .background(glassBg)
                     .border(
                         width = 1.dp,
-                        color = glassBorder,
+                        brush = glassBorderBrush,
                         shape = RoundedCornerShape(32.dp)
                     )
                     .padding(horizontal = 6.dp),
@@ -166,16 +187,16 @@ fun FocusBottomNavigation(
                     .weight(1.1f)
                     .height(64.dp)
                     .shadow(
-                        elevation = 10.dp,
+                        elevation = 12.dp,
                         shape = RoundedCornerShape(24.dp),
-                        ambientColor = Color.Black.copy(alpha = 0.25f),
-                        spotColor = Color.Black.copy(alpha = 0.35f)
+                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.12f),
+                        spotColor = Color.Black.copy(alpha = if (isDark) 0.45f else 0.18f)
                     )
                     .clip(RoundedCornerShape(24.dp))
                     .background(glassBg)
                     .border(
                         width = 1.dp,
-                        color = glassBorder,
+                        brush = glassBorderBrush,
                         shape = RoundedCornerShape(24.dp)
                     )
                     .clickable { onTabSelected(BottomTab.BLOCKS) }

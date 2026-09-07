@@ -38,6 +38,8 @@ enum class QuickActionType {
     START_POMODORO,
     STUDY_CHANNELS,
     BLOCKED_APPS,
+    APP_LIMITS,
+    STRICT_MODE,
     SESSION_HISTORY
 }
 

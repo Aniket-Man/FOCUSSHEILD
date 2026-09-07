@@ -7,6 +7,7 @@ import android.graphics.drawable.Drawable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.core.util.DeviceUsageStatsHelper
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.DailyAppUsageEntity
 import com.example.data.repository.AppLimitRepository
@@ -70,6 +71,7 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
         appLimitRepository.getUsageForDateFlow(appLimitRepository.getTodayDateString())
     ) { limits: List<AppLimitEntity>, usages: List<DailyAppUsageEntity> ->
         val usageMap = usages.associateBy { it.packageName }
+        val systemUsageMap = DeviceUsageStatsHelper.getTodayAllAppsUsageMillis(application)
         var totalMinutes = 0
         var activeCount = 0
         var reachedCount = 0
@@ -78,7 +80,9 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
 
         val items = limits.map { limit ->
             val usage = usageMap[limit.packageName]
-            val usedMillis = usage?.usedMillis ?: 0L
+            val systemUsedMillis = systemUsageMap[limit.packageName] ?: 0L
+            val dbUsedMillis = usage?.usedMillis ?: 0L
+            val usedMillis = maxOf(systemUsedMillis, dbUsedMillis)
             val usedMin = (usedMillis / 60000L).toInt()
             val totalLimitMin = limit.dailyLimitMinutes
             val remainingMin = (totalLimitMin - usedMin).coerceAtLeast(0)

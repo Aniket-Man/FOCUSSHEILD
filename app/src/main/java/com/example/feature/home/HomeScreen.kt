@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Check
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.shadow
 import com.example.core.util.DeviceUsageStatsHelper
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -81,6 +83,7 @@ import com.example.core.ui.FocusSessionCard
 import com.example.core.ui.ProgressCard
 import com.example.core.ui.QuickActionCard
 import com.example.core.ui.StatisticsOverview
+import com.example.core.ui.StudyAndUsageStatsRow
 import com.example.core.ui.StudyPlanRow
 import com.example.core.ui.TodayPlanSummaryCard
 import com.example.data.model.QuickActionType
@@ -105,6 +108,7 @@ fun HomeScreen(
     onNavigateToStudyChannels: () -> Unit = {},
     onNavigateToBlockedApps: () -> Unit = {},
     onNavigateToAppLimits: () -> Unit = {},
+    onNavigateToStrictMode: () -> Unit = {},
     onStartPlanSession: (StudyPlanItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -126,41 +130,29 @@ fun HomeScreen(
         )
     }
 
-    Scaffold(
-        bottomBar = {
-            FocusBottomNavigation(
-                selectedTab = BottomTab.FOCUS,
-                onTabSelected = { tab ->
-                    when (tab) {
-                        BottomTab.FOCUS -> { /* already on home */ }
-                        BottomTab.PLANNER -> onNavigateToPlannerTab()
-                        BottomTab.STATS -> onNavigateToStatsTab()
-                        BottomTab.BLOCKS -> onNavigateToBlocksTab()
-                    }
-                }
-            )
-        },
-        containerColor = FocusColors.Background,
-        modifier = modifier.testTag("home_screen")
-    ) { innerPadding ->
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(FocusColors.Background)
+            .testTag("home_screen")
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .statusBarsPadding(),
-            // The floating bottom dock is drawn as an overlay, not a layout sibling, so the list
-            // must reserve clearance itself or its final items (the Quick Actions row / stats) sit
-            // hidden behind the dock.
-            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance),
+            // The floating bottom dock is drawn as an overlay, so content extends behind it,
+            // while the clearance padding ensures the final items rest above the dock.
+            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
-            // 1. Header (Logo, Brand, Slogan, Notifications, Avatar)
+            // 1. Header (Logo, Brand, Slogan, Quick Theme Switcher, Notifications, Avatar)
             item {
                 FocusHeader(
                     photoUri = uiState.userPhotoUri,
                     avatarPresetId = uiState.userAvatarPreset,
                     onNotificationClick = { /* notification click */ },
-                    onProfileClick = onNavigateToProfile
+                    onProfileClick = onNavigateToProfile,
+                    onThemeToggle = { viewModel.toggleThemeMode() }
                 )
             }
 
@@ -186,244 +178,175 @@ fun HomeScreen(
                 }
             }
 
-            // 3. Today's Progress Card (Study Time, Bar Chart, Circular Gauge)
+            // 3. Two Stats Cards Row: Today's Study & Phone Usage
             item {
-                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
-                    ProgressCard(
+                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    StudyAndUsageStatsRow(
                         studyTime = uiState.todayStudyTime,
                         progressPercentage = uiState.todayProgressPercentage,
-                        weeklyBars = uiState.weeklyBars
+                        phoneUsageTime = uiState.totalScreenTime,
+                        onPhoneUsageClick = onNavigateToStatsTab
                     )
                 }
             }
 
-            // 3b. Phone Usage vs Focus Time Card (Digital Wellbeing Integration)
-            item {
-                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
-                    TodayPhoneUsageVsFocusCard(
-                        totalScreenTime = uiState.totalScreenTime,
-                        todayFocusTime = uiState.todayStudyTime,
-                        completedTimerSessions = uiState.todayCompletedSessionCount,
-                        focusRatioPct = uiState.focusToScreenRatioPercentage,
-                        hasUsagePermission = uiState.hasUsagePermission
-                    )
-                }
-            }
-
-            // 3c. All-Time Lifetime Study Batch Card
-            item {
-                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
-                    AllTimeStudyBatchCard(
-                        allTimeStudyTime = uiState.allTimeStudyTime,
-                        allTimeSessionsCount = uiState.allTimeSessionCount
-                    )
-                }
-            }
-
-            // 4. Quick Actions Section (2x2 Grid)
+            // 4. Quick Actions Section (Balanced 2-Column Grid matching screenshot)
             item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = FocusSpacing.screenHorizontal)
+                        .padding(horizontal = 16.dp)
                 ) {
                     Text(
                         text = "Quick Actions",
-                        style = FocusType.cardTitle
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = FocusColors.TextPrimary
+                        )
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Row 1: Start Pomodoro | Study Channels
+                    // Row 1: Start (Focus timer) | Study (Educational videos)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         QuickActionCard(
-                            item = uiState.quickActions[0],
+                            item = uiState.quickActions.getOrElse(0) {
+                                com.example.data.model.QuickActionItem("1", "Start", "Focus timer", QuickActionType.START_POMODORO)
+                            },
                             modifier = Modifier.weight(1f),
                             onClick = { showFocusSetupSheet = true }
                         )
                         QuickActionCard(
-                            item = uiState.quickActions[1],
+                            item = uiState.quickActions.getOrElse(1) {
+                                com.example.data.model.QuickActionItem("2", "Study", "Educational videos", QuickActionType.STUDY_CHANNELS)
+                            },
                             modifier = Modifier.weight(1f),
                             onClick = onNavigateToStudyChannels
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Row 2: Blocked Apps | Planner
+                    // Row 2: Blocked Apps (Manage blocking) | App Limits (Daily budgets)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         QuickActionCard(
-                            item = uiState.quickActions[2],
+                            item = uiState.quickActions.getOrElse(2) {
+                                com.example.data.model.QuickActionItem("3", "Blocked Apps", "Manage blocking", QuickActionType.BLOCKED_APPS)
+                            },
                             modifier = Modifier.weight(1f),
                             onClick = onNavigateToBlockedApps
                         )
                         QuickActionCard(
-                            item = uiState.quickActions[3],
+                            item = uiState.quickActions.getOrElse(3) {
+                                com.example.data.model.QuickActionItem("4", "App Limits", "Daily budgets", QuickActionType.APP_LIMITS)
+                            },
                             modifier = Modifier.weight(1f),
-                            onClick = onNavigateToPlannerTab
+                            onClick = onNavigateToAppLimits
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Row 3: Strict Mode (Anti-cheating) | Sessions (View analytics)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickActionCard(
+                            item = uiState.quickActions.getOrElse(4) {
+                                com.example.data.model.QuickActionItem("5", "Strict Mode", "Anti-cheating", QuickActionType.STRICT_MODE)
+                            },
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToStrictMode
+                        )
+                        QuickActionCard(
+                            item = uiState.quickActions.getOrElse(5) {
+                                com.example.data.model.QuickActionItem("6", "Sessions", "View analytics", QuickActionType.SESSION_HISTORY)
+                            },
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToStatsTab
                         )
                     }
                 }
             }
 
-            // 4b. App Limits & Daily Budgets Banner
-            item {
-                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .clickable(onClick = onNavigateToAppLimits)
-                            .testTag("home_app_limits_banner"),
-                        color = FocusColors.Surface
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(FocusSpacing.md),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(FocusColors.PrimaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Schedule,
-                                    contentDescription = null,
-                                    tint = FocusColors.Primary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "App Limits & Daily Budgets",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = FocusColors.TextPrimary
-                                    )
-                                )
-                                Text(
-                                    text = "Set daily caps & 2m–20m temporary usage sessions",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = FocusColors.TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 5. Today's Study Plan Section with Full CRUD, Overlap Alert & Progress Summary
+            // 5. Today's Plan Section
             item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = FocusSpacing.screenHorizontal),
+                        .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Section Header with + Add Study Plan button
+                    // Section Header: "Today's Plan" + "+ Add Study" Pill button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "Today's Plan",
-                                style = FocusType.cardTitle
+                        Text(
+                            text = "Today's Plan",
+                            style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = FocusColors.TextPrimary
                             )
-                            Text(
-                                text = "${uiState.studyPlan.size} Planned Blocks",
-                                style = FocusType.secondary
-                            )
-                        }
-
-                        FilledTonalButton(
-                            onClick = {
-                                editingPlan = null
-                                showAddEditDialog = true
-                            },
-                            shape = FocusShapes.pill,
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = FocusColors.Primary.copy(alpha = 0.12f),
-                                contentColor = FocusColors.Primary
-                            ),
-                            modifier = Modifier.testTag("add_study_plan_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Add Study",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Summary Progress Card
-                    if (uiState.studyPlan.isNotEmpty()) {
-                        TodayPlanSummaryCard(
-                            totalPlannedTime = uiState.totalPlannedTime,
-                            totalCompletedTime = uiState.totalCompletedTime,
-                            remainingTime = uiState.remainingPlanTime,
-                            completionPercentage = uiState.planCompletionPercentage
                         )
 
-                        // Scheduled Notifications Info Banner
-                        Surface(
-                            shape = FocusShapes.medium,
-                            color = FocusColors.PrimaryContainer.copy(alpha = 0.35f),
-                            border = BorderStroke(1.dp, FocusColors.Primary.copy(alpha = 0.2f)),
-                            modifier = Modifier.fillMaxWidth()
+                        // Solid purple Pill Button "+ Add Study"
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(FocusColors.Primary)
+                                .clickable {
+                                    editingPlan = null
+                                    showAddEditDialog = true
+                                }
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                                .testTag("add_study_plan_button"),
+                            contentAlignment = Alignment.Center
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.NotificationsActive,
+                                    imageVector = Icons.Rounded.Add,
                                     contentDescription = null,
-                                    tint = FocusColors.Primary,
+                                    tint = Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Plan alerts active • Tap notification to start session directly",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.Primary,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 11.sp
-                                    )
+                                    text = "Add Study",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
                                 )
                             }
                         }
                     }
 
-                    // Overlap Warning Banner
+                    // Summary Progress Card
+                    TodayPlanSummaryCard(
+                        totalPlannedTime = uiState.totalPlannedTime,
+                        totalCompletedTime = uiState.totalCompletedTime,
+                        remainingTime = uiState.remainingPlanTime,
+                        completionPercentage = uiState.planCompletionPercentage,
+                        onClick = onNavigateToPlannerTab
+                    )
+
+                    // Overlap Warning Banner (if overlaps exist)
                     if (uiState.hasOverlapWarnings) {
                         Surface(
-                            shape = FocusShapes.medium,
+                            shape = RoundedCornerShape(12.dp),
                             color = FocusColors.CoralWarning.copy(alpha = 0.1f),
                             border = BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
@@ -452,46 +375,7 @@ fun HomeScreen(
                     }
 
                     // Plan Items List
-                    if (uiState.studyPlan.isEmpty()) {
-                        Surface(
-                            shape = FocusShapes.medium,
-                            color = FocusColors.Surface,
-                            border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CalendarToday,
-                                    contentDescription = null,
-                                    tint = FocusColors.TextSecondary.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(32.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "No study blocks scheduled for today",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = FocusColors.TextSecondary,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                OutlinedButton(
-                                    onClick = {
-                                        editingPlan = null
-                                        showAddEditDialog = true
-                                    },
-                                    shape = FocusShapes.pill
-                                ) {
-                                    Text("Plan First Session")
-                                }
-                            }
-                        }
-                    } else {
+                    if (uiState.studyPlan.isNotEmpty()) {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -520,25 +404,20 @@ fun HomeScreen(
                 }
             }
 
-            // 6. Statistics Metric Overview (Sessions, Blocked attempts, Focus rate)
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = FocusSpacing.screenHorizontal)
-                ) {
-                    Text(
-                        text = "Today's Statistics",
-                        style = FocusType.cardTitle
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    StatisticsOverview(metrics = uiState.statistics)
-                }
-            }
-
         }
+
+        FocusBottomNavigation(
+            selectedTab = BottomTab.FOCUS,
+            onTabSelected = { tab ->
+                when (tab) {
+                    BottomTab.FOCUS -> { /* already on home */ }
+                    BottomTab.PLANNER -> onNavigateToPlannerTab()
+                    BottomTab.STATS -> onNavigateToStatsTab()
+                    BottomTab.BLOCKS -> onNavigateToBlocksTab()
+                }
+            },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     // Add / Edit Study Plan Dialog
