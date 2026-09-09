@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
@@ -39,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -201,20 +204,111 @@ fun SettingsScreen(
 
                     var showAccessibilityTroubleshooting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
-                    SettingsNavigationRow(
-                        title = "Accessibility Blocker Service",
-                        subtitle = if (uiState.isAccessibilityEnabled) "Service active and ready" else "Permission required — Tap to enable or fix malfunction",
-                        icon = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
-                        iconTint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
-                        onClick = {
-                            if (!uiState.isAccessibilityEnabled) {
-                                showAccessibilityTroubleshooting = true
-                            } else {
-                                AccessibilityHelper.openAccessibilitySettings(context)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(FocusShapes.card)
+                            .background(FocusColors.Surface)
+                            .border(
+                                1.dp,
+                                if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess.copy(alpha = 0.4f) else FocusColors.CardBorderSubtle,
+                                FocusShapes.card
+                            )
+                            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
+                            .testTag("settings_accessibility_row")
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess.copy(alpha = 0.12f)
+                                            else FocusColors.CoralWarning.copy(alpha = 0.12f)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                                        contentDescription = null,
+                                        tint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Accessibility Blocker Service",
+                                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FocusColors.TextPrimary,
+                                            fontSize = 15.sp
+                                        )
+                                    )
+                                    Text(
+                                        text = if (uiState.isAccessibilityEnabled) "Service active & running" else "Required for Shorts & App blocking — Tap toggle to enable",
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                            color = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+
+                                Switch(
+                                    checked = uiState.isAccessibilityEnabled,
+                                    onCheckedChange = { checked ->
+                                        if (checked && !uiState.isAccessibilityEnabled) {
+                                            AccessibilityHelper.openAccessibilitySettings(context)
+                                        } else if (!checked && uiState.isAccessibilityEnabled) {
+                                            AccessibilityHelper.openAccessibilitySettings(context)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = FocusColors.TextOnDark,
+                                        checkedTrackColor = FocusColors.EmeraldSuccess,
+                                        uncheckedThumbColor = FocusColors.TextMuted,
+                                        uncheckedTrackColor = FocusColors.SurfaceSubtle
+                                    ),
+                                    modifier = Modifier.testTag("toggle_accessibility_service")
+                                )
                             }
-                        },
-                        testTag = "settings_accessibility_row"
-                    )
+
+                            if (!uiState.isAccessibilityEnabled) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(
+                                        onClick = { showAccessibilityTroubleshooting = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.testTag("btn_accessibility_troubleshoot")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.HelpOutline,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = FocusColors.Primary
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Troubleshooting & MIUI/HyperOS Guide",
+                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
+                                                color = FocusColors.Primary,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     if (showAccessibilityTroubleshooting) {
                         com.example.core.accessibility.AccessibilityTroubleshootingDialog(
@@ -278,6 +372,7 @@ fun SettingsScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "24/7 Shorts & Reels Blocker",
                                         description = "YouTube Shorts, Instagram Reels, and Facebook Reels at all times",
+                                        featureKey = AccessibilityHelper.FEATURE_SHORTS_ALWAYS,
                                         onGranted = { viewModel.updateShortsReelsAlwaysBlocked(true) }
                                     )
                                 } else {
@@ -328,6 +423,7 @@ fun SettingsScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "YouTube Shorts Blocker",
                                         description = "YouTube Shorts feeds and video players",
+                                        featureKey = AccessibilityHelper.FEATURE_YT_SHORTS,
                                         onGranted = { viewModel.updateYouTubeShortsBlocking(true) }
                                     )
                                 } else {
@@ -371,6 +467,7 @@ fun SettingsScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Instagram Reels Blocker",
                                         description = "Instagram Reels tab and clips viewer",
+                                        featureKey = AccessibilityHelper.FEATURE_IG_REELS,
                                         onGranted = { viewModel.updateInstagramReelsBlocking(true) }
                                     )
                                 } else {
@@ -414,6 +511,7 @@ fun SettingsScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Facebook Reels Blocker",
                                         description = "Facebook Reels tray and video players",
+                                        featureKey = AccessibilityHelper.FEATURE_FB_REELS,
                                         onGranted = { viewModel.updateFacebookReelsBlocking(true) }
                                     )
                                 } else {
@@ -556,6 +654,7 @@ fun SettingsScreen(
         AccessibilityPermissionRequiredDialog(
             featureTitle = promptInfo.title,
             featureDescription = promptInfo.description,
+            featureKey = promptInfo.featureKey,
             onDismissRequest = { pendingAccessibilityPrompt = null },
             onPermissionGranted = {
                 promptInfo.onGranted()

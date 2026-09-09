@@ -92,6 +92,8 @@ class FocusAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         isServiceRunning = true
         instance = this
+        AccessibilityHelper.notifyServiceConnected(this)
+        com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, true)
 
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
@@ -978,6 +980,8 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         isServiceRunning = false
         instance = null
+        AccessibilityHelper.notifyServiceDisconnected()
+        com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
         Log.d(tag, "FocusAccessibilityService unbound.")
@@ -987,6 +991,8 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         isServiceRunning = false
         instance = null
+        AccessibilityHelper.notifyServiceDisconnected()
+        com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
         super.onDestroy()

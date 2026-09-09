@@ -28,11 +28,11 @@ object SessionNotificationHelper {
 
     const val CHANNEL_ID = "focus_session_alerts_v3"
     private const val CHANNEL_NAME = "Focus Session Alerts"
-    private const val CHANNEL_DESCRIPTION = "Vibration alerts for Session start/end, Timer completions, and Pomodoro transitions"
+    private const val CHANNEL_DESCRIPTION = "Sound alerts for Session start/end, Timer completions, and Pomodoro transitions"
 
     const val CHANNEL_ID_STUDY_PLAN = "study_plan_reminders_v3"
     private const val CHANNEL_NAME_STUDY_PLAN = "Study Plan Reminders"
-    private const val CHANNEL_DESCRIPTION_STUDY_PLAN = "Vibration notifications for scheduled study sessions and subject timing"
+    private const val CHANNEL_DESCRIPTION_STUDY_PLAN = "Sound notifications for scheduled study sessions and subject timing"
 
     private const val NOTIFICATION_ID_START = 1000
     private const val NOTIFICATION_ID_TIMER = 1001
@@ -58,8 +58,8 @@ object SessionNotificationHelper {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = CHANNEL_DESCRIPTION
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 150, 80, 180)
+                enableVibration(false)
+                vibrationPattern = null
                 setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
@@ -72,8 +72,8 @@ object SessionNotificationHelper {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = CHANNEL_DESCRIPTION_STUDY_PLAN
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 200, 100, 200)
+                enableVibration(false)
+                vibrationPattern = null
                 setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
@@ -131,7 +131,6 @@ object SessionNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .setVibrate(longArrayOf(0, 150, 80, 180))
             .build()
 
         try {
@@ -166,7 +165,6 @@ object SessionNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .setVibrate(longArrayOf(0, 250, 100, 250))
             .build()
 
         try {
@@ -220,7 +218,6 @@ object SessionNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .setVibrate(longArrayOf(0, 200, 100, 200))
             .build()
 
         try {
@@ -312,7 +309,6 @@ object SessionNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setVibrate(longArrayOf(0, 250, 100, 250))
             .addAction(
                 R.drawable.ic_focus_notification,
                 "Start Session",
@@ -364,7 +360,6 @@ object SessionNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setVibrate(longArrayOf(0, 200, 100, 200))
             .build()
 
         try {

@@ -52,7 +52,8 @@ class AppLimitStrictModeEngine private constructor(
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifies you shortly before app limits expire to help you wrap up."
-                enableVibration(true)
+                enableVibration(false)
+                vibrationPattern = null
                 setSound(soundUri, audioAttributes)
             }
             notificationManager?.createNotificationChannel(channel)

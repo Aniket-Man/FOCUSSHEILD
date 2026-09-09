@@ -54,8 +54,8 @@ object FocusShieldBlockNotificationHelper {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = CHANNEL_DESCRIPTION_BLOCKS
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 150, 70, 180, 70, 250)
+                enableVibration(false)
+                vibrationPattern = null
                 setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
@@ -238,7 +238,6 @@ object FocusShieldBlockNotificationHelper {
             .setSound(FocusAlertSoundManager.getNotificationSoundUri(context))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .setVibrate(longArrayOf(0, 150, 70, 180, 70, 250))
             .build()
 
         try {

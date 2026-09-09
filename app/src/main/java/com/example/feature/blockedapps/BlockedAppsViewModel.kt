@@ -89,6 +89,12 @@ class BlockedAppsViewModel(
     init {
         loadInstalledApps()
         checkAccessibilityStatus()
+
+        viewModelScope.launch {
+            AccessibilityHelper.isServiceEnabledFlow.collect { enabled ->
+                _isAccessibilityEnabled.value = enabled
+            }
+        }
     }
 
     fun onSearchQueryChanged(query: String) {

@@ -74,6 +74,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        com.example.core.accessibility.AccessibilityHelper.updateState(this)
+        com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

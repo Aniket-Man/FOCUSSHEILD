@@ -75,6 +75,9 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         super.onCreate()
         instance = this
 
+        // Initialize AccessibilityHelper reactive state & system observers
+        com.example.core.accessibility.AccessibilityHelper.init(this)
+
         // Initialize blocker manager with dependencies
         FocusBlockerManager.initialize(
             appContext = this,

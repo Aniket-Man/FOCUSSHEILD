@@ -97,6 +97,12 @@ class SettingsViewModel(
     init {
         checkAccessibilityStatus()
         checkDeviceAdminStatus()
+
+        viewModelScope.launch {
+            AccessibilityHelper.isServiceEnabledFlow.collect { enabled ->
+                _isAccessibilityEnabled.value = enabled
+            }
+        }
     }
 
     fun checkAccessibilityStatus() {

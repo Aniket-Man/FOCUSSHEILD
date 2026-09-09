@@ -35,6 +35,7 @@ import com.example.core.design.FocusShapes
 data class AccessibilityFeaturePromptInfo(
     val title: String,
     val description: String,
+    val featureKey: String? = null,
     val onGranted: () -> Unit
 )
 
@@ -47,18 +48,49 @@ data class AccessibilityFeaturePromptInfo(
 fun AccessibilityPermissionRequiredDialog(
     featureTitle: String,
     featureDescription: String,
+    featureKey: String? = null,
     onDismissRequest: () -> Unit,
     onPermissionGranted: () -> Unit
 ) {
     val context = LocalContext.current
     var showTroubleshootingGuide by remember { mutableStateOf(false) }
 
-    // Check if user enabled the permission upon returning from Settings
+    val isServiceEnabled by AccessibilityHelper.isServiceEnabledFlow.collectAsState()
+
+    // 1. React immediately when the service connects or StateFlow emits true
+    LaunchedEffect(isServiceEnabled) {
+        if (isServiceEnabled) {
+            onPermissionGranted()
+            onDismissRequest()
+        }
+    }
+
+    // 2. Active polling loop: catches async Binder connection delay when returning from Settings
+    LaunchedEffect(Unit) {
+        if (AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+            AccessibilityHelper.updateState(context)
+            onPermissionGranted()
+            onDismissRequest()
+            return@LaunchedEffect
+        }
+        while (true) {
+            kotlinx.coroutines.delay(350)
+            if (AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                AccessibilityHelper.updateState(context)
+                onPermissionGranted()
+                onDismissRequest()
+                break
+            }
+        }
+    }
+
+    // 3. Check if user enabled the permission upon returning from Settings
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 if (AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                    AccessibilityHelper.updateState(context)
                     onPermissionGranted()
                     onDismissRequest()
                 }
@@ -194,7 +226,11 @@ fun AccessibilityPermissionRequiredDialog(
                 ) {
                     Button(
                         onClick = {
-                            AccessibilityHelper.openAccessibilitySettings(context)
+                            AccessibilityHelper.openAccessibilitySettings(
+                                context = context,
+                                featureKey = featureKey,
+                                onGranted = onPermissionGranted
+                            )
                         },
                         modifier = Modifier
                             .fillMaxWidth()

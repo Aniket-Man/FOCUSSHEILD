@@ -15,6 +15,12 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,7 +44,26 @@ fun AccessibilityTroubleshootingDialog(
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
-    val isServiceActive = AccessibilityHelper.isAccessibilityServiceEnabled(context)
+    val isServiceActiveState by AccessibilityHelper.isServiceEnabledFlow.collectAsState()
+    var isServiceActive by remember {
+        mutableStateOf(AccessibilityHelper.isAccessibilityServiceEnabled(context))
+    }
+
+    LaunchedEffect(isServiceActiveState) {
+        if (isServiceActiveState) {
+            isServiceActive = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                AccessibilityHelper.updateState(context)
+                isServiceActive = true
+            }
+            kotlinx.coroutines.delay(500)
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismissRequest,

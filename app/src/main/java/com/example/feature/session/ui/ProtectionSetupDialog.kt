@@ -42,16 +42,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -75,6 +81,41 @@ fun ProtectionSetupDialog(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isAccessibilityActive by com.example.core.accessibility.AccessibilityHelper.isServiceEnabledFlow.collectAsState()
+
+    // 1. Immediately refresh whenever service connects or flow emits
+    LaunchedEffect(isAccessibilityActive) {
+        onRefreshPermissions()
+    }
+
+    // 2. Refresh immediately upon returning from Settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                com.example.core.accessibility.AccessibilityHelper.updateState(context)
+                onRefreshPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // 3. Active ticker to catch immediate grant without delay
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(400)
+            val currentAcc = com.example.core.accessibility.AccessibilityHelper.isAccessibilityServiceEnabled(context)
+            val currentOverlay = FocusPermissionManager.isOverlayPermissionGranted(context)
+            if (currentAcc != permissionStatus.isAccessibilityEnabled || currentOverlay != permissionStatus.isOverlayGranted) {
+                com.example.core.accessibility.AccessibilityHelper.updateState(context)
+                onRefreshPermissions()
+            }
+        }
+    }
+
     val allMandatoryGranted = permissionStatus.isOverlayGranted && permissionStatus.isAccessibilityEnabled
 
     AlertDialog(
@@ -141,16 +182,12 @@ fun ProtectionSetupDialog(
                 // 2. Accessibility Service Card
                 PermissionItemCard(
                     title = "Accessibility Service",
-                    description = if (permissionStatus.isAccessibilityEnabled) "Enables YouTube Study Mode and blocks distracting apps & Shorts." else "Enables YouTube Study Mode & blocks Shorts. Tap to enable or fix Restricted Settings.",
+                    description = if (permissionStatus.isAccessibilityEnabled) "Enables YouTube Study Mode and blocks distracting apps & Shorts." else "Enables YouTube Study Mode & blocks Shorts. Tap to enable in Settings.",
                     icon = Icons.Rounded.Shield,
                     isGranted = permissionStatus.isAccessibilityEnabled,
                     isRequired = true,
                     onClick = {
-                        if (!permissionStatus.isAccessibilityEnabled) {
-                            showAccessibilityTroubleshooting = true
-                        } else {
-                            FocusPermissionManager.openAccessibilitySettings(context)
-                        }
+                        FocusPermissionManager.openAccessibilitySettings(context)
                         onRefreshPermissions()
                     },
                     testTag = "accessibility_permission_item"

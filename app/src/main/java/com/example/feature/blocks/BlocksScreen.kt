@@ -434,6 +434,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "YouTube Shorts Blocker",
                                         description = "YouTube Shorts feeds and video players",
+                                        featureKey = AccessibilityHelper.FEATURE_YT_SHORTS,
                                         onGranted = { settingsViewModel.updateYouTubeShortsBlocking(true) }
                                     )
                                 } else {
@@ -461,6 +462,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Instagram Reels Blocker",
                                         description = "Instagram Reels feed and clips viewer",
+                                        featureKey = AccessibilityHelper.FEATURE_IG_REELS,
                                         onGranted = { settingsViewModel.updateInstagramReelsBlocking(true) }
                                     )
                                 } else {
@@ -488,6 +490,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Facebook Reels Blocker",
                                         description = "Facebook Reels tray and video players",
+                                        featureKey = AccessibilityHelper.FEATURE_FB_REELS,
                                         onGranted = { settingsViewModel.updateFacebookReelsBlocking(true) }
                                     )
                                 } else {
@@ -602,6 +605,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "App Uninstall Protection",
                                         description = "system settings to prevent FocusShield from being uninstalled",
+                                        featureKey = AccessibilityHelper.FEATURE_UNINSTALL_PROTECTION,
                                         onGranted = { settingsViewModel.updateBlockUninstall(true) }
                                     )
                                 } else {
@@ -627,6 +631,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Split Screen Blocker",
                                         description = "split screen multi-window mode",
+                                        featureKey = AccessibilityHelper.FEATURE_SPLIT_SCREEN,
                                         onGranted = { settingsViewModel.updateBlockSplitScreen(true) }
                                     )
                                 } else {
@@ -652,6 +657,7 @@ fun BlocksScreen(
                                     pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
                                         title = "Floating Window Blocker",
                                         description = "picture-in-picture and floating windows",
+                                        featureKey = AccessibilityHelper.FEATURE_FLOATING_WINDOW,
                                         onGranted = { settingsViewModel.updateBlockFloatingWindow(true) }
                                     )
                                 } else {
@@ -803,6 +809,7 @@ fun BlocksScreen(
         AccessibilityPermissionRequiredDialog(
             featureTitle = promptInfo.title,
             featureDescription = promptInfo.description,
+            featureKey = promptInfo.featureKey,
             onDismissRequest = { pendingAccessibilityPrompt = null },
             onPermissionGranted = {
                 promptInfo.onGranted()

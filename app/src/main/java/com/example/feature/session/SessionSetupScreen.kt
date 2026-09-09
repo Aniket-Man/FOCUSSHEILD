@@ -90,6 +90,25 @@ fun SessionSetupScreen(
         permissionStatus = FocusPermissionManager.getPermissionStatus(context, requiresBlocking = uiState.isAppBlockingEnabled || uiState.isStudyChannelsEnabled)
     }
 
+    val isAccessibilityActive by com.example.core.accessibility.AccessibilityHelper.isServiceEnabledFlow.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(isAccessibilityActive) {
+        refreshPermissions()
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                com.example.core.accessibility.AccessibilityHelper.updateState(context)
+                refreshPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     if (showProtectionSetupDialog) {
         ProtectionSetupDialog(
             permissionStatus = permissionStatus,

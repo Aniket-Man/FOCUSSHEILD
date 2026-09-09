@@ -9,6 +9,9 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.example.core.accessibility.AccessibilityHelper
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Structured snapshot of FocusShield protection permissions.
@@ -32,6 +35,9 @@ data class ProtectionPermissionStatus(
  * 4. "Battery Optimization Exemption" (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) to run in background without being killed when swiped from recents
  */
 object FocusPermissionManager {
+
+    private val _permissionStatusFlow = MutableStateFlow(ProtectionPermissionStatus())
+    val permissionStatusFlow: StateFlow<ProtectionPermissionStatus> = _permissionStatusFlow.asStateFlow()
 
     /**
      * Checks if battery optimization is ignored (unrestricted background execution allowed).
@@ -163,7 +169,7 @@ object FocusPermissionManager {
     }
 
     /**
-     * Returns a consolidated real-time status object.
+     * Returns a consolidated real-time status object and updates the reactive StateFlow.
      */
     fun getPermissionStatus(context: Context, requiresBlocking: Boolean = true): ProtectionPermissionStatus {
         val overlay = isOverlayPermissionGranted(context)
@@ -174,7 +180,7 @@ object FocusPermissionManager {
         val batteryIgnored = isBatteryOptimizationIgnored(context)
         val mandatory = if (requiresBlocking) (overlay && accessibility) else true
 
-        return ProtectionPermissionStatus(
+        val status = ProtectionPermissionStatus(
             isOverlayGranted = overlay,
             isAccessibilityEnabled = accessibility,
             isUsageAccessGranted = usageAccess,
@@ -183,6 +189,31 @@ object FocusPermissionManager {
             isBatteryOptimizationIgnored = batteryIgnored,
             areMandatoryGranted = mandatory
         )
+        _permissionStatusFlow.value = status
+        return status
+    }
+
+    /**
+     * Re-evaluates permission status and emits immediately to permissionStatusFlow.
+     */
+    fun updatePermissionStatus(context: Context, requiresBlocking: Boolean = true): ProtectionPermissionStatus {
+        return getPermissionStatus(context, requiresBlocking)
+    }
+
+    /**
+     * Lifecycle bridge: notified by FocusAccessibilityService or AccessibilityHelper
+     * when accessibility service connection status changes.
+     */
+    fun notifyAccessibilityChanged(context: Context?, isEnabled: Boolean) {
+        if (context != null) {
+            getPermissionStatus(context)
+        } else {
+            val current = _permissionStatusFlow.value
+            _permissionStatusFlow.value = current.copy(
+                isAccessibilityEnabled = isEnabled,
+                areMandatoryGranted = current.isOverlayGranted && isEnabled
+            )
+        }
     }
 
     /**
@@ -230,8 +261,12 @@ object FocusPermissionManager {
     /**
      * Opens Android System Settings for Accessibility Services.
      */
-    fun openAccessibilitySettings(context: Context) {
-        AccessibilityHelper.openAccessibilitySettings(context)
+    fun openAccessibilitySettings(
+        context: Context,
+        featureKey: String? = null,
+        onGranted: (() -> Unit)? = null
+    ) {
+        AccessibilityHelper.openAccessibilitySettings(context, featureKey, onGranted)
     }
 
     /**
