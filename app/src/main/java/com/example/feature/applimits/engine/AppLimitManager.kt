@@ -87,6 +87,12 @@ class AppLimitManager private constructor(
 
     init {
         scope.launch {
+            try {
+                val active = appLimitRepository.getActiveLimits()
+                active.forEach { enabledLimits[it.packageName] = it }
+            } catch (e: Exception) {
+                Log.e(tag, "Initial load active limits error: ${e.message}")
+            }
             appLimitRepository.getActiveLimitsFlow().collectLatest { limits ->
                 enabledLimits.clear()
                 limits.forEach { enabledLimits[it.packageName] = it }
@@ -98,11 +104,42 @@ class AppLimitManager private constructor(
      * Checks if the package has an active configured App Limit.
      */
     fun isPackageLimited(packageName: String): Boolean {
-        return enabledLimits.containsKey(packageName)
+        if (enabledLimits.containsKey(packageName)) return true
+        return try {
+            val fromDb = kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                appLimitRepository.getLimitByPackage(packageName)
+            }
+            if (fromDb != null && fromDb.isEnabled) {
+                enabledLimits[packageName] = fromDb
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun onLimitSaved(limit: AppLimitEntity) {
+        if (limit.isEnabled) {
+            enabledLimits[limit.packageName] = limit
+        } else {
+            enabledLimits.remove(limit.packageName)
+        }
+    }
+
+    fun onLimitDeleted(packageName: String) {
+        enabledLimits.remove(packageName)
     }
 
     fun getLimit(packageName: String): AppLimitEntity? {
-        return enabledLimits[packageName]
+        return enabledLimits[packageName] ?: try {
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                appLimitRepository.getLimitByPackage(packageName)?.also {
+                    if (it.isEnabled) enabledLimits[it.packageName] = it
+                }
+            }
+        } catch (_: Exception) { null }
     }
 
     /**
@@ -131,7 +168,17 @@ class AppLimitManager private constructor(
             return AppLimitDecision.ALLOW_FOCUS_SESSION_RULES
         }
 
-        val limit = enabledLimits[packageName] ?: return AppLimitDecision.ALLOW_NOT_LIMITED
+        val limit = enabledLimits[packageName] ?: run {
+            val fromDb = appLimitRepository.getLimitByPackage(packageName)
+            if (fromDb != null && fromDb.isEnabled) {
+                enabledLimits[packageName] = fromDb
+                fromDb
+            } else {
+                null
+            }
+        } ?: return AppLimitDecision.ALLOW_NOT_LIMITED
+
+        if (!limit.isEnabled) return AppLimitDecision.ALLOW_NOT_LIMITED
 
         val todayDate = appLimitRepository.getTodayDateString()
         val usage = appLimitRepository.getUsage(packageName, todayDate)
@@ -190,7 +237,7 @@ class AppLimitManager private constructor(
         }
     }
 
-    private var lastOverlayLaunchTime: Long = 0L
+    private val lastOverlayLaunchPerPackage = ConcurrentHashMap<String, Long>()
 
     private fun isIgnoredOverlayOrImePackage(pkg: String): Boolean {
         if (pkg.isBlank()) return true
@@ -413,9 +460,7 @@ class AppLimitManager private constructor(
             _activeSession.value = null
             stopTicker()
 
-            // 1. Immediately minimize app to home and pause media
-            val service = com.example.core.accessibility.FocusAccessibilityService.instance
-            service?.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+            // 1. Pause media immediately (overlay will be displayed directly over the app without minimizing to home first)
             MediaPauseHelper.pauseMedia(appContext)
 
             // 2. Query updated total daily usage from system and database
@@ -510,15 +555,16 @@ class AppLimitManager private constructor(
         forceLaunch: Boolean = false
     ) {
         val now = System.currentTimeMillis()
-        if (!forceLaunch && now - lastOverlayLaunchTime < 1000L) {
+        val lastLaunch = lastOverlayLaunchPerPackage[packageName] ?: 0L
+        if (!forceLaunch && now - lastLaunch < 1000L) {
             Log.d(tag, "Suppressing duplicate overlay launch within debounce window for $packageName")
             return
         }
-        lastOverlayLaunchTime = now
+        lastOverlayLaunchPerPackage[packageName] = now
 
         MediaPauseHelper.pauseMedia(appContext)
         val intent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(AppLimitOverlayActivity.EXTRA_PACKAGE_NAME, packageName)
             putExtra(AppLimitOverlayActivity.EXTRA_APP_NAME, appName)
             putExtra(AppLimitOverlayActivity.EXTRA_OVERLAY_MODE, mode.name)
@@ -536,10 +582,10 @@ class AppLimitManager private constructor(
         try {
             if (service != null) {
                 service.startActivity(intent)
-                Log.i(tag, "Launched AppLimitOverlayActivity via FocusAccessibilityService context")
+                Log.i(tag, "Launched AppLimitOverlayActivity via FocusAccessibilityService for $packageName")
             } else {
                 appContext.startActivity(intent)
-                Log.i(tag, "Launched AppLimitOverlayActivity via appContext")
+                Log.i(tag, "Launched AppLimitOverlayActivity via appContext for $packageName")
             }
         } catch (e: Exception) {
             Log.e(tag, "Error starting AppLimitOverlayActivity: ${e.message}", e)

@@ -24,6 +24,17 @@ class BlockOverlayActivity : ComponentActivity() {
         enableEdgeToEdge()
         MediaPauseHelper.pauseMedia(this)
 
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(homeIntent)
+                finish()
+            }
+        })
+
         val blockedPackage = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE)
         val appName = intent.getStringExtra(EXTRA_BLOCKED_APP_NAME) ?: "Distraction App"
         val blockDecision = intent.getStringExtra(EXTRA_BLOCK_DECISION) ?: "BLOCK"

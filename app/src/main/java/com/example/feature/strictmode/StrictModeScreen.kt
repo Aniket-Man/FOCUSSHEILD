@@ -76,7 +76,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -104,6 +106,7 @@ fun StrictModeScreen(
     }
 
     var showEnableStrictDialog by remember { mutableStateOf(false) }
+    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     val isDeviceAdminActive = if (settingsViewModel != null) {
         settingsViewModel.isDeviceAdminActive.collectAsStateWithLifecycle().value
@@ -561,9 +564,21 @@ fun StrictModeScreen(
                         checked = config.blockShortsAndReels,
                         enabled = config.enabled,
                         onCheckedChange = { isChecked ->
-                            val updated = config.copy(blockShortsAndReels = isChecked)
-                            config = updated
-                            sessionViewModel.updateStrictModeConfig(updated)
+                            if (isChecked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "Strict Shorts & Reels Blocker",
+                                    description = "YouTube Shorts, Instagram Reels, and Facebook Reels",
+                                    onGranted = {
+                                        val updated = config.copy(blockShortsAndReels = true)
+                                        config = updated
+                                        sessionViewModel.updateStrictModeConfig(updated)
+                                    }
+                                )
+                            } else {
+                                val updated = config.copy(blockShortsAndReels = isChecked)
+                                config = updated
+                                sessionViewModel.updateStrictModeConfig(updated)
+                            }
                         },
                         testTag = "strict_block_shorts_reels_switch"
                     )
@@ -620,6 +635,19 @@ fun StrictModeScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    // Dynamic Accessibility Permission Prompt Dialog
+    pendingAccessibilityPrompt?.let { promptInfo ->
+        AccessibilityPermissionRequiredDialog(
+            featureTitle = promptInfo.title,
+            featureDescription = promptInfo.description,
+            onDismissRequest = { pendingAccessibilityPrompt = null },
+            onPermissionGranted = {
+                promptInfo.onGranted()
+                pendingAccessibilityPrompt = null
+            }
+        )
     }
 }
 

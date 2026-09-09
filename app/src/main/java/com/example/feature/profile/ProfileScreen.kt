@@ -79,7 +79,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -102,6 +104,7 @@ fun ProfileScreen(
     val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var showEditProfileSheet by remember { mutableStateOf(false) }
+    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -314,7 +317,7 @@ fun ProfileScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(
-                                            text = "${prefs.claimedRewardIds.size} / 8",
+                                            text = "${prefs.claimedRewardIds.size} / 11",
                                             style = MaterialTheme.typography.labelMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 color = FocusColors.EmeraldSuccess,
@@ -432,7 +435,17 @@ fun ProfileScreen(
                                 else -> FocusColors.Primary
                             },
                             checked = uiState.preferences.isBlockUninstallEnabled,
-                            onCheckedChange = { settingsViewModel.updateBlockUninstall(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "App Uninstall Protection",
+                                        description = "system settings to prevent FocusShield from being uninstalled",
+                                        onGranted = { settingsViewModel.updateBlockUninstall(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateBlockUninstall(checked)
+                                }
+                            },
                             testTag = "profile_prevent_uninstall_switch"
                         )
 
@@ -629,6 +642,19 @@ fun ProfileScreen(
                         academicGoal = goal,
                         dailyGoalMinutes = minutes
                     )
+                }
+            )
+        }
+
+        // Dynamic Accessibility Permission Prompt Dialog
+        pendingAccessibilityPrompt?.let { promptInfo ->
+            AccessibilityPermissionRequiredDialog(
+                featureTitle = promptInfo.title,
+                featureDescription = promptInfo.description,
+                onDismissRequest = { pendingAccessibilityPrompt = null },
+                onPermissionGranted = {
+                    promptInfo.onGranted()
+                    pendingAccessibilityPrompt = null
                 }
             )
         }

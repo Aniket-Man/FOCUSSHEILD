@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.core.sound.FocusAlertSoundManager
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.repository.AppLimitRepository
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,12 @@ class AppLimitStrictModeEngine private constructor(
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val soundUri = FocusAlertSoundManager.getNotificationSoundUri(context)
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+
             val channel = NotificationChannel(
                 channelId,
                 "App Limit Reminders",
@@ -46,6 +53,7 @@ class AppLimitStrictModeEngine private constructor(
             ).apply {
                 description = "Notifies you shortly before app limits expire to help you wrap up."
                 enableVibration(true)
+                setSound(soundUri, audioAttributes)
             }
             notificationManager?.createNotificationChannel(channel)
         }
@@ -107,6 +115,7 @@ class AppLimitStrictModeEngine private constructor(
             .setContentTitle("⏰ $appName Time Almost Up")
             .setContentText("You have less than 1 minute left before your $appName limit is reached. Wrap up your task!")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSound(FocusAlertSoundManager.getNotificationSoundUri(context))
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()

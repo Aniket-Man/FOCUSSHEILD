@@ -671,7 +671,7 @@ private fun MasterShieldCard(
                 dashLength = 7.dp,
                 gapLength = 5.dp
             )
-            .padding(14.dp)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -680,11 +680,13 @@ private fun MasterShieldCard(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(if (isMasterEnabled) (if (isDark) Color(0xFF1E3A2F) else Color(0xFFDCFCE7)) else (if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0))),
                     contentAlignment = Alignment.Center
@@ -693,65 +695,53 @@ private fun MasterShieldCard(
                         imageVector = if (isMasterEnabled) Icons.Rounded.NotificationsOff else Icons.Rounded.Notifications,
                         contentDescription = null,
                         tint = if (isMasterEnabled) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Notification Shield Engine",
-                            color = textPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (isMasterEnabled) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = if (isDark) Color(0xFF1E3A2F) else Color(0xFFDCFCE7)
-                            ) {
-                                Text(
-                                    text = if (isSessionActive) "SESSION ACTIVE" else "ACTIVE",
-                                    color = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (isMasterEnabled) {
-                            "$blockedAppsCount apps selected to stay silent"
-                        } else {
-                            "Shield paused (Turn ON to silence alerts)"
-                        },
-                        color = textSecondary,
-                        fontSize = 12.sp
+                        text = "Notification Shield Engine",
+                        color = textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (isMasterEnabled) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A))
+                            )
+                        }
+                        Text(
+                            text = if (isMasterEnabled) {
+                                if (isSessionActive) "Session Active • $blockedAppsCount apps silent"
+                                else "Active • $blockedAppsCount apps silent"
+                            } else {
+                                "Shield paused (Turn ON to silence)"
+                            },
+                            color = if (isMasterEnabled) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
             Switch(
                 checked = isMasterEnabled,
                 onCheckedChange = onToggle,
-                thumbContent = if (isMasterEnabled) {
-                    {
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = FocusColors.EmeraldSuccess
-                        )
-                    }
-                } else null,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = FocusColors.Primary,

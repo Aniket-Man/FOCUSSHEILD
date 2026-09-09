@@ -49,6 +49,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
+import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
+import com.example.feature.session.SpecialAppOption
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,10 +87,12 @@ fun FocusSessionSetupSheet(
     onStartFocus: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
 
     var activeSubView by remember { mutableStateOf(SetupSubView.MAIN) }
+    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     val pendingDeviceAdminRequest by viewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
     val deviceAdminLauncher = rememberLauncherForActivityResult(
@@ -142,12 +149,62 @@ fun FocusSessionSetupSheet(
                     onOpenBreakPicker = { activeSubView = SetupSubView.BREAK },
                     onOpenSelectApps = { activeSubView = SetupSubView.SELECT_APPS },
                     onToggleStrictMode = { viewModel.toggleStrictMode(it) },
-                    onToggleYouTubeStudyMode = { viewModel.toggleYouTubeStudyMode(it) },
-                    onToggleBrowserStudyMode = { viewModel.toggleBrowserStudyMode(it) },
+                    onToggleYouTubeStudyMode = { enabled ->
+                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "YouTube Study Mode",
+                                description = "YouTube study channels and distractive video feeds",
+                                onGranted = { viewModel.toggleYouTubeStudyMode(true) }
+                            )
+                        } else {
+                            viewModel.toggleYouTubeStudyMode(enabled)
+                        }
+                    },
+                    onToggleBrowserStudyMode = { enabled ->
+                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "Browser Study Mode",
+                                description = "distracting websites while allowing study sites",
+                                onGranted = { viewModel.toggleBrowserStudyMode(true) }
+                            )
+                        } else {
+                            viewModel.toggleBrowserStudyMode(enabled)
+                        }
+                    },
                     onToggleBlockHomeScreen = { viewModel.toggleBlockHomeScreen(it) },
-                    onToggleBlockUninstall = { viewModel.toggleBlockUninstall(it) },
-                    onToggleBlockSplitScreen = { viewModel.toggleBlockSplitScreen(it) },
-                    onToggleBlockFloatingWindow = { viewModel.toggleBlockFloatingWindow(it) },
+                    onToggleBlockUninstall = { enabled ->
+                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "App Uninstall Protection",
+                                description = "system settings to prevent FocusShield from being uninstalled",
+                                onGranted = { viewModel.toggleBlockUninstall(true) }
+                            )
+                        } else {
+                            viewModel.toggleBlockUninstall(enabled)
+                        }
+                    },
+                    onToggleBlockSplitScreen = { enabled ->
+                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "Split Screen Blocker",
+                                description = "split screen multi-window mode",
+                                onGranted = { viewModel.toggleBlockSplitScreen(true) }
+                            )
+                        } else {
+                            viewModel.toggleBlockSplitScreen(enabled)
+                        }
+                    },
+                    onToggleBlockFloatingWindow = { enabled ->
+                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "Floating Window Blocker",
+                                description = "picture-in-picture and floating windows",
+                                onGranted = { viewModel.toggleBlockFloatingWindow(true) }
+                            )
+                        } else {
+                            viewModel.toggleBlockFloatingWindow(enabled)
+                        }
+                    },
                     onToggleDeepFocusExpanded = { viewModel.toggleDeepFocusExpanded() },
                     onStartFocusNow = {
                         val started = viewModel.startSession()
@@ -182,14 +239,47 @@ fun FocusSessionSetupSheet(
                     browserOption = setupState.browserOption,
                     isDistractingMasterEnabled = setupState.isDistractingMasterEnabled,
                     blockedAppPackages = setupState.blockedAppPackages,
-                    onYoutubeOptionChange = { viewModel.setYoutubeOption(it) },
-                    onBrowserOptionChange = { viewModel.setBrowserOption(it) },
+                    onYoutubeOptionChange = { option ->
+                        if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "YouTube Study Mode",
+                                description = "YouTube study channels and distractive video feeds",
+                                onGranted = { viewModel.setYoutubeOption(SpecialAppOption.STUDY_MODE) }
+                            )
+                        } else {
+                            viewModel.setYoutubeOption(option)
+                        }
+                    },
+                    onBrowserOptionChange = { option ->
+                        if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                title = "Browser Study Mode",
+                                description = "distracting websites and search results",
+                                onGranted = { viewModel.setBrowserOption(SpecialAppOption.STUDY_MODE) }
+                            )
+                        } else {
+                            viewModel.setBrowserOption(option)
+                        }
+                    },
                     onToggleDistractingMaster = { enabled, allPkgs -> viewModel.toggleDistractingMaster(enabled, allPkgs) },
                     onToggleAppBlocked = { pkg, blocked -> viewModel.toggleAppBlocked(pkg, blocked) },
                     onClose = { activeSubView = SetupSubView.MAIN }
                 )
             }
         }
+    }
+
+    // Dynamic Accessibility Permission Prompt Dialog
+    pendingAccessibilityPrompt?.let { promptInfo ->
+        AccessibilityPermissionRequiredDialog(
+            featureTitle = promptInfo.title,
+            featureDescription = promptInfo.description,
+            onDismissRequest = { pendingAccessibilityPrompt = null },
+            onPermissionGranted = {
+                promptInfo.onGranted()
+                pendingAccessibilityPrompt = null
+            }
+        )
     }
 }
 

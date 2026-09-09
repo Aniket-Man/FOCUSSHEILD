@@ -200,7 +200,7 @@ class FocusBlockerManager private constructor(
             decision == ProtectionDecision.BLOCK_FLOATING_WINDOW
         ) {
             val intent = Intent(appContext, BlockOverlayActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                 putExtra(BlockOverlayActivity.EXTRA_BLOCKED_PACKAGE, packageName)
                 putExtra(BlockOverlayActivity.EXTRA_BLOCKED_APP_NAME, resolvedAppName)
                 putExtra(BlockOverlayActivity.EXTRA_BLOCK_DECISION, decision.name)

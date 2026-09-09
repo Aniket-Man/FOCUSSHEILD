@@ -60,7 +60,33 @@ class FocusAccessibilityService : AccessibilityService() {
     )
 
     private var currentPreferences = FocusPreferences()
-    private var lastAppLimitCheckTimestamp: Long = 0L
+    private val lastAppLimitCheckTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun isExcludedFromAppLimits(rawPackageName: String): Boolean {
+        if (rawPackageName.isBlank()) return true
+        val lower = rawPackageName.lowercase()
+        if (lower.startsWith("com.example") ||
+            lower.startsWith("com.aistudio.focusshield") ||
+            lower == applicationContext.packageName.lowercase()
+        ) {
+            return true
+        }
+
+        return lower == "android" ||
+                lower == "com.android.systemui" ||
+                lower.contains("launcher") ||
+                lower.contains("nexuslauncher") ||
+                lower.contains("launcher3") ||
+                lower == "com.android.server.telecom" ||
+                lower.contains("inputmethod") ||
+                lower.contains("honeyboard") ||
+                lower.contains("keyboard") ||
+                lower.contains("swiftkey") ||
+                lower == "com.google.android.packageinstaller" ||
+                lower == "com.android.packageinstaller" ||
+                lower == "com.google.android.permissioncontroller" ||
+                lower == "com.android.permissioncontroller"
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -343,11 +369,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     }
                     try { rootNode?.recycle() } catch (_: Exception) {}
                 }
-
-                // If Browser Study Mode is active, allow normal browsing and searching
-                if (isBrowserStudyMode) {
-                    return
-                }
             }
 
             // 2. YouTube Study Mode Inspection Flow (Focus Session & Channels Rules)
@@ -419,7 +440,9 @@ class FocusAccessibilityService : AccessibilityService() {
                                 com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
                                 com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
                             }
-                            else -> performGlobalAction(GLOBAL_ACTION_HOME)
+                            else -> {
+                                // Block overlay is launched directly over the blocked app by blockerManager
+                            }
                         }
 
                         val protectionDecision = when (decision.verdict) {
@@ -453,7 +476,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     val decision = blockerManager.evaluateProtection(rawPackageName)
                     if (decision == ProtectionDecision.BLOCK) {
                         Log.i(tag, "Distraction app detected in Focus Session: $rawPackageName. Enforcing FocusShield block.")
-                        performGlobalAction(GLOBAL_ACTION_HOME)
                         blockerManager.handleBlockedPackage(
                             packageName = rawPackageName,
                             fallbackAppName = null,
@@ -473,26 +495,25 @@ class FocusAccessibilityService : AccessibilityService() {
                 val sessionActiveWithYouTubeStudyMode = isSessionRunningOrPaused && (protectionState?.isYouTubeStudyModeEnabled == true)
                 val sessionActiveWithBrowserStudyMode = isSessionRunningOrPaused && (protectionState?.isBrowserStudyModeEnabled == true)
 
-                if (!ProtectionPolicy.SAFE_SYSTEM_PACKAGES.contains(rawPackageName) &&
-                    !rawPackageName.startsWith("com.example") &&
-                    !rawPackageName.startsWith("com.aistudio.focusshield") &&
-                    rawPackageName != applicationContext.packageName &&
+                if (!isExcludedFromAppLimits(rawPackageName) &&
                     !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
                     !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
                 ) {
                     val isLimited = appLimitManager.isPackageLimited(rawPackageName)
                     val isSessionActive = appLimitManager.isSessionActiveFor(rawPackageName)
 
-                    val shouldCheck = (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) ||
-                            (isLimited && !isSessionActive && (now - lastAppLimitCheckTimestamp > 800L))
+                    val lastCheckTime = lastAppLimitCheckTimestamps[rawPackageName] ?: 0L
+                    val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+
+                    val shouldCheck = (isWindowStateChange && (now - lastCheckTime > 300L)) ||
+                            (isLimited && !isSessionActive && (now - lastCheckTime > 500L))
 
                     if (shouldCheck) {
-                        lastAppLimitCheckTimestamp = now
+                        lastAppLimitCheckTimestamps[rawPackageName] = now
                         serviceScope.launch {
                             when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
                                 is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
-                                    Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName}")
-                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                    Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName} ($rawPackageName)")
                                     MediaPauseHelper.pauseMedia(applicationContext)
                                     if (isYouTubePackage) {
                                         val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
@@ -515,8 +536,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                     )
                                 }
                                 is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
-                                    Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName}. Enforcing blocker.")
-                                    performGlobalAction(GLOBAL_ACTION_HOME)
+                                    Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName} ($rawPackageName). Enforcing blocker.")
                                     MediaPauseHelper.pauseMedia(applicationContext)
                                     if (isYouTubePackage) {
                                         val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }

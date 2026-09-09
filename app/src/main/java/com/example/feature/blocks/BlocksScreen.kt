@@ -48,6 +48,9 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.VideoLibrary
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
+import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -190,6 +193,9 @@ fun BlocksScreen(
 
     // Help Dialog
     var showHelpDialog by remember { mutableStateOf(false) }
+
+    // Dynamic Accessibility Permission Prompt for Shorts, Reels & Protection toggles
+    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     // Stepwise Back Handling: If Config Sheet was opened from App Selection Sheet,
     // stepping back returns to the App Selection Sheet first, then cancels the popup.
@@ -423,7 +429,17 @@ fun BlocksScreen(
                             icon = Icons.Rounded.SmartDisplay,
                             iconTint = Color(0xFFFF0000),
                             checked = settingsState.preferences.isYouTubeShortsBlockingEnabled,
-                            onCheckedChange = { settingsViewModel.updateYouTubeShortsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "YouTube Shorts Blocker",
+                                        description = "YouTube Shorts feeds and video players",
+                                        onGranted = { settingsViewModel.updateYouTubeShortsBlocking(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateYouTubeShortsBlocking(checked)
+                                }
+                            },
                             testTag = "blocks_toggle_yt_shorts"
                         )
 
@@ -440,7 +456,17 @@ fun BlocksScreen(
                             icon = Icons.Rounded.VideoLibrary,
                             iconTint = Color(0xFFE1306C),
                             checked = settingsState.preferences.isInstagramReelsBlockingEnabled,
-                            onCheckedChange = { settingsViewModel.updateInstagramReelsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Instagram Reels Blocker",
+                                        description = "Instagram Reels feed and clips viewer",
+                                        onGranted = { settingsViewModel.updateInstagramReelsBlocking(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateInstagramReelsBlocking(checked)
+                                }
+                            },
                             testTag = "blocks_toggle_ig_reels"
                         )
 
@@ -457,7 +483,17 @@ fun BlocksScreen(
                             icon = Icons.Rounded.SmartDisplay,
                             iconTint = Color(0xFF1877F2),
                             checked = settingsState.preferences.isFacebookReelsBlockingEnabled,
-                            onCheckedChange = { settingsViewModel.updateFacebookReelsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Facebook Reels Blocker",
+                                        description = "Facebook Reels tray and video players",
+                                        onGranted = { settingsViewModel.updateFacebookReelsBlocking(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateFacebookReelsBlocking(checked)
+                                }
+                            },
                             testTag = "blocks_toggle_fb_reels"
                         )
                     }
@@ -561,7 +597,17 @@ fun BlocksScreen(
                                 else -> "Cannot uninstall or modify protection for FocusShield"
                             },
                             checked = blockUninstallEnabled,
-                            onCheckedChange = { settingsViewModel.updateBlockUninstall(it) }
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "App Uninstall Protection",
+                                        description = "system settings to prevent FocusShield from being uninstalled",
+                                        onGranted = { settingsViewModel.updateBlockUninstall(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateBlockUninstall(checked)
+                                }
+                            }
                         )
 
                         Box(
@@ -576,7 +622,17 @@ fun BlocksScreen(
                             title = "Block split screen",
                             subtitle = "Cannot use blocked apps in split screen",
                             checked = blockSplitScreenEnabled,
-                            onCheckedChange = { settingsViewModel.updateBlockSplitScreen(it) }
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Split Screen Blocker",
+                                        description = "split screen multi-window mode",
+                                        onGranted = { settingsViewModel.updateBlockSplitScreen(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateBlockSplitScreen(checked)
+                                }
+                            }
                         )
 
                         Box(
@@ -591,7 +647,17 @@ fun BlocksScreen(
                             title = "Block floating window",
                             subtitle = "Cannot use blocked apps in floating window",
                             checked = blockFloatingWindowEnabled,
-                            onCheckedChange = { settingsViewModel.updateBlockFloatingWindow(it) }
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Floating Window Blocker",
+                                        description = "picture-in-picture and floating windows",
+                                        onGranted = { settingsViewModel.updateBlockFloatingWindow(true) }
+                                    )
+                                } else {
+                                    settingsViewModel.updateBlockFloatingWindow(checked)
+                                }
+                            }
                         )
                     }
                 }
@@ -728,6 +794,19 @@ fun BlocksScreen(
                 ) {
                     Text("Got It")
                 }
+            }
+        )
+    }
+
+    // Dynamic Accessibility Permission Prompt Dialog
+    pendingAccessibilityPrompt?.let { promptInfo ->
+        AccessibilityPermissionRequiredDialog(
+            featureTitle = promptInfo.title,
+            featureDescription = promptInfo.description,
+            onDismissRequest = { pendingAccessibilityPrompt = null },
+            onPermissionGranted = {
+                promptInfo.onGranted()
+                pendingAccessibilityPrompt = null
             }
         )
     }

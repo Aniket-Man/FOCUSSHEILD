@@ -93,11 +93,11 @@ fun ProfileRewardsSection(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f, fill = false)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(FocusColors.CoralWarning.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
@@ -106,30 +106,30 @@ fun ProfileRewardsSection(
                         imageVector = Icons.Rounded.EmojiEvents,
                         contentDescription = null,
                         tint = FocusColors.CoralWarning,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "ACHIEVEMENT TROPHIES & BADGES",
+                    text = "ACHIEVEMENTS & BADGES",
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.6.sp
                     ),
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Surface(
                 shape = FocusShapes.pill,
                 color = FocusColors.CoralWarning.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.3f))
+                border = BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.35f))
             ) {
                 Text(
-                    text = "$unlockedCount / ${badges.size} Badges",
+                    text = "$unlockedCount/${badges.size} Badges",
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = FocusColors.CoralWarning,

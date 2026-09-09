@@ -42,6 +42,11 @@ object FocusShieldBlockNotificationHelper {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            val soundUri = FocusAlertSoundManager.getNotificationSoundUri(context)
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                .build()
 
             val channel = NotificationChannel(
                 CHANNEL_ID_BLOCKS,
@@ -51,7 +56,7 @@ object FocusShieldBlockNotificationHelper {
                 description = CHANNEL_DESCRIPTION_BLOCKS
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 150, 70, 180, 70, 250)
-                setSound(null, null) // Silent, vibration only
+                setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(channel)
@@ -230,7 +235,7 @@ object FocusShieldBlockNotificationHelper {
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setSound(null) // Vibration only
+            .setSound(FocusAlertSoundManager.getNotificationSoundUri(context))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setVibrate(longArrayOf(0, 150, 70, 180, 70, 250))

@@ -45,8 +45,13 @@ object SessionNotificationHelper {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            val soundUri = FocusAlertSoundManager.getNotificationSoundUri(context)
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                .build()
 
-            // Session alerts channel (vibration only)
+            // Session alerts channel
             val sessionChannel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
@@ -55,12 +60,12 @@ object SessionNotificationHelper {
                 description = CHANNEL_DESCRIPTION
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 150, 80, 180)
-                setSound(null, null)
+                setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(sessionChannel)
 
-            // Study plan timing reminder channel (vibration only)
+            // Study plan timing reminder channel
             val planChannel = NotificationChannel(
                 CHANNEL_ID_STUDY_PLAN,
                 CHANNEL_NAME_STUDY_PLAN,
@@ -69,7 +74,7 @@ object SessionNotificationHelper {
                 description = CHANNEL_DESCRIPTION_STUDY_PLAN
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 200, 100, 200)
-                setSound(null, null)
+                setSound(soundUri, audioAttributes)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(planChannel)

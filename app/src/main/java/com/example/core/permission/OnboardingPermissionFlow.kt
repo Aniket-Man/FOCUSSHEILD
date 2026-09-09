@@ -19,6 +19,14 @@ enum class OnboardingPermission(
     val whyItMatters: String,
     val isMandatory: Boolean
 ) {
+    DISPLAY_OVER_APPS(
+        title = "Display over other apps",
+        rationale = "This lets us cover a distracting app the moment you open it.",
+        whyItMatters = "A block is only a block if it appears on top of the app you just opened. " +
+            "This permission is what allows FocusShield to draw the focus shield over Instagram or " +
+            "a game instead of quietly logging that you opened it.",
+        isMandatory = true
+    ),
     USAGE_ACCESS(
         title = "Usage permission",
         rationale = "This allows us to track your app usage.",
@@ -35,22 +43,6 @@ enum class OnboardingPermission(
             "This exemption is what lets a session survive you closing the app.",
         isMandatory = true
     ),
-    DISPLAY_OVER_APPS(
-        title = "Display over other apps",
-        rationale = "This lets us cover a distracting app the moment you open it.",
-        whyItMatters = "A block is only a block if it appears on top of the app you just opened. " +
-            "This permission is what allows FocusShield to draw the focus shield over Instagram or " +
-            "a game instead of quietly logging that you opened it.",
-        isMandatory = true
-    ),
-    ACCESSIBILITY(
-        title = "Accessibility permission",
-        rationale = "This lets us spot Shorts, Reels and blocked apps in real time.",
-        whyItMatters = "FocusShield reads only which screen is currently in front of you, so it can " +
-            "tell a YouTube search from a Shorts feed and dismiss the feed within a second. " +
-            "Nothing is recorded, uploaded or stored — everything stays on your phone.",
-        isMandatory = true
-    ),
     NOTIFICATIONS(
         title = "Notification permission",
         rationale = "This shows your live focus timer and break reminders.",
@@ -61,10 +53,9 @@ enum class OnboardingPermission(
     );
 
     fun isGranted(context: Context): Boolean = when (this) {
+        DISPLAY_OVER_APPS -> FocusPermissionManager.isOverlayPermissionGranted(context)
         USAGE_ACCESS -> FocusPermissionManager.isUsageAccessGranted(context)
         BACKGROUND -> FocusPermissionManager.isBatteryOptimizationIgnored(context)
-        DISPLAY_OVER_APPS -> FocusPermissionManager.isOverlayPermissionGranted(context)
-        ACCESSIBILITY -> FocusPermissionManager.isAccessibilityServiceEnabled(context)
         NOTIFICATIONS -> FocusPermissionManager.isNotificationPermissionGranted(context)
     }
 
@@ -72,10 +63,9 @@ enum class OnboardingPermission(
      * Sends the user to the exact system screen where this permission is toggled.
      */
     fun request(context: Context) = when (this) {
+        DISPLAY_OVER_APPS -> FocusPermissionManager.openOverlaySettings(context)
         USAGE_ACCESS -> FocusPermissionManager.openUsageAccessSettings(context)
         BACKGROUND -> FocusPermissionManager.requestIgnoreBatteryOptimization(context)
-        DISPLAY_OVER_APPS -> FocusPermissionManager.openOverlaySettings(context)
-        ACCESSIBILITY -> FocusPermissionManager.openAccessibilitySettings(context)
         NOTIFICATIONS -> FocusPermissionManager.openNotificationSettings(context)
     }
 

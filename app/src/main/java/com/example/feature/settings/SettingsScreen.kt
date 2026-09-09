@@ -42,6 +42,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +59,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -82,6 +86,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
+    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -268,7 +273,17 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = uiState.preferences.isShortsReelsAlwaysBlocked,
-                            onCheckedChange = { viewModel.updateShortsReelsAlwaysBlocked(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "24/7 Shorts & Reels Blocker",
+                                        description = "YouTube Shorts, Instagram Reels, and Facebook Reels at all times",
+                                        onGranted = { viewModel.updateShortsReelsAlwaysBlocked(true) }
+                                    )
+                                } else {
+                                    viewModel.updateShortsReelsAlwaysBlocked(checked)
+                                }
+                            },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
                                 checkedTrackColor = FocusColors.Primary,
@@ -308,7 +323,17 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = uiState.preferences.isYouTubeShortsBlockingEnabled,
-                            onCheckedChange = { viewModel.updateYouTubeShortsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "YouTube Shorts Blocker",
+                                        description = "YouTube Shorts feeds and video players",
+                                        onGranted = { viewModel.updateYouTubeShortsBlocking(true) }
+                                    )
+                                } else {
+                                    viewModel.updateYouTubeShortsBlocking(checked)
+                                }
+                            },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
                                 checkedTrackColor = FocusColors.Primary,
@@ -341,7 +366,17 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = uiState.preferences.isInstagramReelsBlockingEnabled,
-                            onCheckedChange = { viewModel.updateInstagramReelsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Instagram Reels Blocker",
+                                        description = "Instagram Reels tab and clips viewer",
+                                        onGranted = { viewModel.updateInstagramReelsBlocking(true) }
+                                    )
+                                } else {
+                                    viewModel.updateInstagramReelsBlocking(checked)
+                                }
+                            },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
                                 checkedTrackColor = FocusColors.Primary,
@@ -374,7 +409,17 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = uiState.preferences.isFacebookReelsBlockingEnabled,
-                            onCheckedChange = { viewModel.updateFacebookReelsBlocking(it) },
+                            onCheckedChange = { checked ->
+                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "Facebook Reels Blocker",
+                                        description = "Facebook Reels tray and video players",
+                                        onGranted = { viewModel.updateFacebookReelsBlocking(true) }
+                                    )
+                                } else {
+                                    viewModel.updateFacebookReelsBlocking(checked)
+                                }
+                            },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
                                 checkedTrackColor = FocusColors.Primary,
@@ -504,6 +549,19 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(FocusSpacing.base))
             }
         }
+    }
+
+    // Dynamic Accessibility Permission Prompt Dialog
+    pendingAccessibilityPrompt?.let { promptInfo ->
+        AccessibilityPermissionRequiredDialog(
+            featureTitle = promptInfo.title,
+            featureDescription = promptInfo.description,
+            onDismissRequest = { pendingAccessibilityPrompt = null },
+            onPermissionGranted = {
+                promptInfo.onGranted()
+                pendingAccessibilityPrompt = null
+            }
+        )
     }
 }
 

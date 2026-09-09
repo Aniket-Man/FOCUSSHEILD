@@ -63,16 +63,31 @@ class AppLimitRepository(
             updatedAt = System.currentTimeMillis()
         )
         appLimitDao.insertOrUpdate(entity)
+        try {
+            com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(entity)
+        } catch (_: Exception) {}
     }
 
     suspend fun deleteLimit(packageName: String) {
         appLimitDao.deleteByPackage(packageName)
         dailyAppUsageDao.deleteUsageForPackage(packageName)
         appLimitSessionDao.deleteSessionsForPackage(packageName)
+        try {
+            com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
+        } catch (_: Exception) {}
     }
 
     suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean) {
         appLimitDao.setEnabled(packageName, isEnabled)
+        try {
+            if (isEnabled) {
+                appLimitDao.getLimitByPackage(packageName)?.let {
+                    com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(it)
+                }
+            } else {
+                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
