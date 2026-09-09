@@ -21,7 +21,7 @@ object FocusAlertSoundManager {
     private var lastChimeTime: Long = 0L
 
     fun getNotificationSoundUri(context: Context): Uri {
-        return Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/raw/focus_notification_chime")
+        return Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/raw/mixkit_correct_answer_tone")
     }
 
     fun init(context: Context) {
@@ -38,7 +38,7 @@ object FocusAlertSoundManager {
 
         // Play custom notification sound
         try {
-            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.focus_notification_chime)
+            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
             mediaPlayer?.apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -65,7 +65,7 @@ object FocusAlertSoundManager {
 
         // Play notification sound on block interception
         try {
-            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.focus_notification_chime)
+            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
             mediaPlayer?.apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()

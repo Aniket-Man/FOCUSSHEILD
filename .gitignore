@@ -1,0 +1,7 @@
+# Android / Gradle
+local.properties
+.gradle/
+build/
+
+# Claude Code local session data
+.claude/
