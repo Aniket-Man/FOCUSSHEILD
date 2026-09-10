@@ -83,6 +83,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
+import com.example.core.util.ProfilePhotoStorage
 
 /**
  * Avatar Preset Option definition for student personas
@@ -243,6 +244,10 @@ fun EditProfileBottomSheet(
     var academicGoal by remember { mutableStateOf(currentAcademicGoal) }
     var dailyGoalMinutes by remember { mutableIntStateOf(currentDailyGoalMinutes) }
 
+    // The raw gallery URI awaits cropping in the full-screen crop screen. It is deliberately kept
+    // out of `photoUri` so a picked-but-uncropped image can never become the avatar.
+    var pendingCropUri by remember { mutableStateOf<String?>(null) }
+
     // System Image Picker launcher
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -257,7 +262,7 @@ fun EditProfileBottomSheet(
             } catch (e: Exception) {
                 // Ignore if not persistable
             }
-            photoUri = uri.toString()
+            pendingCropUri = uri.toString()
         }
     }
 
@@ -266,7 +271,7 @@ fun EditProfileBottomSheet(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            photoUri = uri.toString()
+            pendingCropUri = uri.toString()
         }
     }
 
@@ -390,6 +395,8 @@ fun EditProfileBottomSheet(
 
                         if (photoUri != null) {
                             TextButton(
+                                // Only clears the pending selection — the stored file is removed on
+                                // save, so cancelling the sheet never destroys the saved avatar.
                                 onClick = { photoUri = null },
                                 shape = RoundedCornerShape(10.dp)
                             ) {
@@ -630,9 +637,23 @@ fun EditProfileBottomSheet(
             Button(
                 onClick = {
                     val finalName = if (name.isBlank()) "Focus Scholar" else name.trim()
+                    // A freshly cropped photo is still sitting in the staging file; promote it to
+                    // the permanent avatar (or drop both files when the photo was removed) before
+                    // handing the URI up to be persisted and uploaded.
+                    val finalPhoto = when {
+                        ProfilePhotoStorage.isStaged(context, photoUri) ->
+                            ProfilePhotoStorage.commitStagedCrop(context) ?: photoUri
+
+                        photoUri == null -> {
+                            ProfilePhotoStorage.deleteStoredPhotos(context)
+                            null
+                        }
+
+                        else -> photoUri
+                    }
                     onSaveProfile(
                         finalName,
-                        photoUri,
+                        finalPhoto,
                         avatarPreset,
                         motto.trim(),
                         academicGoal.trim(),
@@ -667,5 +688,18 @@ fun EditProfileBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
         }
+    }
+
+    // Rendered as a sibling of the sheet rather than inside it: a Dialog gets its own window and
+    // layers above the ModalBottomSheet, so the sheet's drag gestures cannot fight the pinch-zoom.
+    pendingCropUri?.let { source ->
+        ImageCropDialog(
+            sourceUri = Uri.parse(source),
+            onConfirm = { croppedUri ->
+                photoUri = croppedUri
+                pendingCropUri = null
+            },
+            onCancel = { pendingCropUri = null }
+        )
     }
 }

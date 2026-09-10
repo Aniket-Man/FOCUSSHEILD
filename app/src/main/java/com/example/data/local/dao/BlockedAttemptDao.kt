@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.example.data.local.entity.BlockedAttemptEntity
+import com.example.data.local.entity.BlockedEventType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,6 +21,14 @@ interface BlockedAttemptDao {
 
     @Query("SELECT COUNT(*) FROM blocked_attempts WHERE timestamp >= :sinceTimestamp")
     fun getAttemptCountSinceFlow(sinceTimestamp: Long): Flow<Int>
+
+    /**
+     * Count of one event type since a timestamp. The event rows are the durable record, so figures
+     * that used to be kept as standalone counters (e.g. notifications silenced today) are derived
+     * from here and survive a restore.
+     */
+    @Query("SELECT COUNT(*) FROM blocked_attempts WHERE eventType = :eventType AND timestamp >= :sinceTimestamp")
+    fun getEventCountSinceFlow(eventType: BlockedEventType, sinceTimestamp: Long): Flow<Int>
 
     @Query("SELECT * FROM blocked_attempts WHERE sessionId = :sessionId ORDER BY timestamp DESC")
     fun getAttemptsForSessionFlow(sessionId: String): Flow<List<BlockedAttemptEntity>>

@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.example.core.accessibility.ProtectionPolicy
+import com.example.data.local.entity.BlockedEventSource
+import com.example.data.local.entity.BlockedEventType
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.BlockedAttemptRepository
 import com.example.feature.blocker.FocusBlockerManager
@@ -90,9 +92,14 @@ class NotificationBlockerEngine private constructor(
                 alwaysBlockedPackages.clear()
                 alwaysBlockedPackages.addAll(prefs.alwaysBlockedNotificationPackages)
                 _alwaysBlockedPackagesFlow.value = prefs.alwaysBlockedNotificationPackages
-
-                _silencedCountToday.value = prefs.blockedNotificationsCount
             }
+        }
+
+        // Today's silenced count is derived from the event rows, not from a running counter, so it
+        // resets at midnight on its own and is reconstructed correctly after a cloud restore.
+        engineScope.launch {
+            blockedAttemptRepository.getTodayEventCountFlow(BlockedEventType.NOTIFICATION_SILENCED)
+                .collectLatest { _silencedCountToday.value = it }
         }
 
         // Observe session active state
@@ -218,13 +225,18 @@ class NotificationBlockerEngine private constructor(
             }
             _silencedVaultFlow.value = silencedVaultItems.toList()
 
-            // Update stats
+            // Update stats. The counter is only a local cache for the "today" chip; the durable
+            // record is the NOTIFICATION_SILENCED event, which is what syncs and what a restore
+            // rebuilds the figure from. Only the fact of silencing is recorded — never the title,
+            // text or sender of the notification itself.
             engineScope.launch {
                 preferencesRepository.incrementBlockedNotificationsCount()
                 try {
                     blockedAttemptRepository.recordAttempt(
                         packageName = rawPkg,
-                        appName = "$appName (Silenced Notification)",
+                        appName = appName,
+                        eventType = BlockedEventType.NOTIFICATION_SILENCED,
+                        source = BlockedEventSource.NOTIFICATION_ENGINE,
                         sessionId = currentSession?.id
                     )
                 } catch (e: Exception) {
@@ -324,12 +336,16 @@ class NotificationBlockerEngine private constructor(
         }
     }
 
+    /**
+     * Clears the in-memory vault of silenced notification *contents* (title / text / sender).
+     *
+     * This deliberately no longer resets the "silenced today" figure: that figure counts events
+     * that really happened and now comes from the event rows, which are the durable record. A
+     * privacy clear of message contents does not make the silencing not have occurred.
+     */
     fun clearVault() {
         silencedVaultItems.clear()
         _silencedVaultFlow.value = emptyList()
-        engineScope.launch {
-            preferencesRepository.clearBlockedNotificationsCount()
-        }
     }
 
     fun deleteVaultItem(id: String) {

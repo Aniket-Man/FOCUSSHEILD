@@ -5,11 +5,16 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.example.data.local.entity.AppLimitEntity
+import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.BlockedAppEntity
+import com.example.data.local.entity.BlockedAttemptEntity
 import com.example.data.local.entity.BlockedWebsiteEntity
 import com.example.data.local.entity.BreakRecordEntity
+import com.example.data.local.entity.DailyAppUsageEntity
+import com.example.data.local.entity.DailyUnlockEntity
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.KeywordEntity
+import com.example.data.local.entity.ScratchCardEntity
 import com.example.data.local.entity.SessionRecordEntity
 import com.example.data.local.entity.StudyActivityEntity
 import com.example.data.local.entity.StudyChannelEntity
@@ -169,4 +174,62 @@ interface CloudBulkDao {
 
     @Query("DELETE FROM break_records")
     suspend fun clearBreaks()
+
+    // ---- blocked_attempts (history) -------------------------------------------------
+    //
+    // `eventId` is the cloud identity and carries a unique index, so IGNORE makes a re-pulled or
+    // re-uploaded event idempotent even though the Room PK stays an auto-increment surrogate.
+
+    @Query("SELECT * FROM blocked_attempts")
+    suspend fun blockedAttempts(): List<BlockedAttemptEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertBlockedAttemptsMissing(rows: List<BlockedAttemptEntity>)
+
+    @Query("DELETE FROM blocked_attempts")
+    suspend fun clearBlockedAttempts()
+
+    // ---- app_limit_sessions (history) -----------------------------------------------
+
+    @Query("SELECT * FROM app_limit_sessions")
+    suspend fun appLimitSessions(): List<AppLimitSessionEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAppLimitSessionsMissing(rows: List<AppLimitSessionEntity>)
+
+    @Query("DELETE FROM app_limit_sessions")
+    suspend fun clearAppLimitSessions()
+
+    // ---- scratch_cards (history) ----------------------------------------------------
+
+    @Query("SELECT * FROM scratch_cards")
+    suspend fun scratchCards(): List<ScratchCardEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertScratchCardsMissing(rows: List<ScratchCardEntity>)
+
+    @Query("DELETE FROM scratch_cards")
+    suspend fun clearScratchCards()
+
+    // ---- daily_unlocks (reconcile) --------------------------------------------------
+
+    @Query("SELECT * FROM daily_unlocks")
+    suspend fun dailyUnlocks(): List<DailyUnlockEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDailyUnlocks(rows: List<DailyUnlockEntity>)
+
+    @Query("DELETE FROM daily_unlocks")
+    suspend fun clearDailyUnlocks()
+
+    // ---- daily_app_usage (merge — local enforcement columns survive a pull) ----------
+
+    @Query("SELECT * FROM daily_app_usage")
+    suspend fun dailyAppUsage(): List<DailyAppUsageEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDailyAppUsage(rows: List<DailyAppUsageEntity>)
+
+    @Query("DELETE FROM daily_app_usage")
+    suspend fun clearDailyAppUsage()
 }

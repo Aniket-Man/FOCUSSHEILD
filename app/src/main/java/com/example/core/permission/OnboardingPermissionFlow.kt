@@ -27,6 +27,14 @@ enum class OnboardingPermission(
             "a game instead of quietly logging that you opened it.",
         isMandatory = true
     ),
+    ACCESSIBILITY(
+        title = "Accessibility service",
+        rationale = "This detects which app you're using in real time.",
+        whyItMatters = "FocusShield uses accessibility to know the moment you switch to a blocked " +
+            "app so it can cover it instantly. Without it, the shield would only appear after a " +
+            "delay, giving you time to slip into a distraction.",
+        isMandatory = true
+    ),
     USAGE_ACCESS(
         title = "Usage permission",
         rationale = "This allows us to track your app usage.",
@@ -54,6 +62,7 @@ enum class OnboardingPermission(
 
     fun isGranted(context: Context): Boolean = when (this) {
         DISPLAY_OVER_APPS -> FocusPermissionManager.isOverlayPermissionGranted(context)
+        ACCESSIBILITY -> FocusPermissionManager.isAccessibilityServiceEnabled(context)
         USAGE_ACCESS -> FocusPermissionManager.isUsageAccessGranted(context)
         BACKGROUND -> FocusPermissionManager.isBatteryOptimizationIgnored(context)
         NOTIFICATIONS -> FocusPermissionManager.isNotificationPermissionGranted(context)
@@ -64,6 +73,7 @@ enum class OnboardingPermission(
      */
     fun request(context: Context) = when (this) {
         DISPLAY_OVER_APPS -> FocusPermissionManager.openOverlaySettings(context)
+        ACCESSIBILITY -> FocusPermissionManager.openAccessibilitySettings(context)
         USAGE_ACCESS -> FocusPermissionManager.openUsageAccessSettings(context)
         BACKGROUND -> FocusPermissionManager.requestIgnoreBatteryOptimization(context)
         NOTIFICATIONS -> FocusPermissionManager.openNotificationSettings(context)

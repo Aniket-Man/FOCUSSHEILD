@@ -1,11 +1,18 @@
 package com.example.cloud.sync
 
 import com.example.data.local.entity.AppLimitEntity
+import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.BlockedAppEntity
+import com.example.data.local.entity.BlockedAttemptEntity
+import com.example.data.local.entity.BlockedEventSource
+import com.example.data.local.entity.BlockedEventType
 import com.example.data.local.entity.BlockedWebsiteEntity
 import com.example.data.local.entity.BreakRecordEntity
+import com.example.data.local.entity.DailyAppUsageEntity
+import com.example.data.local.entity.DailyUnlockEntity
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.KeywordEntity
+import com.example.data.local.entity.ScratchCardEntity
 import com.example.data.local.entity.SessionRecordEntity
 import com.example.data.local.entity.StudyActivityEntity
 import com.example.data.local.entity.StudyActivitySource
@@ -16,6 +23,7 @@ import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.TopicEntity
 import com.example.data.model.SessionMode
 import com.example.data.preferences.FocusPreferences
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -375,12 +383,177 @@ object CloudJson {
         createdAt = j.lng("createdAt", System.currentTimeMillis())
     )
 
+    // ---- blocked_attempts ------------------------------------------------------------
+    //
+    // `eventId` is the cloud identity; the Room autogen `id` is a local-only surrogate and is
+    // deliberately not uploaded. Payload columns the app did not actually observe at block time
+    // (domain, channel, video title, matched keyword) stay NULL rather than being synthesised.
+
+    fun blockedAttemptToJson(e: BlockedAttemptEntity): JSONObject = JSONObject()
+        .put("eventId", e.eventId)
+        .put("timestamp", e.timestamp)
+        .put("eventType", e.eventType.name)
+        .put("source", e.source.name)
+        .put("packageName", e.packageName)
+        .put("appName", e.appName)
+        .putString("domain", e.domain)
+        .putString("channelId", e.channelId)
+        .putString("channelName", e.channelName)
+        .putString("videoTitle", e.videoTitle)
+        .putString("matchedKeyword", e.matchedKeyword)
+        .putString("ruleRef", e.ruleRef)
+        .putString("sessionId", e.sessionId)
+        .putString("scheduleId", e.scheduleId)
+        .putString("subject", e.subject)
+        .putString("topic", e.topic)
+        .putString("deviceId", e.deviceId)
+        .put("createdAt", e.timestamp)
+
+    fun blockedAttemptFromCloud(j: JSONObject): BlockedAttemptEntity {
+        val type = try {
+            BlockedEventType.valueOf(j.optString("eventType", "LEGACY"))
+        } catch (ex: Exception) {
+            BlockedEventType.LEGACY
+        }
+        val source = try {
+            BlockedEventSource.valueOf(j.optString("source", "LEGACY"))
+        } catch (ex: Exception) {
+            BlockedEventSource.LEGACY
+        }
+        return BlockedAttemptEntity(
+            eventId = j.optString("eventId"),
+            timestamp = j.lng("timestamp", 0L),
+            eventType = type,
+            source = source,
+            packageName = j.optString("packageName"),
+            appName = j.optString("appName"),
+            domain = j.optNullableString("domain"),
+            channelId = j.optNullableString("channelId"),
+            channelName = j.optNullableString("channelName"),
+            videoTitle = j.optNullableString("videoTitle"),
+            matchedKeyword = j.optNullableString("matchedKeyword"),
+            ruleRef = j.optNullableString("ruleRef"),
+            sessionId = j.optNullableString("sessionId"),
+            scheduleId = j.optNullableString("scheduleId"),
+            subject = j.optNullableString("subject"),
+            topic = j.optNullableString("topic"),
+            deviceId = j.optNullableString("deviceId")
+        )
+    }
+
+    // ---- app_limit_sessions ----------------------------------------------------------
+
+    fun appLimitSessionToJson(e: AppLimitSessionEntity): JSONObject = JSONObject()
+        .put("id", e.id)
+        .put("packageName", e.packageName)
+        .put("appName", e.appName)
+        .put("dateString", e.dateString)
+        .put("startedAt", e.startedAt)
+        .put("endedAt", e.endedAt)
+        .put("selectedDurationMillis", e.selectedDurationMillis)
+        .put("actualUsedMillis", e.actualUsedMillis)
+        .put("isEmergency", e.isEmergency)
+        .put("endReason", e.endReason)
+        .put("createdAt", e.startedAt)
+
+    fun appLimitSessionFromCloud(j: JSONObject): AppLimitSessionEntity = AppLimitSessionEntity(
+        id = j.optString("id"),
+        packageName = j.optString("packageName"),
+        appName = j.optString("appName"),
+        dateString = j.optString("dateString"),
+        startedAt = j.lng("startedAt", 0L),
+        endedAt = j.lng("endedAt", 0L),
+        selectedDurationMillis = j.lng("selectedDurationMillis", 0L),
+        actualUsedMillis = j.lng("actualUsedMillis", 0L),
+        isEmergency = j.bool("isEmergency", false),
+        endReason = j.optString("endReason", "USER_LEFT_APP")
+    )
+
+    // ---- daily_unlocks ---------------------------------------------------------------
+
+    fun dailyUnlockToJson(e: DailyUnlockEntity): JSONObject = JSONObject()
+        .put("dateString", e.dateString)
+        .put("unlockCount", e.unlockCount)
+        .put("firstUnlockAt", e.firstUnlockAt)
+        .put("lastUnlockAt", e.lastUnlockAt)
+
+    fun dailyUnlockFromCloud(j: JSONObject): DailyUnlockEntity = DailyUnlockEntity(
+        dateString = j.optString("dateString"),
+        unlockCount = j.int("unlockCount", 0),
+        firstUnlockAt = j.lng("firstUnlockAt", 0L),
+        lastUnlockAt = j.lng("lastUnlockAt", 0L)
+    )
+
+    // ---- scratch_cards ---------------------------------------------------------------
+    //
+    // The reward text is generated once at creation and is not reconstructible from anything
+    // else, so it has to travel with the account or the card reappears empty after a restore.
+
+    fun scratchCardToJson(e: ScratchCardEntity): JSONObject = JSONObject()
+        .put("sessionId", e.sessionId)
+        .put("createdAt", e.createdAt)
+        .put("rewardType", e.rewardType)
+        .put("rewardEmoji", e.rewardEmoji)
+        .put("rewardTitle", e.rewardTitle)
+        .put("rewardMessage", e.rewardMessage)
+        .put("studyMinutes", e.studyMinutes)
+        .put("isRevealed", e.isRevealed)
+
+    fun scratchCardFromCloud(j: JSONObject): ScratchCardEntity = ScratchCardEntity(
+        sessionId = j.optString("sessionId"),
+        createdAt = j.lng("createdAt", 0L),
+        rewardType = j.optString("rewardType"),
+        rewardEmoji = j.optString("rewardEmoji"),
+        rewardTitle = j.optString("rewardTitle"),
+        rewardMessage = j.optString("rewardMessage"),
+        studyMinutes = j.int("studyMinutes", 0),
+        isRevealed = j.bool("isRevealed", false)
+    )
+
+    // ---- daily_app_usage -------------------------------------------------------------
+    //
+    // Only the *usage* columns are account-level. `emergencyUsesCount` and `isBypassedForToday`
+    // are per-device enforcement state (how many emergency unlocks this phone has granted today),
+    // so they stay out of the payload entirely — see SyncEngine's merge binding for this table.
+
+    fun dailyAppUsageToJson(e: DailyAppUsageEntity): JSONObject = JSONObject()
+        .put("packageName", e.packageName)
+        .put("dateString", e.dateString)
+        .put("appName", e.appName)
+        .put("usedMillis", e.usedMillis)
+        .put("lastActiveTimestamp", e.lastActiveTimestamp)
+
+    /** Merges a cloud usage row onto a local enforcement row, preserving local-only columns. */
+    fun dailyAppUsageMerge(local: DailyAppUsageEntity?, remote: JSONObject): DailyAppUsageEntity {
+        val packageName = remote.optString("packageName")
+        val dateString = remote.optString("dateString")
+        return DailyAppUsageEntity(
+            packageName = packageName,
+            dateString = dateString,
+            appName = remote.optString("appName", local?.appName ?: packageName),
+            usedMillis = remote.lng("usedMillis", 0L),
+            emergencyUsedMillis = local?.emergencyUsedMillis ?: 0L,
+            emergencyUsesCount = local?.emergencyUsesCount ?: 0,
+            isBypassedForToday = local?.isBypassedForToday ?: false,
+            lastActiveTimestamp = remote.lng("lastActiveTimestamp", 0L)
+        )
+    }
+
     // ---- user_preferences (account-following subset, stored as one jsonb doc) -------
 
     /**
      * The account-following subset of [FocusPreferences], serialized as a flat object whose keys
-     * equal the [FocusPreferences] field names. Device-local preferences (notification package
-     * lists, reward claims, onboarding, per-device counters) are intentionally excluded.
+     * equal the [FocusPreferences] field names.
+     *
+     * Sets are written **sorted**, never in iteration order. [SyncedPreferencesObserver] fingerprints
+     * this document to decide whether it is dirty, and an unordered set would produce a different
+     * fingerprint for identical content — a spurious upload on every emission. Sorting makes the
+     * serialization a pure function of the value.
+     *
+     * Genuinely device-local state stays out: `hasCompletedOnboarding` (a per-install UX gate),
+     * `userPhotoUri` (a `content://` reference meaningful only on the device that picked it — the
+     * account-level image is `profiles.avatarPath`), and `blockedNotificationsCount` (a runtime
+     * aggregate derived from `blocked_attempts`, not a stored source of truth).
      */
     fun accountPreferencesJson(p: FocusPreferences): JSONObject = JSONObject()
         .put("defaultTimerMinutes", p.defaultTimerMinutes)
@@ -407,6 +580,17 @@ object CloudJson {
         .put("isBlockFloatingWindowEnabled", p.isBlockFloatingWindowEnabled)
         .put("isBlockNotificationsEnabled", p.isBlockNotificationsEnabled)
         .put("notificationBlockMode", p.notificationBlockMode)
+        // Which apps to silence is protection *configuration* the user chose, so it follows the
+        // account; the count of what was silenced is history and lives in `blocked_attempts`.
+        .put("blockedNotificationPackages", sortedArray(p.blockedNotificationPackages))
+        .put("alwaysBlockedNotificationPackages", sortedArray(p.alwaysBlockedNotificationPackages))
+        // Claimed achievement rewards. The badge *unlock* is derived from session history, but a
+        // claim is a user action with nothing else recording it — without this the rewards screen
+        // shows every already-claimed badge as available again after a restore.
+        .put("claimedRewardIds", sortedArray(p.claimedRewardIds))
+
+    private fun sortedArray(values: Set<String>): JSONArray =
+        JSONArray(values.sorted())
 
     // ---- profiles (DataStore-backed; one row per user) ------------------------------
 

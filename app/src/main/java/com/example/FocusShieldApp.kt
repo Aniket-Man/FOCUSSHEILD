@@ -38,7 +38,9 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val studyPlanRepository by lazy { StudyPlanRepository(database.studyPlanDao()) }
     val breakRepository by lazy { BreakRepository(database.breakRecordDao()) }
     val blockedAppRepository by lazy { BlockedAppRepository(database.blockedAppDao()) }
-    val blockedAttemptRepository by lazy { BlockedAttemptRepository(database.blockedAttemptDao()) }
+    val blockedAttemptRepository by lazy {
+        BlockedAttemptRepository(database.blockedAttemptDao(), cloudInstallState)
+    }
     val studyChannelRepository by lazy { StudyChannelRepository(database.studyChannelDao(), applicationScope, this) }
     val preferencesRepository by lazy { FocusPreferencesRepository(this) }
     val appLimitRepository by lazy {
@@ -134,7 +136,8 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.feature.applimits.engine.AppLimitManager.initialize(
             appContext = this,
             appLimitRepository = appLimitRepository,
-            preferencesRepository = preferencesRepository
+            preferencesRepository = preferencesRepository,
+            blockedAttemptRepository = blockedAttemptRepository
         )
         com.example.feature.applimits.engine.AppLimitStrictModeEngine.initialize(
             context = this,
@@ -152,6 +155,12 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.feature.notificationblocker.engine.NotificationBlockerEngine.initialize(
             appContext = this,
             preferencesRepository = preferencesRepository,
+            blockedAttemptRepository = blockedAttemptRepository
+        )
+
+        // Initialize YouTube Study Mode dwell capture (approved-content watch time)
+        com.example.feature.youtube.engine.YouTubeStudyDwellTracker.initialize(
+            analyticsRepository = analyticsRepository,
             blockedAttemptRepository = blockedAttemptRepository
         )
 

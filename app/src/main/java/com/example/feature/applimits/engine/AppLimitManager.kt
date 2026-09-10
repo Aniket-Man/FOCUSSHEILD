@@ -7,9 +7,12 @@ import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.MediaPauseHelper
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.AppLimitSessionEntity
+import com.example.data.local.entity.BlockedEventSource
+import com.example.data.local.entity.BlockedEventType
 import com.example.data.local.entity.DailyAppUsageEntity
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.AppLimitRepository
+import com.example.data.repository.BlockedAttemptRepository
 import com.example.feature.applimits.ui.AppLimitOverlayActivity
 import com.example.feature.session.engine.FocusSessionManager
 import kotlinx.coroutines.CoroutineScope
@@ -70,6 +73,7 @@ class AppLimitManager private constructor(
     private val appContext: Context,
     private val appLimitRepository: AppLimitRepository,
     private val preferencesRepository: FocusPreferencesRepository,
+    private val blockedAttemptRepository: BlockedAttemptRepository,
     private val sessionManager: FocusSessionManager = FocusSessionManager.instance
 ) {
     private val tag = "AppLimitManager"
@@ -77,6 +81,19 @@ class AppLimitManager private constructor(
 
     // Fast in-memory cache of enabled limits
     private val enabledLimits = ConcurrentHashMap<String, AppLimitEntity>()
+
+    /**
+     * When each package's limit-block episode was last recorded, keyed by package.
+     *
+     * The accessibility service re-checks the foreground package every 500 ms while its limit is
+     * exhausted, so [checkAppLimitDecision] returns `REQUIRE_DAILY_LIMIT_BLOCK` over and over for a
+     * single stay in the app. That stay is one episode, not one event per check, so the event is
+     * recorded on entry into the state and suppressed for [limitEventReemitMs] — long enough that
+     * sitting on the blocked screen does not flood the history, short enough that genuinely coming
+     * back later is recorded as a fresh attempt.
+     */
+    private val limitBlockRecordedAt = ConcurrentHashMap<String, Long>()
+    private val limitEventReemitMs = 5 * 60 * 1000L
 
     private val _activeSession = MutableStateFlow<ActiveAppUsageSession?>(null)
     val activeSession: StateFlow<ActiveAppUsageSession?> = _activeSession.asStateFlow()
@@ -225,6 +242,7 @@ class AppLimitManager private constructor(
                 emergencyUsesAllowed = limit.emergencyUsesAllowed
             )
         } else {
+            recordLimitReached(packageName, limit.appName, isStrict)
             AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK(
                 packageName = packageName,
                 appName = limit.appName,
@@ -238,6 +256,34 @@ class AppLimitManager private constructor(
     }
 
     private val lastOverlayLaunchPerPackage = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Records the moment a limited app's daily allowance ran out and the blocker took over.
+     *
+     * A strict limit records `STRICT_MODE_ENFORCED` instead of `APP_LIMIT_REACHED` rather than both:
+     * they are the same episode, and emitting two rows would double-count "times I hit my limit".
+     * Strict mode is the *form* of that hit, so an analytics query wanting every limit hit filters
+     * on both event types. Deduplication is described on [limitBlockRecordedAt].
+     */
+    private suspend fun recordLimitReached(packageName: String, appName: String, isStrict: Boolean) {
+        val now = System.currentTimeMillis()
+        val lastRecorded = limitBlockRecordedAt[packageName] ?: 0L
+        if (now - lastRecorded < limitEventReemitMs) return
+        limitBlockRecordedAt[packageName] = now
+        try {
+            blockedAttemptRepository.recordAttempt(
+                packageName = packageName,
+                appName = appName,
+                eventType = if (isStrict) BlockedEventType.STRICT_MODE_ENFORCED
+                            else BlockedEventType.APP_LIMIT_REACHED,
+                source = BlockedEventSource.APP_LIMIT_ENGINE,
+                ruleRef = "DAILY_LIMIT",
+                timestamp = now
+            )
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to record app limit event for $packageName: ${e.message}")
+        }
+    }
 
     private fun isIgnoredOverlayOrImePackage(pkg: String): Boolean {
         if (pkg.isBlank()) return true
@@ -602,13 +648,15 @@ class AppLimitManager private constructor(
         fun initialize(
             appContext: Context,
             appLimitRepository: AppLimitRepository,
-            preferencesRepository: FocusPreferencesRepository
+            preferencesRepository: FocusPreferencesRepository,
+            blockedAttemptRepository: BlockedAttemptRepository
         ): AppLimitManager {
             return INSTANCE ?: synchronized(this) {
                 val instance = AppLimitManager(
                     appContext = appContext,
                     appLimitRepository = appLimitRepository,
-                    preferencesRepository = preferencesRepository
+                    preferencesRepository = preferencesRepository,
+                    blockedAttemptRepository = blockedAttemptRepository
                 )
                 INSTANCE = instance
                 instance

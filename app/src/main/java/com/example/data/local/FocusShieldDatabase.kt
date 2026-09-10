@@ -67,7 +67,7 @@ import com.example.data.local.entity.TopicEntity
         ScratchCardEntity::class,
         SyncOutboxEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -345,6 +345,97 @@ abstract class FocusShieldDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v12 -> v13: gives `blocked_attempts` a real event model so protection history can be
+         * synced and reconstructed (stable event identity + typed event/source + the payload
+         * fields the app already has at block time).
+         *
+         * Purely additive — every column is added with `ALTER TABLE`, so no table is recreated and
+         * no existing row is lost. Legacy rows are then backfilled in place:
+         *
+         *  - `eventId` becomes `'legacy-' || id`. Deterministic on purpose: re-pushing a legacy row
+         *    yields the same cloud primary key, so migration cannot duplicate history. (`deviceId`
+         *    stays NULL for these rows — they predate install identity.)
+         *  - `eventType`/`source` are derived from the string conventions the old writers used, so
+         *    pre-existing history gains real types instead of being dropped.
+         *  - the domain / channel that used to be packed into `appName` is split into its own
+         *    column, and the silenced-notification suffix is trimmed, so `appName` is an app name
+         *    again.
+         *
+         * The unique index on `eventId` is created only after the backfill, so the UPDATE that
+         * populates it cannot trip a uniqueness violation mid-migration.
+         */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `eventId` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `eventType` TEXT NOT NULL DEFAULT 'LEGACY'")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `source` TEXT NOT NULL DEFAULT 'LEGACY'")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `domain` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `channelId` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `channelName` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `videoTitle` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `matchedKeyword` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `ruleRef` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `scheduleId` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `subject` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `topic` TEXT")
+                db.execSQL("ALTER TABLE `blocked_attempts` ADD COLUMN `deviceId` TEXT")
+
+                db.execSQL("UPDATE `blocked_attempts` SET `eventId` = 'legacy-' || `id` WHERE `eventId` = ''")
+
+                // Classify against the ORIGINAL appName strings (must run before the cleanup below).
+                db.execSQL(
+                    """
+                    UPDATE `blocked_attempts` SET `eventType` = CASE
+                        WHEN `appName` LIKE '% (Silenced Notification)' THEN 'NOTIFICATION_SILENCED'
+                        WHEN `appName` LIKE 'Blocked Website (%' OR `appName` LIKE '18+ Adult Site (%' THEN 'WEBSITE_BLOCKED'
+                        WHEN `appName` LIKE '% Reels' OR `appName` IN ('YouTube Shorts', 'Short-form Content') THEN 'SHORTS_BLOCKED'
+                        WHEN `appName` LIKE 'YouTube (%' THEN 'YOUTUBE_UNAPPROVED_CHANNEL'
+                        WHEN `appName` = 'YouTube' THEN 'YOUTUBE_UNKNOWN_CONTENT'
+                        WHEN `appName` = 'Split-Screen Multitasking' THEN 'SPLIT_SCREEN_BLOCKED'
+                        WHEN `appName` = 'Floating Window / PiP' THEN 'FLOATING_WINDOW_BLOCKED'
+                        ELSE 'APP_BLOCKED'
+                    END
+                    """.trimIndent()
+                )
+
+                // Unpack `Blocked Website (x.com)` / `18+ Adult Site (x.com)` -> domain.
+                db.execSQL(
+                    """
+                    UPDATE `blocked_attempts`
+                    SET `domain` = substr(`appName`, length('Blocked Website (') + 1,
+                                          length(`appName`) - length('Blocked Website (') - 1)
+                    WHERE (`appName` LIKE 'Blocked Website (%' OR `appName` LIKE '18+ Adult Site (%')
+                      AND `domain` IS NULL
+                    """.trimIndent()
+                )
+
+                // Unpack `YouTube (Channel Name)` -> channelName.
+                db.execSQL(
+                    """
+                    UPDATE `blocked_attempts`
+                    SET `channelName` = substr(`appName`, length('YouTube (') + 1,
+                                               length(`appName`) - length('YouTube (') - 1)
+                    WHERE `appName` LIKE 'YouTube (%' AND `channelName` IS NULL
+                    """.trimIndent()
+                )
+
+                // Trim the ` (Silenced Notification)` suffix so appName is the bare app label again.
+                db.execSQL(
+                    """
+                    UPDATE `blocked_attempts`
+                    SET `appName` = substr(`appName`, 1, length(`appName`) - length(' (Silenced Notification)'))
+                    WHERE `appName` LIKE '% (Silenced Notification)'
+                    """.trimIndent()
+                )
+
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_blocked_attempts_eventId` ON `blocked_attempts` (`eventId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_blocked_attempts_timestamp` ON `blocked_attempts` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_blocked_attempts_sessionId` ON `blocked_attempts` (`sessionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_blocked_attempts_eventType` ON `blocked_attempts` (`eventType`)")
+            }
+        }
+
         fun getInstance(context: Context): FocusShieldDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -352,7 +443,7 @@ abstract class FocusShieldDatabase : RoomDatabase() {
                     FocusShieldDatabase::class.java,
                     "focus_shield_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .fallbackToDestructiveMigration()
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()

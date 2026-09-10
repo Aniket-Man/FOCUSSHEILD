@@ -5,7 +5,7 @@
 -- and run it. It is fully idempotent: safe to run again after partial success.
 --
 -- What this sets up
---   1. 14 tables the Android app syncs (Room camelCase columns mirrored 1:1;
+--   1. 19 tables the Android app syncs (Room camelCase columns mirrored 1:1;
 --      every table carries `user_id` uuid + RLS, so a user can only ever see
 --      their own rows).
 --   2. RLS enabled + 4 owner-only policies per table (SELECT/INSERT/UPDATE/
@@ -240,6 +240,100 @@ create table if not exists public.break_records (
     primary key (user_id, "id")
 );
 
+-- Protection events: everything FocusShield blocked, silenced or explicitly allowed. Cloud identity
+-- is the app-generated `eventId` UUID, not the Room autoincrement `id` (which is device-local and
+-- never leaves the device) — that is what makes re-uploading a row idempotent and lets two devices
+-- merge their histories without either overwriting the other.
+create table if not exists public.blocked_attempts (
+    user_id uuid not null,
+    "eventId" text not null,
+    "timestamp" bigint,
+    "eventType" text,
+    "source" text,
+    "packageName" text,
+    "appName" text,
+    "domain" text,
+    "channelId" text,
+    "channelName" text,
+    "videoTitle" text,
+    "matchedKeyword" text,
+    "ruleRef" text,
+    "sessionId" text,
+    "scheduleId" text,
+    "subject" text,
+    "topic" text,
+    "deviceId" text,
+    "createdAt" bigint,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, "eventId")
+);
+
+-- Individual temporary usage sessions inside a limited app (the "unlocked 5 more minutes" episodes).
+create table if not exists public.app_limit_sessions (
+    user_id uuid not null,
+    "id" text not null,
+    "packageName" text,
+    "appName" text,
+    "dateString" text,
+    "startedAt" bigint,
+    "endedAt" bigint,
+    "selectedDurationMillis" bigint,
+    "actualUsedMillis" bigint,
+    "isEmergency" boolean,
+    "endReason" text,
+    "createdAt" bigint,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, "id")
+);
+
+-- Scratch-card rewards. The reward text is generated once, at card creation, and is not
+-- reconstructible from anything else — so it has to travel with the account or the card would
+-- reappear blank after a restore.
+create table if not exists public.scratch_cards (
+    user_id uuid not null,
+    "sessionId" text not null,
+    "createdAt" bigint,
+    "rewardType" text,
+    "rewardEmoji" text,
+    "rewardTitle" text,
+    "rewardMessage" text,
+    "studyMinutes" integer,
+    "isRevealed" boolean,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, "sessionId")
+);
+
+-- Daily phone-unlock counts, one row per calendar day.
+create table if not exists public.daily_unlocks (
+    user_id uuid not null,
+    "dateString" text not null,
+    "unlockCount" integer,
+    "firstUnlockAt" bigint,
+    "lastUnlockAt" bigint,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, "dateString")
+);
+
+-- Per-app foreground usage per day. Only the *usage* columns are here: the app's emergency-unlock
+-- and bypass columns describe what this device's enforcement engine is currently doing, not account
+-- history, so they stay on the device. A pull merges these columns onto the local row and leaves the
+-- device-only ones untouched (TableMeta.clearsOnReconcile = false).
+create table if not exists public.daily_app_usage (
+    user_id uuid not null,
+    "packageName" text not null,
+    "dateString" text not null,
+    "appName" text,
+    "usedMillis" bigint,
+    "lastActiveTimestamp" bigint,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (user_id, "packageName", "dateString")
+);
+
 -- Whole-document single-row-per-user tables (not stored in Room).
 create table if not exists public.profiles (
     user_id uuid primary key references auth.users (id) on delete cascade,
@@ -259,7 +353,7 @@ create table if not exists public.user_preferences (
 );
 
 -- ---------------------------------------------------------------------------
--- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (14 tables)
+-- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (19 tables)
 -- ---------------------------------------------------------------------------
 -- Each table: enable RLS; four policies SELECT/INSERT/UPDATE/DELETE restricted
 -- to `TO authenticated` with `(select auth.uid()) = user_id` in BOTH USING and
@@ -288,6 +382,11 @@ begin
         'session_records',
         'study_activities',
         'break_records',
+        'blocked_attempts',
+        'app_limit_sessions',
+        'scratch_cards',
+        'daily_unlocks',
+        'daily_app_usage',
         'profiles',
         'user_preferences'
     ] loop
@@ -314,7 +413,9 @@ $$;
 revoke all on table public.focus_schedules, public.blocked_apps, public.blocked_websites,
     public.app_limits, public.study_channels, public.study_subjects, public.study_topics,
     public.study_plans, public.blocked_keywords, public.session_records,
-    public.study_activities, public.break_records, public.profiles, public.user_preferences
+    public.study_activities, public.break_records, public.blocked_attempts,
+    public.app_limit_sessions, public.scratch_cards, public.daily_unlocks,
+    public.daily_app_usage, public.profiles, public.user_preferences
     from anon;
 
 -- ---------------------------------------------------------------------------
@@ -360,6 +461,9 @@ create trigger on_auth_user_created
 create index if not exists session_records_created_at_idx on public.session_records (created_at);
 create index if not exists study_activities_created_at_idx on public.study_activities (created_at);
 create index if not exists break_records_created_at_idx on public.break_records (created_at);
+create index if not exists blocked_attempts_created_at_idx on public.blocked_attempts (created_at);
+create index if not exists app_limit_sessions_created_at_idx on public.app_limit_sessions (created_at);
+create index if not exists scratch_cards_created_at_idx on public.scratch_cards (created_at);
 
 -- ---------------------------------------------------------------------------
 -- 5. PRIVATE PROFILE-IMAGE STORAGE BUCKET + OWNER-ONLY OBJECT POLICIES
@@ -420,10 +524,11 @@ commit;
 --   and tablename in ('focus_schedules','blocked_apps','blocked_websites',
 --     'app_limits','study_channels','study_subjects','study_topics','study_plans',
 --     'blocked_keywords','session_records','study_activities','break_records',
---     'profiles','user_preferences');                    --> 14
+--     'blocked_attempts','app_limit_sessions','scratch_cards','daily_unlocks',
+--     'daily_app_usage','profiles','user_preferences');   --> 19
 --
 -- select count(*) from pg_policies
---   where schemaname in ('public','storage') and policyname like '%_own';  --> 60 total (14 tables x 4 + 4 storage)
+--   where schemaname in ('public','storage') and policyname like '%_own';  --> 80 total (19 tables x 4 + 4 storage)
 --
 -- select id, public from storage.buckets where id='profile-images';        --> public = false
 --

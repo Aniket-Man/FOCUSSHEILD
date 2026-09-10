@@ -5,6 +5,8 @@ import android.content.Intent
 import com.example.core.accessibility.FocusProtectionState
 import com.example.core.accessibility.ProtectionDecision
 import com.example.core.accessibility.ProtectionPolicy
+import com.example.data.local.entity.BlockedEventSource
+import com.example.data.local.entity.BlockedEventType
 import com.example.data.repository.BlockedAppRepository
 import com.example.data.repository.BlockedAttemptRepository
 import com.example.data.repository.StudyChannelRepository
@@ -145,12 +147,16 @@ class FocusBlockerManager private constructor(
     /**
      * Called when a blocked application or blocked content is detected.
      * Records the attempt into Room and launches the blocking shield UI.
+     *
+     * [matchedKeyword] is only supplied when a keyword rule is what actually fired; the YouTube
+     * branch has it on its block decision and passes it down, every other caller leaves it null.
      */
     fun handleBlockedPackage(
         packageName: String,
         fallbackAppName: String? = null,
         decision: ProtectionDecision = ProtectionDecision.BLOCK,
-        youtubeResult: YouTubeDetectionResult? = null
+        youtubeResult: YouTubeDetectionResult? = null,
+        matchedKeyword: String? = null
     ) {
         val now = System.currentTimeMillis()
         if (!isBlockingDecision(decision)) {
@@ -166,7 +172,9 @@ class FocusBlockerManager private constructor(
         lastBlockTimestamp = now
 
         val resolvedAppName = when (decision) {
-            ProtectionDecision.BLOCK_SHORTS -> "YouTube Shorts"
+            // Short-form covers YouTube Shorts, Instagram Reels and Facebook Reels; the caller knows
+            // which one it actually was, so its label wins over the YouTube-only default.
+            ProtectionDecision.BLOCK_SHORTS -> fallbackAppName ?: "YouTube Shorts"
             ProtectionDecision.BLOCK_UNAPPROVED_CHANNEL -> {
                 val chan = youtubeResult?.channelName ?: youtubeResult?.channelId ?: "Unapproved Channel"
                 "YouTube ($chan)"
@@ -178,6 +186,17 @@ class FocusBlockerManager private constructor(
             else -> fallbackAppName ?: getAppNameFromPackage(packageName)
         }
 
+        // The protection decision *is* the blocking rule that fired, so it is recorded as-is
+        // rather than being re-derived later from the display name.
+        val eventType = when (decision) {
+            ProtectionDecision.BLOCK_SHORTS -> BlockedEventType.SHORTS_BLOCKED
+            ProtectionDecision.BLOCK_UNAPPROVED_CHANNEL -> BlockedEventType.YOUTUBE_UNAPPROVED_CHANNEL
+            ProtectionDecision.BLOCK_UNKNOWN_YOUTUBE_CONTENT -> BlockedEventType.YOUTUBE_UNKNOWN_CONTENT
+            ProtectionDecision.BLOCK_SPLIT_SCREEN -> BlockedEventType.SPLIT_SCREEN_BLOCKED
+            ProtectionDecision.BLOCK_FLOATING_WINDOW -> BlockedEventType.FLOATING_WINDOW_BLOCKED
+            else -> BlockedEventType.APP_BLOCKED
+        }
+
         val activeSessionId = sessionManager.activeSession.value?.id
 
         // Record attempt in database for analytics
@@ -186,7 +205,14 @@ class FocusBlockerManager private constructor(
                 blockedAttemptRepository.recordAttempt(
                     packageName = packageName,
                     appName = resolvedAppName,
-                    sessionId = activeSessionId
+                    eventType = eventType,
+                    source = BlockedEventSource.ACCESSIBILITY_SERVICE,
+                    sessionId = activeSessionId,
+                    channelId = youtubeResult?.channelId,
+                    channelName = youtubeResult?.channelName,
+                    videoTitle = youtubeResult?.videoTitle,
+                    matchedKeyword = matchedKeyword,
+                    ruleRef = decision.name
                 )
             } catch (e: Exception) {
                 // Room record logged safely

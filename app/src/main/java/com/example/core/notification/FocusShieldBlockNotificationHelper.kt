@@ -235,7 +235,6 @@ object FocusShieldBlockNotificationHelper {
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setSound(FocusAlertSoundManager.getNotificationSoundUri(context))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .build()

@@ -410,10 +410,11 @@ class FocusPreferencesRepository(private val context: Context) {
      * Apply a cloud `user_preferences` payload (the flat JSON produced by
      * [com.example.cloud.sync.CloudJson.accountPreferencesJson]) into local DataStore.
      *
-     * Only keys that are present and non-null are written, and only the account-following subset is
-     * ever touched — device-local state (onboarding, per-device notification-package lists, reward
-     * claims, the local photo URI) is deliberately left alone, so a cross-device preferences pull
-     * can never clobber per-device state.
+     * Only keys that are present are written — an absent key means the server has no opinion, while
+     * a present-but-empty array is a real value (the user cleared every silenced app) and is applied
+     * as such. Device-local state (`hasCompletedOnboarding`, the local photo URI,
+     * `blockedNotificationsCount`) is never touched here, so a cross-device preferences pull cannot
+     * clobber per-device state.
      */
     suspend fun applyCloudPreferences(payloadJson: String) {
         val j = try {
@@ -422,6 +423,18 @@ class FocusPreferencesRepository(private val context: Context) {
             return
         }
         fun present(key: String): Boolean = j.has(key) && !j.isNull(key)
+
+        /** Reads a string array, dropping blanks so a malformed entry cannot become a package name. */
+        fun stringSet(key: String): Set<String> {
+            val arr = j.optJSONArray(key) ?: return emptySet()
+            val values = LinkedHashSet<String>(arr.length())
+            for (i in 0 until arr.length()) {
+                val v = arr.optString(i, "")
+                if (v.isNotBlank()) values.add(v)
+            }
+            return values
+        }
+
         context.dataStore.edit { p ->
             if (present("defaultTimerMinutes")) p[PreferencesKeys.KEY_DEFAULT_TIMER_MINUTES] = j.optInt("defaultTimerMinutes")
             if (present("pomodoroFocusMinutes")) p[PreferencesKeys.KEY_POMODORO_FOCUS_MINUTES] = j.optInt("pomodoroFocusMinutes")
@@ -447,6 +460,9 @@ class FocusPreferencesRepository(private val context: Context) {
             if (present("isBlockFloatingWindowEnabled")) p[PreferencesKeys.KEY_BLOCK_FLOATING_WINDOW] = j.optBoolean("isBlockFloatingWindowEnabled")
             if (present("isBlockNotificationsEnabled")) p[PreferencesKeys.KEY_BLOCK_NOTIFICATIONS] = j.optBoolean("isBlockNotificationsEnabled")
             if (present("notificationBlockMode")) p[PreferencesKeys.KEY_NOTIFICATION_BLOCK_MODE] = j.optString("notificationBlockMode")
+            if (present("blockedNotificationPackages")) p[PreferencesKeys.KEY_BLOCKED_NOTIFICATION_PACKAGES] = stringSet("blockedNotificationPackages")
+            if (present("alwaysBlockedNotificationPackages")) p[PreferencesKeys.KEY_ALWAYS_BLOCKED_NOTIFICATION_PACKAGES] = stringSet("alwaysBlockedNotificationPackages")
+            if (present("claimedRewardIds")) p[PreferencesKeys.KEY_CLAIMED_REWARD_IDS] = stringSet("claimedRewardIds")
         }
     }
 

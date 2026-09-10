@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import android.util.Log
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.ScratchCardDao
 import com.example.data.local.entity.ScratchCardEntity
 import kotlinx.coroutines.CoroutineScope
@@ -56,17 +59,33 @@ class ScratchCardRepository(
             allTimeStudyMillis = allTimeStudyMillis
         )
         val insertResult = dao.insert(card)
-        if (insertResult == -1L) null else card
+        if (insertResult == -1L) {
+            null
+        } else {
+            enqueueCardUpsert(card)
+            card
+        }
     }
 
     fun markRevealedAsync(sessionId: String) {
         scope.launch {
             try {
                 dao.markRevealed(sessionId)
+                // The DAO mutates a flag without returning the row, so read it back to push the
+                // revealed state rather than re-deriving the card here.
+                dao.getCardForSession(sessionId)?.let { enqueueCardUpsert(it) }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to mark scratch card revealed", e)
             }
         }
+    }
+
+    private suspend fun enqueueCardUpsert(card: ScratchCardEntity) {
+        SyncTracker.enqueueUpsert(
+            SyncTables.SCRATCH_CARDS,
+            card.sessionId,
+            CloudJson.scratchCardToJson(card).toString()
+        )
     }
 
     companion object {

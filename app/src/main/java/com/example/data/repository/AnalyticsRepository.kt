@@ -10,6 +10,7 @@ import com.example.data.local.dao.BreakRecordDao
 import com.example.data.local.dao.SessionDao
 import com.example.data.local.dao.StudyActivityDao
 import com.example.data.local.entity.BlockedAttemptEntity
+import com.example.data.local.entity.BlockedEventType
 import com.example.data.local.entity.BreakRecordEntity
 import com.example.data.local.entity.SessionRecordEntity
 import com.example.data.local.entity.StudyActivityEntity
@@ -415,9 +416,18 @@ class AnalyticsRepository(
         }
         val topChannels = channelsMap.toList().sortedByDescending { it.second }
 
-        val blockedYtAttempts = attempts.filter { it.packageName.contains("youtube", ignoreCase = true) }
-        val shortsBlocked = blockedYtAttempts.count { it.appName.contains("Short", ignoreCase = true) }
-        val unapprovedBlocked = blockedYtAttempts.size - shortsBlocked
+        // Types come from the recorded event, not from the display name. The old heuristic
+        // (`appName.contains("Short")`) broke as soon as short-form blocking covered Instagram and
+        // Facebook Reels — those were labelled "Instagram Reels"/"Facebook Reels" and silently
+        // counted as unapproved YouTube content instead of Shorts.
+        val ytBlocked = attempts.filter { it.packageName in YOUTUBE_PACKAGES }
+        val shortsBlocked = ytBlocked.count { it.eventType == BlockedEventType.SHORTS_BLOCKED }
+        // Everything YouTube refused to play because it was not an approved study video.
+        val unapprovedBlocked = ytBlocked.count {
+            it.eventType == BlockedEventType.YOUTUBE_UNAPPROVED_CHANNEL ||
+                it.eventType == BlockedEventType.YOUTUBE_UNKNOWN_CONTENT ||
+                it.eventType == BlockedEventType.YOUTUBE_HOME_FEED
+        }
 
         return YouTubeStudyStats(
             verifiedWatchTimeMillis = totalWatchTime,
@@ -576,5 +586,17 @@ class AnalyticsRepository(
             millis > 0 -> "<1m"
             else -> "0m"
         }
+    }
+
+    companion object {
+        /**
+         * Packages whose blocked events belong on the YouTube study card. These stay a package
+         * check rather than an event-type check because `SHORTS_BLOCKED` is shared with Instagram
+         * and Facebook Reels — the YouTube card must not absorb Reels figures.
+         */
+        private val YOUTUBE_PACKAGES = setOf(
+            "com.google.android.youtube",
+            "com.google.android.youtube.tv"
+        )
     }
 }

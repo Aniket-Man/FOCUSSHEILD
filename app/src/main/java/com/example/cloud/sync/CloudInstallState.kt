@@ -3,6 +3,7 @@ package com.example.cloud.sync
 import android.content.Context
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 
 /**
  * Per-install cloud-sync bookkeeping, stored in a private SharedPreferences file.
@@ -14,8 +15,9 @@ import kotlinx.coroutines.sync.withLock
  * and surfaced as an explicit, destructive boundary choice rather than silently mixing data).
  *
  * It also stores the per-history-table pull watermarks (server `synced_at` values, kept as opaque
- * ISO text so the client never has to reason about server clock skew) and the dirty flags for the
- * two non-Room documents (`profiles`, `user_preferences`) that are pushed as whole rows.
+ * ISO text so the client never has to reason about server clock skew), the stable [installId], and
+ * the dirty flags for the two non-Room documents (`profiles`, `user_preferences`) that are pushed
+ * as whole rows.
  *
  * Reads/writes are synchronized on a process-local [Mutex]; `apply()` updates the in-memory map
  * synchronously so a later read in the same process sees the write.
@@ -32,7 +34,23 @@ class CloudInstallState(context: Context) {
         const val KEY_KNOWN = "knownAuthenticatedAccounts"
         const val KEY_PROFILE_DIRTY = "dirty_profile"
         const val KEY_PREFS_DIRTY = "dirty_preferences"
+        const val KEY_INSTALL_ID = "installId"
         const val WATERMARK_PREFIX = "wm:"
+    }
+
+    /**
+     * Stable identifier for *this installation*, generated once on first use and never rotated.
+     *
+     * It identifies an install, not a person: a random UUID, not a hardware, advertising, or
+     * account identifier. Protection events carry it as provenance so that when the same account
+     * runs on several devices, history pulled from the cloud can be attributed to the device that
+     * actually observed it. It deliberately survives [resetTransient] — a cross-account restore
+     * replaces the *data*, not the install.
+     */
+    suspend fun installId(): String = mutex.withLock {
+        prefs.getString(KEY_INSTALL_ID, null) ?: UUID.randomUUID().toString().also { generated ->
+            prefs.edit().putString(KEY_INSTALL_ID, generated).apply()
+        }
     }
 
     /** The account whose cloud data this install's local data currently belongs to (null = none). */

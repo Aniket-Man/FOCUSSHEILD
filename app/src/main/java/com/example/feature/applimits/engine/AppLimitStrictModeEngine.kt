@@ -116,7 +116,6 @@ class AppLimitStrictModeEngine private constructor(
             .setContentTitle("⏰ $appName Time Almost Up")
             .setContentText("You have less than 1 minute left before your $appName limit is reached. Wrap up your task!")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setSound(FocusAlertSoundManager.getNotificationSoundUri(context))
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()

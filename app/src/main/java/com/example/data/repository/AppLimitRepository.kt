@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncKeycode
 import com.example.cloud.sync.SyncTables
 import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.AppLimitDao
@@ -25,8 +26,11 @@ class AppLimitRepository(
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    // --- Sync helpers: enqueue an app_limits row so the reconcile pull never reverts it.
-    // Only app_limits is cloud-synced here; daily usage + limit sessions are device-local.
+    // --- Sync helpers: enqueue a row so the pull that follows never reverts a local write.
+    //
+    // Column split for `daily_app_usage`: only the usage columns are account-level (CloudJson's
+    // converter drops the rest), so the emergency/bypass setters below deliberately enqueue
+    // nothing — there is no remote column for them to disagree with.
 
     private suspend fun enqueueLimitUpsert(e: AppLimitEntity) {
         SyncTracker.enqueueUpsert(
@@ -42,6 +46,28 @@ class AppLimitRepository(
 
     private suspend fun enqueueLimitState(packageName: String) {
         appLimitDao.getLimitByPackage(packageName)?.let { enqueueLimitUpsert(it) }
+    }
+
+    /**
+     * Enqueues the row's post-write state. The usage DAO increments with SQL (`addUsedTime`), so the
+     * row has to be read back rather than recomputed here — a stale total would be pushed as the
+     * account's usage figure.
+     */
+    private suspend fun enqueueAppUsageUpsert(packageName: String, dateString: String) {
+        val row = dailyAppUsageDao.getUsage(packageName, dateString) ?: return
+        SyncTracker.enqueueUpsert(
+            SyncTables.DAILY_APP_USAGE,
+            SyncKeycode.appUsageKey(packageName, dateString),
+            CloudJson.dailyAppUsageToJson(row).toString()
+        )
+    }
+
+    private suspend fun enqueueSessionUpsert(e: AppLimitSessionEntity) {
+        SyncTracker.enqueueUpsert(
+            SyncTables.APP_LIMIT_SESSIONS,
+            e.id,
+            CloudJson.appLimitSessionToJson(e).toString()
+        )
     }
 
     fun getTodayDateString(): String = dateFormat.format(Date())
@@ -91,10 +117,18 @@ class AppLimitRepository(
         } catch (_: Exception) {}
     }
 
+    /**
+     * Removes the limit *configuration* only.
+     *
+     * The per-day usage rows and the individual usage sessions deliberately survive: they record
+     * what actually happened on this device and are the source for the usage/session analytics, so
+     * cascading them away here would both destroy history and leave the cloud copy orphaned (a
+     * `daily_app_usage` pull merges, and a `HISTORY` pull never deletes, so the rows would simply
+     * reappear). Clearing usage for an app that is no longer limited is the same thing the user
+     * gets by leaving the limit off — nothing reads these rows without a limit config.
+     */
     suspend fun deleteLimit(packageName: String) {
         appLimitDao.deleteByPackage(packageName)
-        dailyAppUsageDao.deleteUsageForPackage(packageName)
-        appLimitSessionDao.deleteSessionsForPackage(packageName)
         enqueueLimitDelete(packageName)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
@@ -193,6 +227,7 @@ class AppLimitRepository(
                 dailyAppUsageDao.addUsedTime(packageName, dateString, deltaMillis)
             }
         }
+        enqueueAppUsageUpsert(packageName, dateString)
     }
 
     /**
@@ -218,12 +253,14 @@ class AppLimitRepository(
                 lastActiveTimestamp = System.currentTimeMillis()
             )
             dailyAppUsageDao.insertOrUpdate(newRecord)
+            enqueueAppUsageUpsert(packageName, dateString)
         } else if (existing.usedMillis < systemUsageMillis) {
             val updated = existing.copy(
                 usedMillis = systemUsageMillis,
                 lastActiveTimestamp = System.currentTimeMillis()
             )
             dailyAppUsageDao.insertOrUpdate(updated)
+            enqueueAppUsageUpsert(packageName, dateString)
         }
     }
 
@@ -268,6 +305,7 @@ class AppLimitRepository(
 
     suspend fun recordSession(session: AppLimitSessionEntity) {
         appLimitSessionDao.insertSession(session)
+        enqueueSessionUpsert(session)
     }
 
     suspend fun getSessionCountToday(packageName: String, dateString: String = getTodayDateString()): Int =

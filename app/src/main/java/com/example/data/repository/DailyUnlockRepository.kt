@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import android.util.Log
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.DailyUnlockDao
 import com.example.data.local.entity.DailyUnlockEntity
 import kotlinx.coroutines.CoroutineScope
@@ -56,23 +59,27 @@ class DailyUnlockRepository(
                         synchronized(dateFormat) { dateFormat.format(Date(timestamp)) }
                     }
                     val existing = dao.getUnlock(dateString)
-                    if (existing == null) {
-                        dao.insert(
-                            DailyUnlockEntity(
-                                dateString = dateString,
-                                unlockCount = 1,
-                                firstUnlockAt = timestamp,
-                                lastUnlockAt = timestamp
-                            )
+                    val updated = if (existing == null) {
+                        DailyUnlockEntity(
+                            dateString = dateString,
+                            unlockCount = 1,
+                            firstUnlockAt = timestamp,
+                            lastUnlockAt = timestamp
                         )
                     } else {
-                        dao.insert(
-                            existing.copy(
-                                unlockCount = existing.unlockCount + 1,
-                                lastUnlockAt = timestamp
-                            )
+                        existing.copy(
+                            unlockCount = existing.unlockCount + 1,
+                            lastUnlockAt = timestamp
                         )
                     }
+                    dao.insert(updated)
+                    // One row per date, keyed by the date itself; SyncTracker coalesces, so a burst
+                    // of unlocks leaves a single pending upsert carrying the final count.
+                    SyncTracker.enqueueUpsert(
+                        SyncTables.DAILY_UNLOCKS,
+                        dateString,
+                        CloudJson.dailyUnlockToJson(updated).toString()
+                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to record unlock", e)

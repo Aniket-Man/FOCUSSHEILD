@@ -62,6 +62,16 @@ class FocusAccessibilityService : AccessibilityService() {
     private var currentPreferences = FocusPreferences()
     private val lastAppLimitCheckTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    /**
+     * Approved-content watch-time capture. Every call site treats a missing tracker as "no capture"
+     * rather than an error — blocking must never depend on analytics being available.
+     */
+    private fun dwellTracker(): com.example.feature.youtube.engine.YouTubeStudyDwellTracker? = try {
+        com.example.feature.youtube.engine.YouTubeStudyDwellTracker.instance
+    } catch (_: Exception) {
+        null
+    }
+
     private fun isExcludedFromAppLimits(rawPackageName: String): Boolean {
         if (rawPackageName.isBlank()) return true
         val lower = rawPackageName.lowercase()
@@ -111,6 +121,9 @@ class FocusAccessibilityService : AccessibilityService() {
         // Track phone unlocks (ACTION_USER_PRESENT must be registered at runtime)
         com.example.core.tracking.PhoneUnlockTracker.register(this)
 
+        // Track screen state so watch-time capture stops when the screen goes dark
+        com.example.core.tracking.ScreenStateTracker.register(this)
+
         // Observe user preferences for shorts/reels blocking
         serviceScope.launch {
             try {
@@ -134,6 +147,9 @@ class FocusAccessibilityService : AccessibilityService() {
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                     YouTubeContentBlockEngine.reset()
                     homeFeedPopupDismissed = false
+                    // The session a segment belongs to is over, so close it before `activeSession` is
+                    // cleared — the tracker stamps the segment with the session it opened under.
+                    dwellTracker()?.flush("session ended")
                 }
             }
         }
@@ -173,6 +189,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage)
             ) {
                 YouTubeContentBlockEngine.reset()
+                dwellTracker()?.flush("left YouTube")
             }
             lastForegroundPackage = rawPackageName
             com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -192,6 +209,7 @@ class FocusAccessibilityService : AccessibilityService() {
                     !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
                 ) {
                     YouTubeContentBlockEngine.reset()
+                    dwellTracker()?.flush("left YouTube")
                 }
                 lastForegroundPackage = rawPackageName
                 
@@ -351,18 +369,26 @@ class FocusAccessibilityService : AccessibilityService() {
                                 com.example.core.notification.FocusShieldBlockNotificationHelper.notifyCustomWebsiteBlocked(this, siteDecision.domain)
                             }
 
-                            // 3. Record analytics attempt directly into Room database
-                            val blockedAttemptRepo = try { FocusShieldApp.instance.database.blockedAttemptDao() } catch (e: Exception) { null }
+                            // 3. Record the event through the repository (single write path → sync)
+                            val blockedAttemptRepo =
+                                try { FocusShieldApp.instance.blockedAttemptRepository } catch (e: Exception) { null }
                             val activeSessionId = blockerManager?.getCurrentProtectionState(now)?.sessionId
+                            val isAdultAuto = siteDecision.engineType == "ADULT_AUTOMATIC"
                             serviceScope.launch {
                                 try {
-                                    blockedAttemptRepo?.insertAttempt(
-                                        com.example.data.local.entity.BlockedAttemptEntity(
-                                            packageName = rawPackageName,
-                                            appName = if (siteDecision.engineType == "ADULT_AUTOMATIC") "18+ Adult Site (${siteDecision.domain})" else "Blocked Website (${siteDecision.domain})",
-                                            timestamp = now,
-                                            sessionId = activeSessionId
-                                        )
+                                    blockedAttemptRepo?.recordAttempt(
+                                        packageName = rawPackageName,
+                                        appName = if (isAdultAuto) {
+                                            "18+ Adult Site (${siteDecision.domain})"
+                                        } else {
+                                            "Blocked Website (${siteDecision.domain})"
+                                        },
+                                        eventType = com.example.data.local.entity.BlockedEventType.WEBSITE_BLOCKED,
+                                        source = com.example.data.local.entity.BlockedEventSource.ACCESSIBILITY_SERVICE,
+                                        sessionId = activeSessionId,
+                                        domain = siteDecision.domain,
+                                        ruleRef = siteDecision.engineType,
+                                        timestamp = now
                                     )
                                 } catch (_: Exception) {}
                             }
@@ -410,6 +436,18 @@ class FocusAccessibilityService : AccessibilityService() {
                     } else {
                         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                         homeFeedPopupDismissed = false
+                    }
+
+                    // Approved content is the only verdict that earns watch time. Every other verdict
+                    // — navigation surfaces, Home, and all three block verdicts — closes the segment,
+                    // so an approved video that leads into a blocked one is billed only for itself.
+                    if (decision.verdict == YouTubeBlockVerdict.ALLOW) {
+                        dwellTracker()?.onAllowedContent(
+                            channelName = decision.detectedChannel,
+                            videoTitle = decision.detectedTitle
+                        )
+                    } else {
+                        dwellTracker()?.flush("verdict ${decision.verdict}")
                     }
 
                     if (decision.isBlocking) {
@@ -460,7 +498,8 @@ class FocusAccessibilityService : AccessibilityService() {
                             packageName = rawPackageName,
                             fallbackAppName = null,
                             decision = protectionDecision,
-                            youtubeResult = youtubeResult
+                            youtubeResult = youtubeResult,
+                            matchedKeyword = decision.matchedKeyword
                         )
                         return
                     }
@@ -469,6 +508,7 @@ class FocusAccessibilityService : AccessibilityService() {
                     // Session no longer active while YouTube is open: remove any lingering Study Mode popup
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                     homeFeedPopupDismissed = false
+                    dwellTracker()?.flush("session not running")
                 }
             } else {
                 com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -983,6 +1023,10 @@ class FocusAccessibilityService : AccessibilityService() {
         AccessibilityHelper.notifyServiceDisconnected()
         com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
+        com.example.core.tracking.ScreenStateTracker.unregister(this)
+        // Close any open watch-time segment: the service is what observes YouTube, so nothing will
+        // ever report the end of this one once it is gone.
+        dwellTracker()?.flush("service unbound")
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
         Log.d(tag, "FocusAccessibilityService unbound.")
         return super.onUnbind(intent)
@@ -994,6 +1038,8 @@ class FocusAccessibilityService : AccessibilityService() {
         AccessibilityHelper.notifyServiceDisconnected()
         com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
+        com.example.core.tracking.ScreenStateTracker.unregister(this)
+        dwellTracker()?.flush("service destroyed")
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
         super.onDestroy()
         Log.d(tag, "FocusAccessibilityService destroyed.")

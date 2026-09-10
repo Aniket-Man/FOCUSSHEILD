@@ -17,11 +17,20 @@ object SyncTables {
     const val STUDY_TOPICS = "study_topics"
     const val STUDY_PLANS = "study_plans"
     const val BLOCKED_KEYWORDS = "blocked_keywords" // Room table "keywords"
+    const val DAILY_UNLOCKS = "daily_unlocks"
+    /**
+     * Daily per-app usage. Reconcile pulls *merge* into local rows rather than replacing them,
+     * because each row also carries device-only enforcement state (emergency unlocks / bypass).
+     */
+    const val DAILY_APP_USAGE = "daily_app_usage"
 
     // History tables (append-only pull; deletes propagate only when performed locally).
     const val SESSION_RECORDS = "session_records"
     const val STUDY_ACTIVITIES = "study_activities"
     const val BREAK_RECORDS = "break_records"
+    const val BLOCKED_ATTEMPTS = "blocked_attempts"
+    const val APP_LIMIT_SESSIONS = "app_limit_sessions"
+    const val SCRATCH_CARDS = "scratch_cards"
 
     // Whole-document rows (one row per user, not stored in Room).
     const val PROFILES = "profiles"
@@ -49,10 +58,21 @@ data class TableMeta(
     /**
      * Room primary-key column used to key the outbox and build cloud delete filters.
      * For most tables this is `id`, `packageName` or `domain`. Keywords use a natural key and
-     * are handled specially (see [SyncKeycode]).
+     * are handled specially (see [SyncKeycode]); `daily_app_usage` has a composite key that a
+     * single column cannot express, so it is keyed through [SyncKeycode.appUsageKey] and — having
+     * no local delete path — never produces a cloud DELETE.
      */
     val pkField: String,
-    val pullMode: PullMode
+    val pullMode: PullMode,
+    /**
+     * Whether a reconcile pull may clear this table before re-inserting the remote rows.
+     *
+     * `false` for tables whose local rows carry device-only state that the cloud does not hold:
+     * a clear-then-reinsert would silently drop it. Such tables merge instead — remote columns are
+     * written onto the existing local row, device-only columns are left alone. A *destructive
+     * restore* still clears them, because that path is defined as replacing local data wholesale.
+     */
+    val clearsOnReconcile: Boolean = true
 )
 
 /**
@@ -69,9 +89,21 @@ val SYNCED_ROOM_TABLES: List<TableMeta> = listOf(
     TableMeta(SyncTables.APP_LIMITS, SyncTables.APP_LIMITS, "packageName", PullMode.RECONCILE),
     TableMeta(SyncTables.STUDY_CHANNELS, SyncTables.STUDY_CHANNELS, "id", PullMode.RECONCILE),
     TableMeta(SyncTables.BLOCKED_KEYWORDS, SyncTables.BLOCKED_KEYWORDS, "", PullMode.RECONCILE),
+    // Usage rows merge rather than clear: they also carry this device's emergency/bypass state.
+    TableMeta(
+        SyncTables.DAILY_APP_USAGE,
+        SyncTables.DAILY_APP_USAGE,
+        "packageName",
+        PullMode.RECONCILE,
+        clearsOnReconcile = false
+    ),
+    TableMeta(SyncTables.DAILY_UNLOCKS, SyncTables.DAILY_UNLOCKS, "dateString", PullMode.RECONCILE),
     TableMeta(SyncTables.SESSION_RECORDS, SyncTables.SESSION_RECORDS, "id", PullMode.HISTORY),
     TableMeta(SyncTables.STUDY_ACTIVITIES, SyncTables.STUDY_ACTIVITIES, "id", PullMode.HISTORY),
-    TableMeta(SyncTables.BREAK_RECORDS, SyncTables.BREAK_RECORDS, "id", PullMode.HISTORY)
+    TableMeta(SyncTables.BREAK_RECORDS, SyncTables.BREAK_RECORDS, "id", PullMode.HISTORY),
+    TableMeta(SyncTables.BLOCKED_ATTEMPTS, SyncTables.BLOCKED_ATTEMPTS, "eventId", PullMode.HISTORY),
+    TableMeta(SyncTables.APP_LIMIT_SESSIONS, SyncTables.APP_LIMIT_SESSIONS, "id", PullMode.HISTORY),
+    TableMeta(SyncTables.SCRATCH_CARDS, SyncTables.SCRATCH_CARDS, "sessionId", PullMode.HISTORY)
 )
 
 /** Keyword natural keys: a keyword row has no stable Room PK, so we key it by type + keyword. */
@@ -80,6 +112,13 @@ object SyncKeycode {
 
     /** Build the stable key for a keyword row. Unambiguous because `type` is a fixed enum value. */
     fun keywordKey(type: String, keyword: String): String = "$type$SEP${keyword.length}$SEP$keyword"
+
+    /**
+     * Build the outbox/row key for a `daily_app_usage` row. The table's primary key is the
+     * composite (packageName, dateString), so neither column alone is unique.
+     */
+    fun appUsageKey(packageName: String, dateString: String): String =
+        "$packageName$SEP$dateString"
 
     /**
      * Split a key produced by [keywordKey] back into (type, keyword). Returns null when the key is
