@@ -13,8 +13,7 @@ Every ❌ in this audit is now implemented, and the live Supabase project carrie
   `eventType`/`source`, domain/channel/keyword/rule/session/subject/topic/device columns) and
   bound to sync; Room migrated 12 → 13 non-destructively, legacy rows backfilled with
   `eventId = 'legacy-<id>'` and a best-guess type.
-- `app_limit_sessions`, `scratch_cards`, `daily_unlocks`, `daily_app_usage` bound to sync
-  (`daily_app_usage` merges rather than clears, so enforcement state stays device-local).
+- `scratch_cards` and `daily_unlocks` bound to sync.
 - `claimedRewardIds`, `blockedNotificationPackages`, `alwaysBlockedNotificationPackages` moved
   into `accountPreferencesJson`.
 - YouTube Study Mode watch time is now captured (`YouTubeStudyDwellTracker` +
@@ -22,6 +21,23 @@ Every ❌ in this audit is now implemented, and the live Supabase project carrie
 - `SyncEngine.restoreLocked()` no longer carves telemetry out of a restore.
 - Supabase: 14 → **19 tables**, 80 owner-only RLS policies; migration
   `add_analytics_telemetry_tables` applied live.
+
+### Reversal (2026-09-10) — app-limit data is device-local
+
+App limits are enforced on-device, and their data is not wanted as account history, so the
+decision above was walked back for them specifically: `app_limits`, `daily_app_usage` and
+`app_limit_sessions` were dropped from Supabase (migration `drop_app_limit_sync_tables`) and
+removed from `SYNCED_ROOM_TABLES`. Room still owns all three tables and the App Limits feature is
+unaffected — it simply no longer syncs. Supabase is now **16 tables**.
+
+Two consequences worth recording:
+
+- `SyncEngine.drain()` used to resolve an outbox row's table through `metaFor()`, which fell back
+  to `SYNCED_ROOM_TABLES.first()`. Any op left over from a dropped table would have been pushed at
+  `study_subjects`. Stale ops are now discarded by table lookup instead.
+- `daily_app_usage` was the only table using `clearsOnReconcile = false` and the `merge` binding, so
+  that machinery now has no users. It is left in place — it is a general engine capability and the
+  default (`true`) is what every remaining table wants.
 
 Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived at runtime from the OS (correctly device-local)
 
@@ -68,10 +84,10 @@ Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived a
 
 | UI statistic | DAO | Entity | Cloud table |
 |---|---|---|---|
-| Limit configuration (minutes, strict, reminders, emergency allowance) | `AppLimitDao` | `app_limits` | ✅ |
-| **Today's usage progress bar / used minutes** | `DailyAppUsageDao` | `daily_app_usage` | ❌ |
-| **Emergency uses consumed / bypassed-today state** | `DailyAppUsageDao` | `daily_app_usage` | ❌ (device-runtime enforcement, but see §5 classification below) |
-| **Limit session history** (start/end, selected vs actual, end reason) | `AppLimitSessionDao` | `app_limit_sessions` | ❌ |
+| Limit configuration (minutes, strict, reminders, emergency allowance) | `AppLimitDao` | `app_limits` | ⚙️ device-local (reversal above) |
+| **Today's usage progress bar / used minutes** | `DailyAppUsageDao` | `daily_app_usage` | ⚙️ device-local |
+| **Emergency uses consumed / bypassed-today state** | `DailyAppUsageDao` | `daily_app_usage` | ⚙️ device-local |
+| **Limit session history** (start/end, selected vs actual, end reason) | `AppLimitSessionDao` | `app_limit_sessions` | ⚙️ device-local |
 
 ### 1.4 Widgets & rewards
 
@@ -104,8 +120,8 @@ Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived a
 2. **YouTube Study Mode records nothing.** `AnalyticsRepository.recordYouTubeStudyActivity()` is
    dead code (zero callers), so `verifiedWatchTimeMillis` and every §4 figure are permanently 0.
    `study_activities` *is* synced — the storage path exists and is simply never fed.
-3. **Four more unsynced tables** carrying user-visible history: `daily_unlocks`,
-   `app_limit_sessions`, `daily_app_usage`, `scratch_cards`.
+3. **Two more unsynced tables** carrying user-visible history: `daily_unlocks`,
+   `scratch_cards`.
 4. **`claimedRewardIds` is device-local** (DataStore, not in `accountPreferencesJson`) — §10 requires
    claimed rewards/achievement progress to follow the account.
 5. **`blockedNotificationsCount` is a mutable counter** (§2/§9: aggregates must not be the only

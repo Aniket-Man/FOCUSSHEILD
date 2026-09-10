@@ -84,6 +84,7 @@ import coil.request.ImageRequest
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.util.ProfilePhotoStorage
+import java.io.File
 
 /**
  * Avatar Preset Option definition for student personas
@@ -135,6 +136,25 @@ val AVATAR_PRESETS = listOf(
 )
 
 /**
+ * Coil cache key for an avatar image.
+ *
+ * The committed avatar and the staged crop each live at a fixed path, so their `file://` URI is
+ * byte-for-byte identical before and after a re-crop. Coil keys both its memory and disk caches on
+ * that URI, so without this a newly cropped photo keeps rendering the previously cached bitmap.
+ * Folding in the file's last-modified stamp — which changes on every write — makes the key change
+ * with it. `content://` and cached cloud avatars already have unique URIs and are left alone.
+ *
+ * Deliberately not wrapped in `remember`: the whole point is to pick up a new timestamp while the
+ * URI stays the same.
+ */
+private fun avatarCacheKey(uri: Uri): String {
+    if (uri.scheme != "file") return uri.toString()
+    val file = uri.path?.let { File(it) }
+    val stamp = if (file != null && file.exists()) file.lastModified() else 0L
+    return "$uri#$stamp"
+}
+
+/**
  * User Profile Avatar component.
  * Gracefully displays uploaded image from local storage or falls back to preset avatar.
  */
@@ -160,9 +180,13 @@ fun UserProfileAvatar(
         contentAlignment = Alignment.Center
     ) {
         if (!photoUri.isNullOrBlank()) {
+            val avatarUri = Uri.parse(photoUri)
+            val cacheKey = avatarCacheKey(avatarUri)
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
-                    .data(Uri.parse(photoUri))
+                    .data(avatarUri)
+                    .memoryCacheKey(cacheKey)
+                    .diskCacheKey(cacheKey)
                     .crossfade(true)
                     .build(),
                 contentDescription = "User Profile Photo",

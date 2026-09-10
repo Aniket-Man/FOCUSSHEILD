@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -235,7 +236,13 @@ fun ImageCropDialog(
                                     contentScale = ContentScale.FillBounds,
                                     modifier = Modifier
                                         .align(Alignment.Center)
-                                        .size(
+                                        // `requiredSize`, not `size`: the parent viewport is a
+                                        // square, so a plain `size` would clamp this back to a
+                                        // square and `FillBounds` would then stretch the bitmap into
+                                        // it — squashing every non-square photo. Overriding the
+                                        // incoming constraints is the whole point; the viewport's
+                                        // `clipToBounds` is what trims the overflow.
+                                        .requiredSize(
                                             width = with(density) {
                                                 (image.width * coverScale).toDp()
                                             },

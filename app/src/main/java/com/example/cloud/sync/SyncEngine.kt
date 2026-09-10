@@ -102,7 +102,8 @@ class SyncEngine(
      * account's history has to be reproduced from the cloud, and a table left behind would show the
      * *previous* owner's events alongside the restored account's. The only state still surviving a
      * restore is what was never account-level to begin with: the device-local preference keys, and
-     * the per-device enforcement columns of `daily_app_usage`, which are restored as defaults.
+     * the tables outside the sync set entirely (the app-limit tables are device-local by decision —
+     * see [SyncTables]).
      */
     suspend fun restore(uid: String): SyncCycleOutcome {
         if (!SupabaseConfig.isConfigured) return SyncCycleOutcome.NoSession
@@ -199,9 +200,7 @@ class SyncEngine(
 
         // 2) Clear every synced table + the outbox, then load the target account's data. This is the
         //    one deliberately destructive path (a cross-account restore, or a fresh install adopting
-        //    an existing account). `daily_app_usage` is cleared here too — its device-only emergency
-        //    and bypass columns belong to the *previous* device/account pairing, so carrying them
-        //    into the restored account would be wrong.
+        //    an existing account).
         database.withTransaction {
             outbox.clearAll()
             for (b in bindings) b.clearAll()
@@ -232,8 +231,17 @@ class SyncEngine(
             val batch = outbox.peekOldest(40)
             if (batch.isEmpty()) return
             for (op in batch) {
+                val meta = SYNCED_ROOM_TABLES.firstOrNull { it.tableKey == op.tableName }
+                if (meta == null) {
+                    // This table left the sync set (app limits became device-local), so the op has
+                    // no destination and no remote row to converge. Discard it rather than pushing
+                    // it at some other table: `drain` loops over the oldest rows until they are
+                    // gone, so leaving it in place would never terminate.
+                    outbox.deleteBySeq(op.seq)
+                    continue
+                }
                 try {
-                    pushOutboxOp(session, op)
+                    pushOutboxOp(session, op, meta)
                     outbox.deleteBySeq(op.seq)
                 } catch (e: Exception) {
                     outbox.bumpAttemptCount(op.seq)
@@ -243,16 +251,15 @@ class SyncEngine(
         }
     }
 
-    private suspend fun pushOutboxOp(session: AuthSession, op: SyncOutboxEntity) {
+    private suspend fun pushOutboxOp(session: AuthSession, op: SyncOutboxEntity, meta: TableMeta) {
         when (op.op) {
             SyncTracker.OP_UPSERT -> {
                 val payload = op.payload ?: return
                 val row = JSONObject(payload)
                 row.put("user_id", session.userId)
-                postRows(session, metaFor(op.tableName).cloudTable, listOf(row))
+                postRows(session, meta.cloudTable, listOf(row))
             }
             SyncTracker.OP_DELETE -> {
-                val meta = metaFor(op.tableName)
                 val query = if (op.tableName == SyncTables.BLOCKED_KEYWORDS) {
                     val pair = SyncKeycode.decodeKeywordKey(op.rowId)
                     if (pair == null) return
@@ -456,10 +463,6 @@ class SyncEngine(
         )
     }
 
-    private fun metaFor(tableKey: String): TableMeta =
-        SYNCED_ROOM_TABLES.firstOrNull { it.tableKey == tableKey }
-            ?: SYNCED_ROOM_TABLES.first() // unreachable; outbox only holds synced room tables
-
     // ---- typed table bindings --------------------------------------------------------------
 
     private interface TableBinding {
@@ -575,15 +578,6 @@ class SyncEngine(
             clear = { bulk.clearBlockedWebsites() }
         )
         l += bind(
-            meta = TableMeta(SyncTables.APP_LIMITS, SyncTables.APP_LIMITS, "packageName", PullMode.RECONCILE),
-            keyOfJson = { it.optString("packageName") },
-            fromJson = { CloudJson.appLimitFromCloud(it) },
-            toJson = { CloudJson.appLimitToJson(it) },
-            readAll = { bulk.appLimits() },
-            insert = { bulk.upsertAppLimits(it) },
-            clear = { bulk.clearAppLimits() }
-        )
-        l += bind(
             meta = TableMeta(SyncTables.STUDY_CHANNELS, SyncTables.STUDY_CHANNELS, "id", PullMode.RECONCILE),
             keyOfJson = { it.optString("id") },
             fromJson = { CloudJson.studyChannelFromCloud(it) },
@@ -641,15 +635,6 @@ class SyncEngine(
             clear = { bulk.clearBlockedAttempts() }
         )
         l += bind(
-            meta = TableMeta(SyncTables.APP_LIMIT_SESSIONS, SyncTables.APP_LIMIT_SESSIONS, "id", PullMode.HISTORY),
-            keyOfJson = { it.optString("id") },
-            fromJson = { CloudJson.appLimitSessionFromCloud(it) },
-            toJson = { CloudJson.appLimitSessionToJson(it) },
-            readAll = { bulk.appLimitSessions() },
-            insert = { bulk.insertAppLimitSessionsMissing(it) },
-            clear = { bulk.clearAppLimitSessions() }
-        )
-        l += bind(
             meta = TableMeta(SyncTables.SCRATCH_CARDS, SyncTables.SCRATCH_CARDS, "sessionId", PullMode.HISTORY),
             keyOfJson = { it.optString("sessionId") },
             fromJson = { CloudJson.scratchCardFromCloud(it) },
@@ -668,51 +653,7 @@ class SyncEngine(
             insert = { bulk.upsertDailyUnlocks(it) },
             clear = { bulk.clearDailyUnlocks() }
         )
-        // daily_app_usage merges instead of clearing, so this device's emergency/bypass columns
-        // survive. Remote usage is applied only when it is at least as recent as the local row,
-        // which keeps this device's newer counts rather than silently regressing them; the local
-        // row's pending upsert still converges the cloud copy on the next drain.
-        l += bind(
-            meta = TableMeta(
-                SyncTables.DAILY_APP_USAGE,
-                SyncTables.DAILY_APP_USAGE,
-                "packageName",
-                PullMode.RECONCILE,
-                clearsOnReconcile = false
-            ),
-            keyOfJson = { SyncKeycode.appUsageKey(it.optString("packageName"), it.optString("dateString")) },
-            fromJson = { CloudJson.dailyAppUsageMerge(null, it) },
-            toJson = { CloudJson.dailyAppUsageToJson(it) },
-            readAll = { bulk.dailyAppUsage() },
-            insert = { bulk.upsertDailyAppUsage(it) },
-            clear = { bulk.clearDailyAppUsage() },
-            merge = { rows -> mergeDailyAppUsage(rows) }
-        )
         return l
-    }
-
-    /**
-     * Apply remote `daily_app_usage` rows onto the local ones. A remote row is written only when it
-     * is newer than the local row it would replace, and it is always combined with the local row's
-     * device-only columns (emergency usage, bypass) which the cloud does not store.
-     */
-    private suspend fun mergeDailyAppUsage(rows: List<JSONObject>) {
-        val local = bulk.dailyAppUsage().associateBy {
-            SyncKeycode.appUsageKey(it.packageName, it.dateString)
-        }
-        val merged = rows.mapNotNull { row ->
-            val key = SyncKeycode.appUsageKey(row.optString("packageName"), row.optString("dateString"))
-            val existing = local[key]
-            if (existing != null && existing.lastActiveTimestamp > row.optLong("lastActiveTimestamp", 0L)) {
-                return@mapNotNull null
-            }
-            try {
-                CloudJson.dailyAppUsageMerge(existing, row)
-            } catch (e: Exception) {
-                null
-            }
-        }
-        if (merged.isNotEmpty()) bulk.upsertDailyAppUsage(merged)
     }
 }
 
