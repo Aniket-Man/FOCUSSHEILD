@@ -3,5 +3,19 @@ local.properties
 .gradle/
 build/
 
+# Local signing keystores + signing secrets (never commit; passwords come from env vars).
+# my-upload-key.jks is intentionally absent from the repo going forward.
+*.jks
+*.keystore
+keystore.properties
+
+# Kotlin compiler session data (transient heartbeat files)
+.kotlin/
+
 # Claude Code local session data
 .claude/
+
+# Supabase MCP server config + agent skills (local tooling, not source)
+.mcp.json
+.agents/
+skills-lock.json
