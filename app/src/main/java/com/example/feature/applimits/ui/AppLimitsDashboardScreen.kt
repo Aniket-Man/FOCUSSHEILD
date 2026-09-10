@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -85,9 +88,22 @@ fun AppLimitsDashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<AppLimitUiItem?>(null) }
+    var showAccessibilityRequired by remember { mutableStateOf(false) }
+
+    // App Limit enforcement runs through the Accessibility Service (it watches which app
+    // is in the foreground and surfaces the limit screen over it). Before opening the
+    // add/edit flow, make sure that permission is granted so the limit actually works.
+    fun openAddLimitFlow() {
+        if (AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+            showAddDialog = true
+        } else {
+            showAccessibilityRequired = true
+        }
+    }
 
     Scaffold(
         modifier = modifier
@@ -130,7 +146,7 @@ fun AppLimitsDashboardScreen(
             ExtendedFloatingActionButton(
                 onClick = {
                     editingItem = null
-                    showAddDialog = true
+                    openAddLimitFlow()
                 },
                 containerColor = FocusColors.Primary,
                 contentColor = FocusColors.TextOnDark,
@@ -166,7 +182,7 @@ fun AppLimitsDashboardScreen(
                     EmptyLimitsView(
                         onAddLimit = {
                             editingItem = null
-                            showAddDialog = true
+                            openAddLimitFlow()
                         }
                     )
                 }
@@ -193,7 +209,7 @@ fun AppLimitsDashboardScreen(
                         onToggle = { isEnabled -> viewModel.toggleLimit(item.packageName, isEnabled) },
                         onEdit = {
                             editingItem = item
-                            showAddDialog = true
+                            openAddLimitFlow()
                         },
                         onDelete = { viewModel.deleteLimit(item.packageName) },
                         onUnlockToday = { viewModel.unlockForToday(item.packageName) },
@@ -206,6 +222,20 @@ fun AppLimitsDashboardScreen(
                 }
             }
         }
+    }
+
+    if (showAccessibilityRequired) {
+        AccessibilityPermissionRequiredDialog(
+            featureTitle = "App Limits",
+            featureDescription = "your daily usage limits when distracting apps are opened",
+            featureKey = "app_limits",
+            onDismissRequest = { showAccessibilityRequired = false },
+            onPermissionGranted = {
+                showAccessibilityRequired = false
+                // Resume the add/edit flow now that the service is enabled.
+                showAddDialog = true
+            }
+        )
     }
 
     if (showAddDialog) {

@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.SessionDao
 import com.example.data.local.dao.StudyActivityDao
 import com.example.data.local.entity.SessionRecordEntity
@@ -82,6 +85,11 @@ class SessionRepository(
             createdAt = session.startedAt
         )
         sessionDao.insertSession(record)
+        SyncTracker.enqueueUpsert(
+            SyncTables.SESSION_RECORDS,
+            record.id,
+            CloudJson.sessionRecordToJson(record).toString()
+        )
 
         // Also record corresponding verified StudyActivity
         if (pureStudyDuration > 0 && studyActivityDao != null) {
@@ -110,6 +118,11 @@ class SessionRepository(
             )
             try {
                 studyActivityDao.insertActivity(studyActivity)
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_ACTIVITIES,
+                    studyActivity.id,
+                    CloudJson.studyActivityToJson(studyActivity).toString()
+                )
             } catch (e: Exception) {
                 // Ignore activity persistence error
             }
@@ -118,6 +131,11 @@ class SessionRepository(
 
     suspend fun insertSession(record: SessionRecordEntity) {
         sessionDao.insertSession(record)
+        SyncTracker.enqueueUpsert(
+            SyncTables.SESSION_RECORDS,
+            record.id,
+            CloudJson.sessionRecordToJson(record).toString()
+        )
     }
 
     suspend fun getSessionById(id: String): SessionRecordEntity? {
@@ -125,11 +143,22 @@ class SessionRepository(
     }
 
     suspend fun deleteSession(id: String) {
+        // History rows are append-only on pull, so deleting a session must propagate the delete for
+        // the session AND each of its activities row-by-row (ids are read before the delete).
+        val activities = try {
+            studyActivityDao?.getActivitiesForSession(id).orEmpty()
+        } catch (e: Exception) {
+            emptyList()
+        }
         sessionDao.deleteSessionById(id)
+        SyncTracker.enqueueDelete(SyncTables.SESSION_RECORDS, id)
         try {
             studyActivityDao?.deleteActivitiesForSession(id)
         } catch (e: Exception) {
             // Ignore
+        }
+        activities.forEach { activity ->
+            SyncTracker.enqueueDelete(SyncTables.STUDY_ACTIVITIES, activity.id)
         }
     }
 

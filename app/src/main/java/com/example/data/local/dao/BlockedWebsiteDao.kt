@@ -18,6 +18,9 @@ interface BlockedWebsiteDao {
     @Query("SELECT * FROM blocked_websites WHERE isEnabled = 1")
     suspend fun getActiveBlockedWebsitesSync(): List<BlockedWebsiteEntity>
 
+    @Query("SELECT * FROM blocked_websites WHERE domain = :domain LIMIT 1")
+    suspend fun getWebsiteByDomain(domain: String): BlockedWebsiteEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWebsite(website: BlockedWebsiteEntity)
 

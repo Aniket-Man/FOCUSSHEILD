@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.StudyPlanDao
 import com.example.data.local.entity.StudyPlanEntity
 import com.example.feature.session.notification.StudyPlanAlarmScheduler
@@ -70,7 +73,12 @@ class StudyPlanRepository(
             createdAt = System.currentTimeMillis()
         )
         studyPlanDao.insertPlan(plan)
-        
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_PLANS,
+            plan.id,
+            CloudJson.studyPlanToJson(plan).toString()
+        )
+
         try {
             val context = com.example.FocusShieldApp.instance
             StudyPlanAlarmScheduler.scheduleSinglePlanReminder(context, plan)
@@ -118,6 +126,11 @@ class StudyPlanRepository(
             createdAt = existing?.createdAt ?: System.currentTimeMillis()
         )
         studyPlanDao.updatePlan(plan)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_PLANS,
+            plan.id,
+            CloudJson.studyPlanToJson(plan).toString()
+        )
 
         try {
             val context = com.example.FocusShieldApp.instance
@@ -133,6 +146,15 @@ class StudyPlanRepository(
 
     suspend fun togglePlanCompletion(id: String, isCompleted: Boolean) {
         studyPlanDao.updatePlanCompletion(id, isCompleted)
+        // Read back the full row so the reconcile pull never reverts an unpushed toggle.
+        val updated = studyPlanDao.getPlanById(id)
+        if (updated != null) {
+            SyncTracker.enqueueUpsert(
+                SyncTables.STUDY_PLANS,
+                updated.id,
+                CloudJson.studyPlanToJson(updated).toString()
+            )
+        }
         try {
             val context = com.example.FocusShieldApp.instance
             if (isCompleted) {
@@ -150,6 +172,7 @@ class StudyPlanRepository(
 
     suspend fun deletePlan(id: String) {
         studyPlanDao.deletePlanById(id)
+        SyncTracker.enqueueDelete(SyncTables.STUDY_PLANS, id)
         try {
             val context = com.example.FocusShieldApp.instance
             StudyPlanAlarmScheduler.cancelPlanReminder(context, id)
@@ -199,6 +222,13 @@ class StudyPlanRepository(
                 )
             }
             studyPlanDao.insertAll(newTodayPlans)
+            newTodayPlans.forEach { plan ->
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_PLANS,
+                    plan.id,
+                    CloudJson.studyPlanToJson(plan).toString()
+                )
+            }
             return newTodayPlans
         } else {
             initializeDefaultPlansIfEmpty()
@@ -264,7 +294,14 @@ class StudyPlanRepository(
                 )
             )
             studyPlanDao.insertAll(defaultPlans)
-            
+            defaultPlans.forEach { plan ->
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_PLANS,
+                    plan.id,
+                    CloudJson.studyPlanToJson(plan).toString()
+                )
+            }
+
             try {
                 val context = com.example.FocusShieldApp.instance
                 StudyPlanAlarmScheduler.schedulePlanReminders(context, defaultPlans)

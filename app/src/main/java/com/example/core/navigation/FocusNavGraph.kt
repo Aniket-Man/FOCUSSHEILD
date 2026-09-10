@@ -42,6 +42,8 @@ import com.example.feature.session.StartSessionScreen
 import com.example.feature.session.notification.PlanLaunchPayload
 import com.example.feature.settings.SettingsScreen
 import com.example.feature.settings.SettingsViewModel
+import com.example.feature.account.AccountScreen
+import com.example.feature.account.AccountViewModel
 
 /**
  * Central FocusShield Navigation Graph.
@@ -66,6 +68,13 @@ fun FocusNavGraph(
     websiteBlockerViewModel: WebsiteBlockerViewModel = viewModel(),
     studyChannelsViewModel: StudyChannelsViewModel = viewModel {
         StudyChannelsViewModel(FocusShieldApp.instance.studyChannelRepository)
+    },
+    accountViewModel: AccountViewModel = viewModel {
+        AccountViewModel(
+            FocusShieldApp.instance.authRepository,
+            FocusShieldApp.instance.cloudInstallState,
+            FocusShieldApp.instance.syncGateway
+        )
     }
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
@@ -214,6 +223,8 @@ fun FocusNavGraph(
                 onNavigateToHistory = { navController.navigate(Screen.SessionsHistory.route) },
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
+                onNavigateToAccount = { navController.navigate(Screen.Account.route) },
+                accountViewModel = accountViewModel,
                 onNavigateToOnboarding = { navController.navigate(Screen.Onboarding.route) }
             )
         }
@@ -319,6 +330,14 @@ fun FocusNavGraph(
         composable(Screen.AppLimits.route) {
             AppLimitsDashboardScreen(
                 viewModel = appLimitsViewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // SUB-SCREEN: ACCOUNT & CLOUD BACKUP (optional; local-first until the user signs in)
+        composable(Screen.Account.route) {
+            AccountScreen(
+                accountViewModel = accountViewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

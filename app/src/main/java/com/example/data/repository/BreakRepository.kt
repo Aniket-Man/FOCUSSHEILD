@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.BreakRecordDao
 import com.example.data.local.entity.BreakRecordEntity
 import com.example.feature.session.domain.ManualBreakInfo
@@ -25,6 +28,11 @@ class BreakRepository(
             createdAt = breakInfo.startedAt
         )
         breakRecordDao.insertBreak(entity)
+        SyncTracker.enqueueUpsert(
+            SyncTables.BREAK_RECORDS,
+            entity.id,
+            CloudJson.breakRecordToJson(entity).toString()
+        )
     }
 
     suspend fun updateBreak(breakInfo: ManualBreakInfo, isCompleted: Boolean) = withContext(Dispatchers.IO) {
@@ -39,6 +47,11 @@ class BreakRepository(
             createdAt = breakInfo.startedAt
         )
         breakRecordDao.updateBreak(entity)
+        SyncTracker.enqueueUpsert(
+            SyncTables.BREAK_RECORDS,
+            entity.id,
+            CloudJson.breakRecordToJson(entity).toString()
+        )
     }
 
     fun getBreaksForSessionFlow(sessionId: String): Flow<List<BreakRecordEntity>> {

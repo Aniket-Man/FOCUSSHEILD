@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import android.content.Context
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.core.util.ChannelLogoStorageManager
 import com.example.data.local.dao.StudyChannelDao
 import com.example.data.local.entity.StudyChannelEntity
@@ -136,6 +139,12 @@ class StudyChannelRepository(
 
         studyChannelDao.insertChannel(entity)
 
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_CHANNELS,
+            entity.id,
+            CloudJson.studyChannelToJson(entity).toString()
+        )
+
         if (isApproved) {
             cachedApprovedChannelIds.add(channelId.trim().lowercase(Locale.ROOT))
             if (normInputName.isNotBlank()) cachedApprovedNormalizedNames.add(normInputName)
@@ -156,15 +165,26 @@ class StudyChannelRepository(
      */
     suspend fun removeChannel(id: String) {
         studyChannelDao.deleteChannelById(id)
+        SyncTracker.enqueueDelete(SyncTables.STUDY_CHANNELS, id)
     }
 
     /**
      * Deletes all study channels.
      */
     suspend fun clearAllChannels() {
+        // Read the row ids first so each channel's delete can be propagated to the cloud
+        // (a whole-table DELETE has no single cloud key to target).
+        val channels = try {
+            studyChannelDao.getAllChannels()
+        } catch (e: Exception) {
+            emptyList()
+        }
         studyChannelDao.deleteAllChannels()
         cachedApprovedChannelIds.clear()
         cachedApprovedNormalizedNames.clear()
+        channels.forEach { channel ->
+            SyncTracker.enqueueDelete(SyncTables.STUDY_CHANNELS, channel.id)
+        }
     }
 
     /**
@@ -172,6 +192,15 @@ class StudyChannelRepository(
      */
     suspend fun toggleChannelApproval(id: String, isApproved: Boolean) {
         studyChannelDao.setApprovalStatus(id, isApproved)
+        // Read back the full row so the reconcile pull never reverts an unpushed toggle.
+        val updated = studyChannelDao.getChannelById(id)
+        if (updated != null) {
+            SyncTracker.enqueueUpsert(
+                SyncTables.STUDY_CHANNELS,
+                updated.id,
+                CloudJson.studyChannelToJson(updated).toString()
+            )
+        }
     }
 
     /**
@@ -232,6 +261,11 @@ class StudyChannelRepository(
             )
             studyChannelDao.insertAll(defaults)
             defaults.forEach {
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_CHANNELS,
+                    it.id,
+                    CloudJson.studyChannelToJson(it).toString()
+                )
                 cachedApprovedChannelIds.add(it.channelId.trim().lowercase(Locale.ROOT))
                 cachedApprovedNormalizedNames.add(normalizeChannelName(it.channelName))
             }

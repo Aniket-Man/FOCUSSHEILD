@@ -35,6 +35,9 @@ interface KeywordDao {
     @Delete
     suspend fun deleteKeyword(keyword: KeywordEntity)
 
+    @Query("SELECT * FROM keywords WHERE id = :id LIMIT 1")
+    suspend fun getKeywordById(id: Long): KeywordEntity?
+
     @Query("DELETE FROM keywords WHERE id = :id")
     suspend fun deleteKeywordById(id: Long)
 }

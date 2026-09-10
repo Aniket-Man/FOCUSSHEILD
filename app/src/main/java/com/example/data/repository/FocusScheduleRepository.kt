@@ -1,6 +1,9 @@
 package com.example.data.repository
 
 import android.content.Context
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.FocusScheduleDao
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.feature.session.notification.FocusScheduleAlarmScheduler
@@ -44,6 +47,11 @@ class FocusScheduleRepository(
             )
             for (sch in defaultSchedules) {
                 dao.insertSchedule(sch)
+                SyncTracker.enqueueUpsert(
+                    SyncTables.FOCUS_SCHEDULES,
+                    sch.id,
+                    CloudJson.focusScheduleToJson(sch).toString()
+                )
             }
             context?.let { ctx ->
                 val enabled = dao.getEnabledSchedules()
@@ -54,6 +62,11 @@ class FocusScheduleRepository(
 
     suspend fun addSchedule(schedule: FocusScheduleEntity) {
         dao.insertSchedule(schedule)
+        SyncTracker.enqueueUpsert(
+            SyncTables.FOCUS_SCHEDULES,
+            schedule.id,
+            CloudJson.focusScheduleToJson(schedule).toString()
+        )
         context?.let { ctx ->
             FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, schedule)
         }
@@ -61,6 +74,11 @@ class FocusScheduleRepository(
 
     suspend fun updateSchedule(schedule: FocusScheduleEntity) {
         dao.updateSchedule(schedule)
+        SyncTracker.enqueueUpsert(
+            SyncTables.FOCUS_SCHEDULES,
+            schedule.id,
+            CloudJson.focusScheduleToJson(schedule).toString()
+        )
         context?.let { ctx ->
             FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, schedule)
         }
@@ -69,6 +87,13 @@ class FocusScheduleRepository(
     suspend fun toggleScheduleEnabled(id: String, isEnabled: Boolean) {
         dao.setScheduleEnabled(id, isEnabled)
         val updated = dao.getScheduleById(id)
+        if (updated != null) {
+            SyncTracker.enqueueUpsert(
+                SyncTables.FOCUS_SCHEDULES,
+                updated.id,
+                CloudJson.focusScheduleToJson(updated).toString()
+            )
+        }
         context?.let { ctx ->
             if (updated != null) {
                 if (isEnabled) {
@@ -82,6 +107,7 @@ class FocusScheduleRepository(
 
     suspend fun deleteSchedule(id: String) {
         dao.deleteScheduleById(id)
+        SyncTracker.enqueueDelete(SyncTables.FOCUS_SCHEDULES, id)
         context?.let { ctx ->
             FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, id)
         }

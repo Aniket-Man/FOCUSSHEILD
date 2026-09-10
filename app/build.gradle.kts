@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -8,6 +9,24 @@ plugins {
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
+
+// Read optional Supabase cloud configuration from local.properties (gitignored). Declared
+// BEFORE the android {} block on purpose: defaultConfig.buildConfigField interpolates these
+// values at configuration time, and a forward reference (vals declared after android {}) reads
+// null and bakes the literal string "null" into BuildConfig — which makes SupabaseConfig report
+// "not configured". Optional by design: absent keys leave BuildConfig.SUPABASE_URL blank and the
+// app runs fully offline. The anon key is a publishable client key, never a service_role/secret key.
+val focusShieldLocalProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun optionalCloudProperty(key: String): String {
+    val value = focusShieldLocalProperties.getProperty(key) ?: System.getenv(key) ?: ""
+    // Escape for safe interpolation into a Java String literal in generated BuildConfig.
+    return value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+val supabaseUrl = optionalCloudProperty("SUPABASE_URL")
+val supabaseAnonKey = optionalCloudProperty("SUPABASE_ANON_KEY")
 
 android {
   namespace = "com.example"
@@ -21,6 +40,10 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Optional Supabase cloud config (see helper above). Empty when not configured.
+    buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+    buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
   }
 
   signingConfigs {

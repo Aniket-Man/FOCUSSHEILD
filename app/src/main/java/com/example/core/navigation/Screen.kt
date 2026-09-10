@@ -16,6 +16,7 @@ sealed class Screen(val route: String) {
     object ActiveSession : Screen("active_session")
 
     // Sub-screens
+    object Account : Screen("account")
     object SessionsHistory : Screen("sessions_history")
     object SettingsScreen : Screen("settings_screen")
     object BlockedApps : Screen("blocked_apps")

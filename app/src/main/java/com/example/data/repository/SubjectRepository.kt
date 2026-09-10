@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.SubjectDao
 import com.example.data.local.dao.TopicDao
 import com.example.data.local.entity.SubjectEntity
@@ -24,6 +27,11 @@ class SubjectRepository(
             colorHex = colorHex
         )
         subjectDao.insertSubject(subject)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_SUBJECTS,
+            subject.id,
+            CloudJson.subjectToJson(subject).toString()
+        )
         return subject
     }
 
@@ -34,6 +42,11 @@ class SubjectRepository(
             name = name
         )
         topicDao.insertTopic(topic)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_TOPICS,
+            topic.id,
+            CloudJson.topicToJson(topic).toString()
+        )
         return topic
     }
 
@@ -46,6 +59,13 @@ class SubjectRepository(
                 SubjectEntity("biology", "Biology", "#38BDF8", "biology")
             )
             subjectDao.insertAll(subjects)
+            subjects.forEach { subject ->
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_SUBJECTS,
+                    subject.id,
+                    CloudJson.subjectToJson(subject).toString()
+                )
+            }
 
             val topics = listOf(
                 TopicEntity(UUID.randomUUID().toString(), "physics", "Electrostatics"),
@@ -57,6 +77,13 @@ class SubjectRepository(
                 TopicEntity(UUID.randomUUID().toString(), "mathematics", "Algebra")
             )
             topicDao.insertAll(topics)
+            topics.forEach { topic ->
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_TOPICS,
+                    topic.id,
+                    CloudJson.topicToJson(topic).toString()
+                )
+            }
         }
     }
 }

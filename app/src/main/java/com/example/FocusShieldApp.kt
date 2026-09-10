@@ -5,6 +5,13 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.example.cloud.auth.AuthRepository
+import com.example.cloud.net.ConnectivityMonitor
+import com.example.cloud.sync.CloudInstallState
+import com.example.cloud.sync.SyncEngine
+import com.example.cloud.sync.SyncGateway
+import com.example.cloud.sync.SyncTracker
+import com.example.cloud.sync.SyncedPreferencesObserver
 import com.example.core.util.ChannelLogoStorageManager
 import com.example.data.local.FocusShieldDatabase
 import com.example.data.preferences.FocusPreferencesRepository
@@ -71,12 +78,49 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.data.repository.ScratchCardRepository(database.scratchCardDao(), applicationScope)
     }
 
+    // Optional Supabase cloud account layer. AuthRepository is cheap to construct (it does no
+    // network I/O until restoreOnStart()); connectivityMonitor powers sync retry gating.
+    val authRepository by lazy { AuthRepository(this) }
+    val connectivityMonitor by lazy { ConnectivityMonitor(this) }
+
+    // Cloud-sync stack. Constructed lazily so a local-only install pays nothing until something first
+    // requests a sync (e.g. the first enqueue after SyncTracker.init below).
+    val cloudInstallState by lazy { CloudInstallState(this) }
+    val syncEngine by lazy {
+        SyncEngine(database, cloudInstallState, preferencesRepository, authRepository)
+    }
+    val syncGateway by lazy {
+        SyncGateway(applicationScope, authRepository, connectivityMonitor, syncEngine)
+    }
+    val preferencesObserver by lazy {
+        SyncedPreferencesObserver(preferencesRepository, cloudInstallState)
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
 
         // Initialize AccessibilityHelper reactive state & system observers
         com.example.core.accessibility.AccessibilityHelper.init(this)
+
+        // Connectivity monitoring (drives cloud sync retries)
+        connectivityMonitor.start()
+
+        // Cloud sync wiring: the outbox needs the database before any repository write can enqueue,
+        // and the gateway + document-dirty observer must be live before the first seed-init write.
+        // onPendingChanged is set last so a repository enqueue always finds a wired trigger.
+        SyncTracker.init(database)
+        syncGateway.start()
+        preferencesObserver.start(applicationScope)
+        SyncTracker.onPendingChanged = { syncGateway.requestSync() }
+
+        // Restore any previously-signed-in cloud session (no-op when not configured / signed out)
+        applicationScope.launch {
+            try {
+                authRepository.restoreOnStart()
+            } catch (_: Exception) {
+            }
+        }
 
         // Initialize blocker manager with dependencies
         FocusBlockerManager.initialize(

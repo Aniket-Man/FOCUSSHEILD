@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Timer
@@ -61,6 +62,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +91,11 @@ import com.example.feature.settings.SettingsViewModel
 import com.example.feature.rewards.ui.ProfileRewardsSection
 import com.example.feature.profile.ui.UserProfileAvatar
 import com.example.feature.profile.ui.EditProfileBottomSheet
+import com.example.FocusShieldApp
+import com.example.cloud.auth.AuthState
+import com.example.cloud.storage.ProfileImageUploader
+import com.example.feature.account.AccountViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun ProfileScreen(
@@ -97,6 +104,8 @@ fun ProfileScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToStudyChannels: () -> Unit,
     onNavigateToStrictMode: () -> Unit,
+    onNavigateToAccount: () -> Unit,
+    accountViewModel: AccountViewModel,
     onNavigateToOnboarding: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -105,6 +114,59 @@ fun ProfileScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var showEditProfileSheet by remember { mutableStateOf(false) }
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+
+    val accountState by accountViewModel.uiState.collectAsStateWithLifecycle()
+    val cloudScope = rememberCoroutineScope()
+    val cloudUploader = remember(context) {
+        ProfileImageUploader(context, FocusShieldApp.instance.authRepository)
+    }
+    var cloudAvatarFileUri by remember { mutableStateOf<String?>(null) }
+
+    // On a restored device (authenticated, no local photo, but the account owns one) fetch the avatar
+    // into a private cache file so the hero renders the cloud image. Silent no-op in every other case.
+    val authUserId = (accountState.auth as? AuthState.Authenticated)?.userId
+    LaunchedEffect(authUserId, uiState.preferences.userPhotoUri) {
+        cloudAvatarFileUri = null
+        if (authUserId == null || uiState.preferences.userPhotoUri != null) return@LaunchedEffect
+        val cloudPath = try {
+            FocusShieldApp.instance.preferencesRepository.cloudAvatarPath()
+        } catch (_: Throwable) {
+            null
+        }
+        if (cloudPath != null) {
+            cloudAvatarFileUri = try {
+                cloudUploader.downloadOwnAvatarToCache(authUserId)?.let { "file://$it" }
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+
+    // After an authenticated profile save: upload a new image (or delete a cleared one), then mark the
+    // profiles row dirty + request a sync so the text fields and the avatar path reach the cloud.
+    val pushEditedProfileToCloud: (String?, String?) -> Unit = { photoBefore, photoAfter ->
+        val uid = (accountState.auth as? AuthState.Authenticated)?.userId
+        if (uid != null) {
+            cloudScope.launch {
+                val repo = FocusShieldApp.instance.preferencesRepository
+                val installState = FocusShieldApp.instance.cloudInstallState
+                if (photoAfter != null) {
+                    val uploaded = cloudUploader.uploadOwnImage(photoAfter)
+                    if (uploaded) {
+                        try { repo.setCloudAvatarPath(ProfileImageUploader.objectPath(uid)) } catch (_: Throwable) {}
+                    }
+                } else if (photoBefore != null) {
+                    val cloudPathBefore = try { repo.cloudAvatarPath() } catch (_: Throwable) { null }
+                    if (cloudPathBefore != null) {
+                        cloudUploader.deleteOwnImage()
+                        try { repo.setCloudAvatarPath(null) } catch (_: Throwable) {}
+                    }
+                }
+                try { installState.setProfileDirty(true) } catch (_: Throwable) {}
+                FocusShieldApp.instance.syncGateway.requestSync()
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -184,7 +246,7 @@ fun ProfileScreen(
                             ) {
                                 // Avatar with upload badge
                                 UserProfileAvatar(
-                                    photoUri = prefs.userPhotoUri,
+                                    photoUri = prefs.userPhotoUri ?: cloudAvatarFileUri,
                                     avatarPresetId = prefs.userAvatarPreset,
                                     size = 64.dp,
                                     showEditBadge = true,
@@ -336,6 +398,23 @@ fun ProfileScreen(
                             }
                         }
                     }
+                }
+
+                // Account & Cloud Backup (optional; local-first until the user signs in)
+                item {
+                    val authenticated = accountState.auth is AuthState.Authenticated
+                    ProfileNavigationRow(
+                        title = "Account & Cloud Backup",
+                        subtitle = if (authenticated) {
+                            "Cloud backup on • Manage your account, sync, or sign out"
+                        } else {
+                            "Optional — everything stays on this device until you sign in"
+                        },
+                        icon = if (authenticated) Icons.Rounded.CloudDone else Icons.Rounded.Shield,
+                        iconTint = if (authenticated) FocusColors.EmeraldSuccess else FocusColors.Primary,
+                        onClick = onNavigateToAccount,
+                        testTag = "profile_account_nav_row"
+                    )
                 }
 
                 // Rewards & Milestones Section (Horizontal Carousel Cards)
@@ -642,6 +721,7 @@ fun ProfileScreen(
                         academicGoal = goal,
                         dailyGoalMinutes = minutes
                     )
+                    pushEditedProfileToCloud(prefs.userPhotoUri, photo)
                 }
             )
         }

@@ -22,6 +22,9 @@ interface StudyChannelDao {
     @Query("SELECT * FROM study_channels ORDER BY channelName ASC")
     fun getAllChannelsFlow(): Flow<List<StudyChannelEntity>>
 
+    @Query("SELECT * FROM study_channels")
+    suspend fun getAllChannels(): List<StudyChannelEntity>
+
     @Query("SELECT * FROM study_channels WHERE isApproved = 1 ORDER BY channelName ASC")
     fun getApprovedChannelsFlow(): Flow<List<StudyChannelEntity>>
 

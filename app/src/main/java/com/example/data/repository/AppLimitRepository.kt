@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.AppLimitDao
 import com.example.data.local.dao.AppLimitSessionDao
 import com.example.data.local.dao.DailyAppUsageDao
@@ -21,6 +24,25 @@ class AppLimitRepository(
     private val appLimitSessionDao: AppLimitSessionDao
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+    // --- Sync helpers: enqueue an app_limits row so the reconcile pull never reverts it.
+    // Only app_limits is cloud-synced here; daily usage + limit sessions are device-local.
+
+    private suspend fun enqueueLimitUpsert(e: AppLimitEntity) {
+        SyncTracker.enqueueUpsert(
+            SyncTables.APP_LIMITS,
+            e.packageName,
+            CloudJson.appLimitToJson(e).toString()
+        )
+    }
+
+    private suspend fun enqueueLimitDelete(packageName: String) {
+        SyncTracker.enqueueDelete(SyncTables.APP_LIMITS, packageName)
+    }
+
+    private suspend fun enqueueLimitState(packageName: String) {
+        appLimitDao.getLimitByPackage(packageName)?.let { enqueueLimitUpsert(it) }
+    }
 
     fun getTodayDateString(): String = dateFormat.format(Date())
 
@@ -63,6 +85,7 @@ class AppLimitRepository(
             updatedAt = System.currentTimeMillis()
         )
         appLimitDao.insertOrUpdate(entity)
+        enqueueLimitUpsert(entity)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(entity)
         } catch (_: Exception) {}
@@ -72,6 +95,7 @@ class AppLimitRepository(
         appLimitDao.deleteByPackage(packageName)
         dailyAppUsageDao.deleteUsageForPackage(packageName)
         appLimitSessionDao.deleteSessionsForPackage(packageName)
+        enqueueLimitDelete(packageName)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
         } catch (_: Exception) {}
@@ -79,6 +103,7 @@ class AppLimitRepository(
 
     suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean) {
         appLimitDao.setEnabled(packageName, isEnabled)
+        enqueueLimitState(packageName)
         try {
             if (isEnabled) {
                 appLimitDao.getLimitByPackage(packageName)?.let {
@@ -92,14 +117,17 @@ class AppLimitRepository(
 
     suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
         appLimitDao.updateDailyLimitMinutes(packageName, minutes)
+        enqueueLimitState(packageName)
     }
 
     suspend fun updateStrictMode(packageName: String, isStrict: Boolean) {
         appLimitDao.updateStrictMode(packageName, isStrict)
+        enqueueLimitState(packageName)
     }
 
     suspend fun updateRemindersSetting(packageName: String, showReminders: Boolean) {
         appLimitDao.updateRemindersSetting(packageName, showReminders)
+        enqueueLimitState(packageName)
     }
 
     suspend fun recordDisciplineStreak(packageName: String) {
@@ -108,11 +136,13 @@ class AppLimitRepository(
         if (limit.lastStreakDate != today) {
             val newStreak = limit.streakDays + 1
             appLimitDao.updateStreak(packageName, newStreak, today)
+            enqueueLimitState(packageName)
         }
     }
 
     suspend fun resetStreak(packageName: String) {
         appLimitDao.resetStreak(packageName)
+        enqueueLimitState(packageName)
     }
 
     // --- DAILY USAGE TRACKING ---

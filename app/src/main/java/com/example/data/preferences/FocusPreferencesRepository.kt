@@ -11,7 +11,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 import java.io.IOException
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "focus_shield_preferences")
@@ -96,6 +98,7 @@ class FocusPreferencesRepository(private val context: Context) {
         val KEY_USER_AVATAR_PRESET = stringPreferencesKey("user_avatar_preset")
         val KEY_USER_MOTTO = stringPreferencesKey("user_motto")
         val KEY_USER_ACADEMIC_GOAL = stringPreferencesKey("user_academic_goal")
+        val KEY_USER_CLOUD_AVATAR_PATH = stringPreferencesKey("user_cloud_avatar_path")
     }
 
     val preferencesFlow: Flow<FocusPreferences> = context.dataStore.data
@@ -381,6 +384,91 @@ class FocusPreferencesRepository(private val context: Context) {
     suspend fun updateUserAcademicGoal(goal: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] = goal
+        }
+    }
+
+    // ---- cloud-sync bridge -------------------------------------------------------------
+
+    /** One-shot read of the full current preferences (used by the sync engine to build payloads). */
+    suspend fun snapshot(): FocusPreferences = preferencesFlow.first()
+
+    /** Cloud avatar object path stored for this account; null when the profile has no image. */
+    suspend fun cloudAvatarPath(): String? = try {
+        context.dataStore.data.first()[PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH]
+    } catch (ex: IOException) {
+        null
+    }
+
+    suspend fun setCloudAvatarPath(path: String?) {
+        context.dataStore.edit { p ->
+            if (path == null) p.remove(PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH)
+            else p[PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH] = path
+        }
+    }
+
+    /**
+     * Apply a cloud `user_preferences` payload (the flat JSON produced by
+     * [com.example.cloud.sync.CloudJson.accountPreferencesJson]) into local DataStore.
+     *
+     * Only keys that are present and non-null are written, and only the account-following subset is
+     * ever touched — device-local state (onboarding, per-device notification-package lists, reward
+     * claims, the local photo URI) is deliberately left alone, so a cross-device preferences pull
+     * can never clobber per-device state.
+     */
+    suspend fun applyCloudPreferences(payloadJson: String) {
+        val j = try {
+            JSONObject(payloadJson)
+        } catch (ex: Exception) {
+            return
+        }
+        fun present(key: String): Boolean = j.has(key) && !j.isNull(key)
+        context.dataStore.edit { p ->
+            if (present("defaultTimerMinutes")) p[PreferencesKeys.KEY_DEFAULT_TIMER_MINUTES] = j.optInt("defaultTimerMinutes")
+            if (present("pomodoroFocusMinutes")) p[PreferencesKeys.KEY_POMODORO_FOCUS_MINUTES] = j.optInt("pomodoroFocusMinutes")
+            if (present("pomodoroShortBreakMinutes")) p[PreferencesKeys.KEY_POMODORO_SHORT_BREAK_MINUTES] = j.optInt("pomodoroShortBreakMinutes")
+            if (present("pomodoroLongBreakMinutes")) p[PreferencesKeys.KEY_POMODORO_LONG_BREAK_MINUTES] = j.optInt("pomodoroLongBreakMinutes")
+            if (present("pomodoroCycles")) p[PreferencesKeys.KEY_POMODORO_CYCLES] = j.optInt("pomodoroCycles")
+            if (present("defaultSubject")) p[PreferencesKeys.KEY_DEFAULT_SUBJECT] = j.optString("defaultSubject")
+            if (present("defaultTopic")) p[PreferencesKeys.KEY_DEFAULT_TOPIC] = j.optString("defaultTopic")
+            if (present("isAppBlockingDefault")) p[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] = j.optBoolean("isAppBlockingDefault")
+            if (present("isStrictModeDefault")) p[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] = j.optBoolean("isStrictModeDefault")
+            if (present("isStudyChannelsDefault")) p[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] = j.optBoolean("isStudyChannelsDefault")
+            if (present("isYouTubeShortsBlockingEnabled")) p[PreferencesKeys.KEY_YT_SHORTS_BLOCKING] = j.optBoolean("isYouTubeShortsBlockingEnabled")
+            if (present("isInstagramReelsBlockingEnabled")) p[PreferencesKeys.KEY_IG_REELS_BLOCKING] = j.optBoolean("isInstagramReelsBlockingEnabled")
+            if (present("isFacebookReelsBlockingEnabled")) p[PreferencesKeys.KEY_FB_REELS_BLOCKING] = j.optBoolean("isFacebookReelsBlockingEnabled")
+            if (present("isShortsReelsAlwaysBlocked")) p[PreferencesKeys.KEY_SHORTS_ALWAYS_BLOCKED] = j.optBoolean("isShortsReelsAlwaysBlocked")
+            if (present("dailyGoalMinutes")) p[PreferencesKeys.KEY_DAILY_GOAL_MINUTES] = j.optInt("dailyGoalMinutes")
+            if (present("minimumStreakThresholdMinutes")) p[PreferencesKeys.KEY_MIN_STREAK_THRESHOLD_MINUTES] = j.optInt("minimumStreakThresholdMinutes")
+            if (present("themeMode")) p[PreferencesKeys.KEY_THEME_MODE] = j.optString("themeMode")
+            if (present("isAutoAdultWebsiteBlockingEnabled")) p[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] = j.optBoolean("isAutoAdultWebsiteBlockingEnabled")
+            if (present("isManualWebsiteBlockingEnabled")) p[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] = j.optBoolean("isManualWebsiteBlockingEnabled")
+            if (present("isBlockUninstallEnabled")) p[PreferencesKeys.KEY_BLOCK_UNINSTALL] = j.optBoolean("isBlockUninstallEnabled")
+            if (present("isBlockSplitScreenEnabled")) p[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] = j.optBoolean("isBlockSplitScreenEnabled")
+            if (present("isBlockFloatingWindowEnabled")) p[PreferencesKeys.KEY_BLOCK_FLOATING_WINDOW] = j.optBoolean("isBlockFloatingWindowEnabled")
+            if (present("isBlockNotificationsEnabled")) p[PreferencesKeys.KEY_BLOCK_NOTIFICATIONS] = j.optBoolean("isBlockNotificationsEnabled")
+            if (present("notificationBlockMode")) p[PreferencesKeys.KEY_NOTIFICATION_BLOCK_MODE] = j.optString("notificationBlockMode")
+        }
+    }
+
+    /**
+     * Apply the cloud `profiles` row's display fields. Writes the account-following profile keys
+     * and the cloud avatar path; the local photo URI (a content:// reference meaningful only on the
+     * device that picked it) is never touched here.
+     */
+    suspend fun applyCloudProfile(
+        displayName: String,
+        avatarPreset: String,
+        motto: String,
+        academicGoal: String,
+        avatarPath: String?
+    ) {
+        context.dataStore.edit { p ->
+            p[PreferencesKeys.KEY_USER_NAME] = displayName
+            p[PreferencesKeys.KEY_USER_AVATAR_PRESET] = avatarPreset
+            p[PreferencesKeys.KEY_USER_MOTTO] = motto
+            p[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] = academicGoal
+            if (avatarPath == null) p.remove(PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH)
+            else p[PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH] = avatarPath
         }
     }
 }

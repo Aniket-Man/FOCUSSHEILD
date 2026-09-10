@@ -14,6 +14,7 @@ import com.example.data.local.dao.BlockedAppDao
 import com.example.data.local.dao.BlockedAttemptDao
 import com.example.data.local.dao.BlockedWebsiteDao
 import com.example.data.local.dao.BreakRecordDao
+import com.example.data.local.dao.CloudBulkDao
 import com.example.data.local.dao.DailyAppUsageDao
 import com.example.data.local.dao.DailyUnlockDao
 import com.example.data.local.dao.FocusScheduleDao
@@ -24,6 +25,7 @@ import com.example.data.local.dao.StudyActivityDao
 import com.example.data.local.dao.StudyChannelDao
 import com.example.data.local.dao.StudyPlanDao
 import com.example.data.local.dao.SubjectDao
+import com.example.data.local.dao.SyncOutboxDao
 import com.example.data.local.dao.TopicDao
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.AppLimitSessionEntity
@@ -41,6 +43,7 @@ import com.example.data.local.entity.StudyActivityEntity
 import com.example.data.local.entity.StudyChannelEntity
 import com.example.data.local.entity.StudyPlanEntity
 import com.example.data.local.entity.SubjectEntity
+import com.example.data.local.entity.SyncOutboxEntity
 import com.example.data.local.entity.TopicEntity
 
 @Database(
@@ -61,9 +64,10 @@ import com.example.data.local.entity.TopicEntity
         FocusScheduleEntity::class,
         KeywordEntity::class,
         DailyUnlockEntity::class,
-        ScratchCardEntity::class
+        ScratchCardEntity::class,
+        SyncOutboxEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -85,6 +89,10 @@ abstract class FocusShieldDatabase : RoomDatabase() {
     abstract fun keywordDao(): KeywordDao
     abstract fun dailyUnlockDao(): DailyUnlockDao
     abstract fun scratchCardDao(): ScratchCardDao
+    abstract fun syncOutboxDao(): SyncOutboxDao
+
+    /** Bulk read/upsert/clear access to the cloud-synced tables (sync engine only). */
+    abstract fun cloudBulkDao(): CloudBulkDao
 
     companion object {
         @Volatile
@@ -314,6 +322,29 @@ abstract class FocusShieldDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v11 -> v12 (additive): introduces the cloud sync outbox. No existing table is altered;
+         * this is purely a new table so every prior release migrates losslessly.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_outbox` (
+                        `seq` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `tableName` TEXT NOT NULL,
+                        `rowId` TEXT NOT NULL,
+                        `op` TEXT NOT NULL,
+                        `payload` TEXT,
+                        `attemptCount` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_outbox_tableName_rowId` ON `sync_outbox` (`tableName`, `rowId`)")
+            }
+        }
+
         fun getInstance(context: Context): FocusShieldDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -321,7 +352,7 @@ abstract class FocusShieldDatabase : RoomDatabase() {
                     FocusShieldDatabase::class.java,
                     "focus_shield_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration()
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()

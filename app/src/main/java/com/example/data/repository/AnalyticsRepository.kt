@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.TimeFormatter
 import com.example.data.local.dao.BlockedAttemptDao
@@ -454,6 +457,11 @@ class AnalyticsRepository(
             createdAt = System.currentTimeMillis()
         )
         studyActivityDao.insertActivity(entity)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_ACTIVITIES,
+            entity.id,
+            CloudJson.studyActivityToJson(entity).toString()
+        )
     }
 
     suspend fun updateDailyGoalMinutes(minutes: Int) {

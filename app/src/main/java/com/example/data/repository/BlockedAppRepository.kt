@@ -1,5 +1,8 @@
 package com.example.data.repository
 
+import com.example.cloud.sync.CloudJson
+import com.example.cloud.sync.SyncTables
+import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.BlockedAppDao
 import com.example.data.local.entity.BlockedAppEntity
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +30,15 @@ class BlockedAppRepository(
                 )
             )
         }
+        // Read back the full row (insert or update) so the reconcile pull never reverts it.
+        val saved = blockedAppDao.getBlockedAppByPackage(packageName)
+        if (saved != null) {
+            SyncTracker.enqueueUpsert(
+                SyncTables.BLOCKED_APPS,
+                saved.packageName,
+                CloudJson.blockedAppToJson(saved).toString()
+            )
+        }
     }
 
     suspend fun isPackageBlocked(packageName: String): Boolean {
@@ -36,5 +48,6 @@ class BlockedAppRepository(
 
     suspend fun removeBlockedApp(packageName: String) {
         blockedAppDao.deleteBlockedApp(packageName)
+        SyncTracker.enqueueDelete(SyncTables.BLOCKED_APPS, packageName)
     }
 }
