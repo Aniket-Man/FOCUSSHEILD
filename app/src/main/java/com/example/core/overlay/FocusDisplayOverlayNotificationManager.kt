@@ -292,7 +292,7 @@ object FocusDisplayOverlayNotificationManager {
             dismissRunnable = Runnable {
                 dismissActiveHud()
             }
-            mainHandler.postDelayed(dismissRunnable!!, durationMs)
+            dismissRunnable?.let { mainHandler.postDelayed(it, durationMs) }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to attach window overlay", e)
         }

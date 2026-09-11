@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -118,7 +119,7 @@ fun SessionsHistoryScreen(
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.testTag("sessions_history_screen")
+        modifier = modifier.navigationBarsPadding().testTag("sessions_history_screen")
     ) { innerPadding ->
         if (uiState.groupedSessions.isEmpty()) {
             // Polished Empty State

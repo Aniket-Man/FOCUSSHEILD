@@ -8,9 +8,8 @@ import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.DailyAppUsageEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
  * Repository coordinating app limit configs, daily accumulated usage, and temporary usage sessions.
@@ -20,12 +19,12 @@ class AppLimitRepository(
     private val dailyAppUsageDao: DailyAppUsageDao,
     private val appLimitSessionDao: AppLimitSessionDao
 ) {
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     // --- App-limit data is device-local by decision: limits, daily usage counters and temporary
     // usage sessions are never uploaded, so nothing here enqueues a sync op.
 
-    fun getTodayDateString(): String = dateFormat.format(Date())
+    fun getTodayDateString(): String = LocalDate.now().format(dateFormat)
 
     // --- APP LIMIT CONFIGURATIONS ---
 
@@ -148,41 +147,24 @@ class AppLimitRepository(
         dailyAppUsageDao.getTotalLimitedAppUsageForDateFlow(dateString).map { it ?: 0L }
 
     /**
-     * Incrementally records actual elapsed foreground usage for an app limit.
+     * Resets usedMillis to 0 for a specific app and date. Used by the "Reset Today's Usage" button.
      */
-    suspend fun recordUsage(
-        packageName: String,
-        appName: String,
-        dateString: String = getTodayDateString(),
-        deltaMillis: Long,
-        isEmergency: Boolean = false
-    ) {
-        if (deltaMillis <= 0L) return
+    suspend fun resetUsage(packageName: String, dateString: String = getTodayDateString()) {
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
-        if (existing == null) {
-            val newRecord = DailyAppUsageEntity(
-                packageName = packageName,
-                dateString = dateString,
-                appName = appName,
-                usedMillis = if (!isEmergency) deltaMillis else 0L,
-                emergencyUsedMillis = if (isEmergency) deltaMillis else 0L,
+        if (existing != null) {
+            val updated = existing.copy(
+                usedMillis = 0L,
+                emergencyUsedMillis = 0L,
                 emergencyUsesCount = 0,
-                isBypassedForToday = false,
                 lastActiveTimestamp = System.currentTimeMillis()
             )
-            dailyAppUsageDao.insertOrUpdate(newRecord)
-        } else {
-            if (isEmergency) {
-                dailyAppUsageDao.addEmergencyTime(packageName, dateString, deltaMillis)
-            } else {
-                dailyAppUsageDao.addUsedTime(packageName, dateString, deltaMillis)
-            }
+            dailyAppUsageDao.insertOrUpdate(updated)
         }
-
     }
 
     /**
-     * Synchronizes usage with actual system usage if the system usage is higher than DB.
+     * Synchronizes usage with actual system usage.
+     * If system usage is higher, syncs UP. If DB is inflated, caps it DOWN to system value.
      */
     suspend fun syncSystemUsage(
         packageName: String,
@@ -205,7 +187,8 @@ class AppLimitRepository(
             )
             dailyAppUsageDao.insertOrUpdate(newRecord)
 
-        } else if (existing.usedMillis < systemUsageMillis) {
+        } else if (existing.usedMillis != systemUsageMillis) {
+            // Sync to system value — works both UP and DOWN
             val updated = existing.copy(
                 usedMillis = systemUsageMillis,
                 lastActiveTimestamp = System.currentTimeMillis()

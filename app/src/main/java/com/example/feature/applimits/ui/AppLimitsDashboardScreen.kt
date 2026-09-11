@@ -108,6 +108,7 @@ fun AppLimitsDashboardScreen(
     Scaffold(
         modifier = modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .testTag("app_limits_dashboard_screen"),
         containerColor = FocusColors.Background,
         topBar = {

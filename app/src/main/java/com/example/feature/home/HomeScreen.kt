@@ -65,6 +65,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -142,7 +143,7 @@ fun HomeScreen(
                 .statusBarsPadding(),
             // The floating bottom dock is drawn as an overlay, so content extends behind it,
             // while the clearance padding ensures the final items rest above the dock.
-            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp),
+            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp + 48.dp),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
             // 1. Header (Logo, Brand, Slogan, Quick Theme Switcher, Notifications, Avatar)
@@ -476,7 +477,10 @@ fun HomeScreen(
                 )
             },
             text = {
-                Text("Are you sure you want to remove \"${planToDelete?.subject} - ${planToDelete?.topic}\" from today's plan?")
+                Text("Are you sure you want to remove \"${planToDelete?.subject} - ${planToDelete?.topic}\" from today's plan?",
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
             },
             confirmButton = {
                 Button(

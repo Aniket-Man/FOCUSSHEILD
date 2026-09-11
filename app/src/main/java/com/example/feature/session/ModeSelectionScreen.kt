@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -104,7 +105,7 @@ fun ModeSelectionScreen(
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.testTag("mode_selection_screen")
+        modifier = modifier.navigationBarsPadding().testTag("mode_selection_screen")
     ) { innerPadding ->
         Column(
             modifier = Modifier

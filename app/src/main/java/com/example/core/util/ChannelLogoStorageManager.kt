@@ -158,8 +158,9 @@ object ChannelLogoStorageManager {
                     .build()
 
                 httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful && response.body != null) {
-                        val bytes = response.body!!.bytes()
+                    val body = response.body
+                    if (response.isSuccessful && body != null) {
+                        val bytes = body.bytes()
                         if (bytes.size > 200) { // Valid image payload
                             val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
                             FileOutputStream(tempFile).use { fos ->

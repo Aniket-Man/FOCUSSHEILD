@@ -36,22 +36,7 @@ object FocusAlertSoundManager {
         if (now - lastChimeTime < 800L) return
         lastChimeTime = now
 
-        // Play custom notification sound
-        try {
-            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
-            mediaPlayer?.apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .build()
-                )
-                setOnCompletionListener { it.release() }
-                start()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error playing notification chime sound", e)
-        }
+        playSound(context, "chime")
     }
 
     /**
@@ -63,21 +48,34 @@ object FocusAlertSoundManager {
         if (now - lastBuzzTime < 500L) return
         lastBuzzTime = now
 
-        // Play notification sound on block interception
+        playSound(context, "buzzer")
+    }
+
+    private fun playSound(context: Context, label: String) {
+        var mediaPlayer: MediaPlayer? = null
         try {
-            val mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
-            mediaPlayer?.apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .build()
-                )
-                setOnCompletionListener { it.release() }
-                start()
+            mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
+            if (mediaPlayer == null) {
+                Log.w(TAG, "MediaPlayer.create returned null for $label")
+                return
             }
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .build()
+            )
+            mediaPlayer.setOnCompletionListener { mp ->
+                try { mp.release() } catch (_: Exception) {}
+            }
+            mediaPlayer.setOnErrorListener { mp, _, _ ->
+                try { mp.release() } catch (_: Exception) {}
+                true
+            }
+            mediaPlayer.start()
         } catch (e: Exception) {
-            Log.e(TAG, "Error playing notification sound on block", e)
+            Log.e(TAG, "Error playing notification $label sound", e)
+            try { mediaPlayer?.release() } catch (_: Exception) {}
         }
     }
 }

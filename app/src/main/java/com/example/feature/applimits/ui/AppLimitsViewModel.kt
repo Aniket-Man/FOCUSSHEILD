@@ -55,10 +55,10 @@ data class AppLimitsUiState(
     val isLoading: Boolean = false
 )
 
-class AppLimitsViewModel(application: Application) : AndroidViewModel(application) {
+class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private val appLimitRepository: AppLimitRepository =
-        (application as FocusShieldApp).appLimitRepository
+        (app as FocusShieldApp).appLimitRepository
 
     private val _installedApps = MutableStateFlow<List<InstalledAppChoice>>(emptyList())
     val installedApps: StateFlow<List<InstalledAppChoice>> = _installedApps.asStateFlow()
@@ -71,18 +71,19 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
         appLimitRepository.getUsageForDateFlow(appLimitRepository.getTodayDateString())
     ) { limits: List<AppLimitEntity>, usages: List<DailyAppUsageEntity> ->
         val usageMap = usages.associateBy { it.packageName }
-        val systemUsageMap = DeviceUsageStatsHelper.getTodayAllAppsUsageMillis(application)
+        val systemUsageMap = DeviceUsageStatsHelper.getTodayAllAppsUsageMillis(app)
         var totalMinutes = 0
         var activeCount = 0
         var reachedCount = 0
 
-        val pm = application.packageManager
+        val pm = app.packageManager
 
         val items = limits.map { limit ->
             val usage = usageMap[limit.packageName]
             val systemUsedMillis = systemUsageMap[limit.packageName] ?: 0L
             val dbUsedMillis = usage?.usedMillis ?: 0L
-            val usedMillis = maxOf(systemUsedMillis, dbUsedMillis)
+            // Trust the OS-level usage as source of truth
+            val usedMillis = systemUsedMillis
             val usedMin = (usedMillis / 60000L).toInt()
             val totalLimitMin = limit.dailyLimitMinutes
             val remainingMin = (totalLimitMin - usedMin).coerceAtLeast(0)
@@ -216,7 +217,9 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
             val limit = appLimitRepository.getLimitByPackage(packageName)
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
-            val usedMillis = usage?.usedMillis ?: 0L
+            // Use UsageStatsManager as source of truth for actual usage
+            val systemUsedMillis = DeviceUsageStatsHelper.getTodayAppUsageMillis(app, packageName)
+            val usedMillis = if (systemUsedMillis > 0) systemUsedMillis else (usage?.usedMillis ?: 0L)
             val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
             val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 
@@ -236,7 +239,9 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
             val limit = appLimitRepository.getLimitByPackage(packageName)
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
-            val usedMillis = usage?.usedMillis ?: 0L
+            // Use UsageStatsManager as source of truth for actual usage
+            val systemUsedMillis = DeviceUsageStatsHelper.getTodayAppUsageMillis(app, packageName)
+            val usedMillis = if (systemUsedMillis > 0) systemUsedMillis else (usage?.usedMillis ?: 0L)
             val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
             val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 
@@ -263,18 +268,8 @@ class AppLimitsViewModel(application: Application) : AndroidViewModel(applicatio
             val dateStr = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, dateStr, false)
             appLimitRepository.setEmergencyUsesCount(packageName, dateStr, 0)
-            // Re-zero usage record
-            val existing = appLimitRepository.getUsage(packageName, dateStr)
-            if (existing != null) {
-                // Delete or re-insert with 0
-                val limit = appLimitRepository.getLimitByPackage(packageName)
-                appLimitRepository.recordUsage(
-                    packageName = packageName,
-                    appName = limit?.appName ?: packageName,
-                    dateString = dateStr,
-                    deltaMillis = 0L
-                )
-            }
+            // Actually reset usage to 0
+            appLimitRepository.resetUsage(packageName, dateStr)
         }
     }
 }

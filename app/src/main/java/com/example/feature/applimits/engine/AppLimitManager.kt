@@ -102,6 +102,14 @@ class AppLimitManager private constructor(
     private var tickerJob: Job? = null
     private var lastForegroundTimestamp: Long = 0L
 
+    /**
+     * Clears the overlay debounce for a package so the next foreground change re-triggers immediately.
+     * Called when a session expires to ensure the blocker re-appears without waiting.
+     */
+    fun clearOverlayDebounce(packageName: String) {
+        lastOverlayLaunchPerPackage.remove(packageName)
+    }
+
     init {
         scope.launch {
             try {
@@ -214,13 +222,13 @@ class AppLimitManager private constructor(
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
         val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, packageName)
         val dbUsage = usage?.usedMillis ?: 0L
-        val accumulatedUsed = maxOf(systemUsage, dbUsage)
 
-        // Asynchronously sync system usage to repository if higher
-        if (systemUsage > dbUsage) {
-            scope.launch {
-                appLimitRepository.syncSystemUsage(packageName, limit.appName, systemUsage, todayDate)
-            }
+        // Use the higher of system vs DB as the source of truth.
+        // When systemUsage is 0 (missing permission or lagging), fall back to DB.
+        val accumulatedUsed = when {
+            systemUsage > 0 && systemUsage >= dbUsage -> systemUsage
+            dbUsage > 0 -> dbUsage  // System is 0 or lagging — trust DB
+            else -> systemUsage  // Both zero
         }
 
         val usedMinutes = kotlin.math.round(accumulatedUsed / 60000.0).toInt().coerceAtLeast(0)
@@ -380,9 +388,10 @@ class AppLimitManager private constructor(
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
             val dbUsedMillis = usage?.usedMillis ?: 0L
-            val usedMillis = maxOf(systemUsage, dbUsedMillis)
+            // Trust the OS-level usage as source of truth
+            val usedMillis = systemUsage
 
-            if (systemUsage > dbUsedMillis) {
+            if (systemUsage != dbUsedMillis) {
                 appLimitRepository.syncSystemUsage(packageName, appName, systemUsage, todayDate)
             }
 
@@ -506,6 +515,9 @@ class AppLimitManager private constructor(
             _activeSession.value = null
             stopTicker()
 
+            // Clear debounce timestamp so the next foreground change re-checks the limit immediately
+            clearOverlayDebounce(session.packageName)
+
             // 1. Pause media immediately (overlay will be displayed directly over the app without minimizing to home first)
             MediaPauseHelper.pauseMedia(appContext)
 
@@ -515,10 +527,11 @@ class AppLimitManager private constructor(
             val usage = appLimitRepository.getUsage(session.packageName, todayDate)
             val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, session.packageName)
             val dbUsage = usage?.usedMillis ?: 0L
-            val totalDailyUsedMillis = maxOf(systemUsage, dbUsage)
-
-            if (systemUsage > dbUsage) {
-                appLimitRepository.syncSystemUsage(session.packageName, session.appName, systemUsage, todayDate)
+            // Use the higher of system vs DB as source of truth
+            val totalDailyUsedMillis = when {
+                systemUsage > 0 && systemUsage >= dbUsage -> systemUsage
+                dbUsage > 0 -> dbUsage
+                else -> systemUsage
             }
 
             val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
@@ -561,16 +574,9 @@ class AppLimitManager private constructor(
 
     private suspend fun saveSessionRecord(session: ActiveAppUsageSession, actualUsedMillis: Long, reason: String) {
         val todayDate = appLimitRepository.getTodayDateString()
-        // 1. Increment daily usage
-        appLimitRepository.recordUsage(
-            packageName = session.packageName,
-            appName = session.appName,
-            dateString = todayDate,
-            deltaMillis = actualUsedMillis,
-            isEmergency = session.isEmergency
-        )
 
-        // 2. Insert individual session entity for analytics
+        // Record session metadata for analytics (NOT actual usage).
+        // Actual usage comes from UsageStatsManager — never from the FocusShield timer.
         val sessionEntity = AppLimitSessionEntity(
             id = session.id,
             packageName = session.packageName,
@@ -584,6 +590,11 @@ class AppLimitManager private constructor(
             endReason = reason
         )
         appLimitRepository.recordSession(sessionEntity)
+
+        // Sync the database with UsageStatsManager so historical records are accurate.
+        // This ensures usedMillis reflects actual foreground time, not FocusShield timer increments.
+        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, session.packageName)
+        appLimitRepository.syncSystemUsage(session.packageName, session.appName, systemUsage, todayDate)
     }
 
     fun launchOverlay(
@@ -624,20 +635,51 @@ class AppLimitManager private constructor(
             putExtra(AppLimitOverlayActivity.EXTRA_STREAK_DAYS, streakDays)
         }
 
+        // Try multiple strategies to launch the overlay, ensuring it appears even after session expiry
+        var launched = false
         val service = com.example.core.accessibility.FocusAccessibilityService.instance
         try {
             if (service != null) {
                 service.startActivity(intent)
-                Log.i(tag, "Launched AppLimitOverlayActivity via FocusAccessibilityService for $packageName")
-            } else {
-                appContext.startActivity(intent)
-                Log.i(tag, "Launched AppLimitOverlayActivity via appContext for $packageName")
+                launched = true
+                Log.i(tag, "Launched AppLimitOverlayActivity via FocusAccessibilityService for $packageName (mode=$mode)")
             }
         } catch (e: Exception) {
-            Log.e(tag, "Error starting AppLimitOverlayActivity: ${e.message}", e)
+            Log.w(tag, "FocusAccessibilityService failed to start overlay: ${e.message}")
+        }
+
+        if (!launched) {
             try {
                 appContext.startActivity(intent)
-            } catch (ignored: Exception) {}
+                launched = true
+                Log.i(tag, "Launched AppLimitOverlayActivity via appContext for $packageName (mode=$mode)")
+            } catch (e: Exception) {
+                Log.e(tag, "appContext failed to start overlay: ${e.message}")
+            }
+        }
+
+        if (!launched) {
+            // Last resort: try with NEW_TASK flag only
+            try {
+                val fallbackIntent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    putExtra(AppLimitOverlayActivity.EXTRA_PACKAGE_NAME, packageName)
+                    putExtra(AppLimitOverlayActivity.EXTRA_APP_NAME, appName)
+                    putExtra(AppLimitOverlayActivity.EXTRA_OVERLAY_MODE, mode.name)
+                    putExtra(AppLimitOverlayActivity.EXTRA_SELECTED_MINUTES, selectedMinutes)
+                    putExtra(AppLimitOverlayActivity.EXTRA_USED_MINUTES, usedMinutes)
+                    putExtra(AppLimitOverlayActivity.EXTRA_REMAINING_DAILY_MINUTES, remainingDailyMinutes)
+                    putExtra(AppLimitOverlayActivity.EXTRA_DAILY_LIMIT_MINUTES, dailyLimitMinutes)
+                    putExtra(AppLimitOverlayActivity.EXTRA_EMERGENCY_COUNT, emergencyUsesCount)
+                    putExtra(AppLimitOverlayActivity.EXTRA_EMERGENCY_ALLOWED, emergencyUsesAllowed)
+                    putExtra(AppLimitOverlayActivity.EXTRA_IS_STRICT, isStrict)
+                    putExtra(AppLimitOverlayActivity.EXTRA_STREAK_DAYS, streakDays)
+                }
+                appContext.startActivity(fallbackIntent)
+                Log.i(tag, "Launched AppLimitOverlayActivity via fallback intent for $packageName (mode=$mode)")
+            } catch (e: Exception) {
+                Log.e(tag, "All overlay launch strategies failed for $packageName: ${e.message}", e)
+            }
         }
     }
 

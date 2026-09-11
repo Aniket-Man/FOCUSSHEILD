@@ -1,0 +1,631 @@
+FOCUSSHIELD — SEPARATE APP USAGE TRACKING FROM APP-LIMIT ALLOWANCE TIMER
+
+IMPORTANT ARCHITECTURAL CHANGE:
+
+FocusShield currently has its own timer/session mechanism for App Limit overlay sessions.
+
+DO NOT REMOVE, REPLACE, OR REPURPOSE that timer.
+
+The existing FocusShield timer has a valid and different responsibility:
+
+It represents the amount of time the user has explicitly selected/allowed from the FocusShield App Limit overlay.
+
+Android UsageStatsManager must become the authoritative source for ACTUAL APPLICATION USAGE.
+
+These two concepts MUST remain completely separate.
+
+==================================================
+1. TWO DIFFERENT TIME CONCEPTS
+==================================================
+
+Implement and enforce this separation:
+
+A. ACTUAL APP USAGE
+Source:
+Android UsageStatsManager
+
+Meaning:
+How much time the user actually spent with an application in the foreground.
+
+Used for:
+• App Limit "Used" time
+• Daily usage statistics
+• Home statistics
+• Analytics
+• Historical usage
+• Usage charts
+• Cloud analytics/sync
+• Calculating remaining daily app limit
+
+B. FOCUSSHIELD ALLOWANCE / TEMPORARY SESSION
+Source:
+Existing FocusShield App Limit timer/session system
+
+Meaning:
+How much time the user explicitly grants themselves through the FocusShield overlay.
+
+Used for:
+• Overlay countdown
+• Temporary access duration
+• Remaining allowance
+• Session expiration
+• App-limit enforcement
+• Emergency/bypass sessions
+• Triggering the FocusShield blocking overlay
+
+NEVER treat B as A.
+
+==================================================
+2. EXAMPLE
+==================================================
+
+User has:
+
+Daily YouTube limit = 4 hours
+
+Android UsageStatsManager reports:
+
+YouTube actual foreground usage = 3 hours
+
+User opens the FocusShield App Limit overlay and selects:
+
+"30 minutes"
+
+This means:
+
+actualUsage = 3 hours
+
+temporaryAllowance = 30 minutes
+
+It does NOT mean:
+
+actualUsage = 3h 30m
+
+If the user actually spends only 8 minutes on YouTube during that temporary session:
+
+actualUsage increases according to Android's actual foreground usage.
+
+The FocusShield allowance/session timer remains an enforcement mechanism.
+
+Do NOT add the selected 30 minutes directly to actual usage.
+
+==================================================
+3. USAGESTATSMANAGER AS THE AUTHORITY
+==================================================
+
+Use Android UsageStatsManager for the canonical "actual app usage" calculation.
+
+Prefer:
+
+UsageStatsManager.queryAndAggregateUsageStats()
+
+and:
+
+UsageStats.totalTimeInForeground
+
+where appropriate.
+
+Also inspect UsageEvents if required to correctly handle the currently active foreground interval.
+
+Create/use a single repository/domain-level method for canonical usage, conceptually:
+
+getActualUsageToday(packageName): Long
+
+The returned value must represent actual foreground usage.
+
+All UI and analytics that display "app used time" must ultimately use this canonical value.
+
+==================================================
+4. REMOVE DOUBLE COUNTING
+==================================================
+
+Audit and remove any architecture where:
+
+FocusShield timer
++
+UsageStatsManager
+=
+actual app usage
+
+This is WRONG.
+
+Also avoid:
+
+maxOf(systemUsage, databaseUsage)
+
+as a generic solution if databaseUsage may itself contain incorrectly accumulated FocusShield timer time.
+
+Do not use the FocusShield temporary-session timer as a source for historical actual usage.
+
+Do not add allowance/session duration directly to DailyAppUsageEntity.usedMillis.
+
+==================================================
+5. KEEP THE EXISTING FOCUSSHIELD TIMER
+==================================================
+
+The existing timer must remain functional.
+
+It should continue controlling:
+
+• selected access duration
+• temporary App Limit sessions
+• countdown UI
+• session expiration
+• enforcement
+• emergency access
+• bypass behavior
+
+For example:
+
+User selects 30 minutes.
+
+FocusShield starts:
+
+remainingAllowance = 30 minutes
+
+The countdown may decrement while the user is actually using the protected application according to the existing enforcement design.
+
+When the allowance reaches zero:
+
+→ trigger existing App Limit blocking behavior.
+
+Do NOT remove this functionality merely because UsageStatsManager is now used for actual usage statistics.
+
+==================================================
+6. SEPARATE DATA FIELDS
+==================================================
+
+Audit the existing:
+
+DailyAppUsageEntity
+AppLimitSessionEntity
+AppLimitManager
+AppLimitRepository
+AppLimitsViewModel
+DeviceUsageStatsHelper
+
+and determine which existing fields currently mix these concepts.
+
+Refactor where necessary so the data model has clear semantics.
+
+Conceptually distinguish:
+
+systemForegroundUsageMillis
+    = actual usage reported by Android
+
+temporaryAllowanceMillis
+    = user-selected allowed duration
+
+remainingAllowanceMillis
+    = remaining temporary access duration
+
+emergencyUsageMillis
+    = emergency/bypass usage if applicable
+
+enforcementState
+    = local state used by App Limit enforcement
+
+Do not necessarily create all of these fields if the existing architecture can represent them cleanly.
+
+The important requirement is semantic separation.
+
+==================================================
+7. DAILY APP LIMIT CALCULATION
+==================================================
+
+The daily limit calculation should conceptually be:
+
+actualUsageToday
+    = UsageStatsManager actual foreground usage
+
+remainingDailyLimit
+    = dailyLimit - actualUsageToday
+
+Example:
+
+Daily limit = 4h
+Actual Android usage = 3h
+
+Remaining = 1h
+
+If the user opens a FocusShield temporary session for 30 minutes, do NOT immediately change:
+
+actualUsageToday
+
+from 3h to 3h30m.
+
+Only actual application foreground usage changes actualUsageToday.
+
+==================================================
+8. REAL-TIME ENFORCEMENT
+==================================================
+
+Important:
+
+UsageStatsManager is the authoritative source for the user's actual usage statistic.
+
+However, UsageStatsManager may not always provide instantaneous real-time updates.
+
+Therefore, preserve the existing foreground detection/enforcement mechanism where useful for real-time App Limit enforcement.
+
+Use:
+
+• Accessibility foreground-package detection
+• existing FocusShield timer/session logic
+• UsageStatsManager
+
+for their appropriate responsibilities.
+
+DO NOT make the existing enforcement timer responsible for historical usage accounting.
+
+The architecture should be:
+
+UsageStatsManager
+        ↓
+actual usage calculation
+        ↓
+statistics / daily limit / analytics
+
+Existing FocusShield timer
+        ↓
+temporary allowance
+        ↓
+real-time enforcement
+        ↓
+block overlay
+
+==================================================
+9. FOREGROUND VALIDATION
+==================================================
+
+When calculating actual usage, correctly handle:
+
+• app enters foreground
+• app leaves foreground
+• switching to another application
+• Home screen
+• Settings
+• notification shade
+• keyboard/input method
+• screen off
+• device lock
+• screen on
+• split-screen
+• multi-window
+• floating windows
+• background playback
+
+Do not count an application simply because its process is alive.
+
+Do not count background media playback as foreground usage.
+
+Use Android's usage data rather than extending an internal wall-clock timer indefinitely.
+
+==================================================
+10. EXISTING DATABASE DATA
+==================================================
+
+Audit existing DailyAppUsageEntity records.
+
+Determine whether:
+
+usedMillis
+
+currently contains:
+
+A. Android system usage
+B. FocusShield timer usage
+C. a mixture of both
+
+If it contains a mixture, migrate/reconcile it safely.
+
+Do NOT blindly preserve known incorrect accumulated values.
+
+For current-day actual usage, Android UsageStatsManager should be able to correct stale/overcounted FocusShield values.
+
+Example:
+
+Existing database:
+YouTube = 5h
+
+Android UsageStatsManager:
+YouTube = 3h
+
+If the 5h was produced by the old incorrect FocusShield timer accumulation, do not continue displaying 5h.
+
+Reconcile it to the authoritative actual usage model.
+
+Do not destroy unrelated App Limit configuration.
+
+==================================================
+11. UI CONSISTENCY
+==================================================
+
+Audit every location that displays app usage.
+
+Examples:
+
+• App Limits screen
+• App Limit detail screen
+• Home screen
+• Analytics
+• Statistics
+• History
+• charts
+• progress indicators
+• daily usage cards
+• cloud analytics
+
+All "actual usage" displays must use the same canonical usage repository/calculation.
+
+There must not be:
+
+App Limits → UsageStatsManager
+
+Home → internal timer
+
+Analytics → database accumulator
+
+These must all represent the same actual-usage definition.
+
+==================================================
+12. CLOUD SYNC
+==================================================
+
+Only synchronize ACTUAL APP USAGE data for analytics/statistics according to the existing Supabase architecture.
+
+Do NOT synchronize the temporary FocusShield countdown as if it were actual application usage.
+
+Cloud data should distinguish:
+
+ACTUAL_USAGE / ANALYTICS
+
+from:
+
+LOCAL_ENFORCEMENT_STATE
+
+Temporary enforcement state such as:
+
+• remaining countdown
+• current active overlay session
+• current enforcement state
+
+should generally remain local/device-specific unless the existing product explicitly requires otherwise.
+
+Meaningful historical usage required for cross-device statistics should be synchronized.
+
+==================================================
+13. OFFLINE BEHAVIOR
+==================================================
+
+FocusShield must continue working offline.
+
+If UsageStatsManager is available:
+
+→ calculate actual usage locally.
+
+If network is unavailable:
+
+→ App Limit enforcement still works.
+
+→ actual usage statistics still work.
+
+→ cloud synchronization waits until connectivity returns.
+
+The cloud must never be required for App Limit enforcement.
+
+==================================================
+14. REQUIRED TEST CASES
+==================================================
+
+TEST 1:
+
+YouTube actual usage:
+3 hours
+
+FocusShield temporary session:
+30 minutes
+
+Expected:
+
+Actual usage remains approximately 3 hours until the user actually uses YouTube.
+
+NOT 3h30m.
+
+--------------------------------------------------
+
+TEST 2:
+
+User selects 30-minute FocusShield session.
+
+User uses YouTube for only 8 minutes.
+
+Expected:
+
+Actual usage increases by approximately 8 minutes.
+
+The 30-minute selection itself does not become usage.
+
+--------------------------------------------------
+
+TEST 3:
+
+User selects 30 minutes.
+
+Leaves YouTube after 5 minutes.
+
+Expected:
+
+Actual usage increases only according to actual foreground usage.
+
+The FocusShield allowance/enforcement state is handled independently.
+
+--------------------------------------------------
+
+TEST 4:
+
+YouTube is playing audio/video in the background while Chrome is foreground.
+
+Expected:
+
+YouTube foreground usage does not continue increasing merely because the process/media session remains active.
+
+--------------------------------------------------
+
+TEST 5:
+
+YouTube foreground for 10 minutes.
+
+Chrome foreground for 20 minutes.
+
+YouTube foreground again for 10 minutes.
+
+Expected:
+
+YouTube actual usage ≈ 20 minutes.
+
+NOT 40 minutes.
+
+--------------------------------------------------
+
+TEST 6:
+
+Screen off for 30 minutes while YouTube process remains alive.
+
+Expected:
+
+No 30-minute foreground usage increase.
+
+--------------------------------------------------
+
+TEST 7:
+
+Android UsageStatsManager reports 3h.
+
+Old FocusShield database says 5h.
+
+Determine whether the 5h is old internal-timer accumulation.
+
+If yes:
+
+reconcile actual usage toward approximately 3h.
+
+--------------------------------------------------
+
+TEST 8:
+
+Restart FocusShield.
+
+Expected:
+
+Actual usage does not reset or double.
+
+Temporary enforcement session is restored according to its existing session-persistence design.
+
+--------------------------------------------------
+
+TEST 9:
+
+Device reboot.
+
+Expected:
+
+Usage statistics remain consistent with Android UsageStatsManager.
+
+App Limit configuration remains intact.
+
+==================================================
+15. DO NOT BREAK EXISTING FEATURES
+==================================================
+
+Preserve:
+
+• App Limits
+• temporary access sessions
+• overlay UI
+• countdown timer
+• emergency sessions
+• bypass-for-today
+• strict mode
+• blocking overlay
+• reminders
+• Accessibility Service
+• Room
+• existing analytics
+• Supabase synchronization
+• offline functionality
+
+Do not remove the existing FocusShield timer.
+
+Do not replace the existing enforcement mechanism with UsageStatsManager.
+
+Instead:
+
+REFACTOR THE SYSTEM SO THAT:
+
+UsageStatsManager
+= ACTUAL USAGE SOURCE
+
+Existing FocusShield Timer
+= USER-SELECTED ALLOWANCE / ENFORCEMENT TIMER
+
+These must never be treated as the same measurement.
+
+==================================================
+16. FINAL ARCHITECTURE
+==================================================
+
+The final architecture must conceptually be:
+
+                 APP LIMIT SYSTEM
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+          ▼                         ▼
+   ACTUAL APP USAGE          TEMPORARY ACCESS
+          │                         │
+          ▼                         ▼
+ UsageStatsManager          FocusShield Timer
+          │                         │
+          ▼                         ▼
+ Daily Usage               Remaining Allowance
+ Statistics                Enforcement
+ Analytics                 Overlay Countdown
+ Cloud Analytics           Block Trigger
+          │
+          ▼
+ Supabase historical
+ analytics synchronization
+
+Do not merge these two branches.
+
+==================================================
+17. FINAL REPORT
+==================================================
+
+After implementation, report:
+
+1. Exact root cause of the current 3h vs 5h discrepancy.
+2. Which files contained the old usage calculation.
+3. Which files were changed.
+4. How UsageStatsManager is now used.
+5. How the existing FocusShield timer remains used.
+6. How actual usage and temporary allowance are separated.
+7. How daily App Limits are calculated.
+8. How real-time enforcement works.
+9. How old incorrect usage is reconciled.
+10. How cloud analytics represents actual usage.
+11. Tests performed.
+12. Any Android/OEM limitations.
+
+CRITICAL REQUIREMENT:
+
+NEVER add the user's selected FocusShield allowance directly to actual app usage.
+
+"TIME USER IS ALLOWED TO USE THE APP"
+
+and
+
+"TIME USER ACTUALLY USED THE APP"
+
+are two different measurements and must remain separate throughout Room, repositories, ViewModels, UI, analytics, and Supabase synchronization.

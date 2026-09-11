@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -78,6 +79,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -397,7 +399,7 @@ fun ActiveSessionScreen(
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.testTag("active_session_screen")
+        modifier = modifier.navigationBarsPadding().testTag("active_session_screen")
     ) { innerPadding ->
         Crossfade(
             targetState = when {
@@ -579,7 +581,9 @@ fun ActiveSessionScreen(
                             color = FocusColors.TextPrimary,
                             fontSize = 24.sp
                         ),
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
 
                     if (uiState.goal.isNotBlank()) {
@@ -818,7 +822,9 @@ fun ActiveSessionScreen(
                                     color = FocusColors.TextSecondary,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 12.sp
-                                )
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }

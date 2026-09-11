@@ -41,7 +41,15 @@ class BootAndDailyResetReceiver : BroadcastReceiver() {
                 // 4. Reschedule all automated recurring focus schedules
                 app.focusScheduleRepository.syncAllAlarms(context)
 
-                // 5. Refresh home screen widgets for the new day
+                // 5. Prune old app usage and session records (keep last 30 days)
+                try {
+                    val thirtyDaysAgo = java.time.LocalDate.now().minusDays(30).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                    app.database.dailyAppUsageDao().pruneOldRecords(thirtyDaysAgo)
+                    app.database.appLimitSessionDao().pruneOldSessions(thirtyDaysAgo)
+                } catch (_: Exception) {
+                }
+
+                // 6. Refresh home screen widgets for the new day
                 try {
                     com.example.feature.widgets.FocusShieldWidgetUpdater.updateAll(context, force = true)
                 } catch (_: Exception) {

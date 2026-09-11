@@ -127,12 +127,20 @@ fun AnalyticsScreen(
             .background(FocusColors.Background)
             .testTag("analytics_screen")
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp),
-            verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
+        if (uiState.isLoading) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                CircularProgressIndicator(color = FocusColors.Primary)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding(),
+                contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp + 48.dp),
+                verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
             // 1. Header Section
             item {
@@ -311,6 +319,7 @@ fun AnalyticsScreen(
                 }
             }
         }
+        } // end else (loading check)
 
         FocusBottomNavigation(
             selectedTab = BottomTab.STATS,
@@ -695,7 +704,9 @@ private fun DailyGoalAndStreakCard(
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextSecondary,
                                 fontSize = 11.sp
-                            )
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -731,7 +742,9 @@ private fun DailyGoalAndStreakCard(
                             color = FocusColors.TextPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
-                        )
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
