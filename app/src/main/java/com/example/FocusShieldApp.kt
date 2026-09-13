@@ -205,6 +205,10 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // the process died is still offered, then check once on launch. Both are cooldown-gated and
         // failure-silent, so this never spams the user or the network.
         com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
+        // The triggers below all need the app to be in use, so arm the periodic worker too — it is
+        // what notices a release published while FocusShield stays closed. Idempotent (unique work,
+        // KEEP), network-constrained, and gated by the same cooldown as every other check.
+        com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
         applicationScope.launch {
             try {
                 updateManager.restore()

@@ -93,10 +93,20 @@ class UpdateManager(
      * (prompt.txt §4/§16).
      */
     fun checkInBackground() {
-        scope.launch {
-            val result = checkMutex.withLock { checker.check(manual = false) }
-            applyResult(result, manual = false)
-        }
+        scope.launch { runBackgroundCheck() }
+    }
+
+    /**
+     * The same automatic check, run inline to completion.
+     *
+     * [checkInBackground] is fire-and-forget, which suits the launch/resume/connectivity triggers but
+     * not the periodic worker: WorkManager has to know when the work actually finished, and a worker
+     * that returns while its request is still in flight can have its process torn down mid-call.
+     * Both paths funnel through here so the cooldown rule still lives in exactly one place.
+     */
+    suspend fun runBackgroundCheck() {
+        val result = checkMutex.withLock { checker.check(manual = false) }
+        applyResult(result, manual = false)
     }
 
     /** User-initiated check from Profile → New Updates. Bypasses the cooldown and may report failure. */

@@ -114,8 +114,9 @@ fun HomeScreen(
     /** Opens the update details screen (Profile → New Updates shares the same destination). */
     onNavigateToUpdate: () -> Unit = {},
     /**
-     * Lit red dot on the header bell. Sourced from the single app-wide update state, so the bell and
-     * Profile → New Updates always agree (prompt.txt §5/§6).
+     * Lit red dot on the header bell *and* on the header avatar. One flag, two badges, both fed by the
+     * single app-wide update state — so the bell, the avatar and Profile → New Updates can never
+     * disagree (prompt.txt §5/§6).
      */
     showUpdateDot: Boolean = false,
     modifier: Modifier = Modifier
@@ -158,12 +159,14 @@ fun HomeScreen(
                 FocusHeader(
                     photoUri = uiState.userPhotoUri,
                     avatarPresetId = uiState.userAvatarPreset,
-                    // Tapping the bell opens the pending update when there is one; with nothing
-                    // pending it stays inert rather than opening an empty notification centre.
-                    onNotificationClick = { if (showUpdateDot) onNavigateToUpdate() },
+                    // The bell always opens the update section. Gating it on showUpdateDot made the
+                    // button inert whenever nothing was pending, which reads as a broken tap; the
+                    // update screen already renders a truthful "up to date" state.
+                    onNotificationClick = onNavigateToUpdate,
                     onProfileClick = onNavigateToProfile,
                     onThemeToggle = { viewModel.toggleThemeMode() },
-                    showNotificationDot = showUpdateDot
+                    showNotificationDot = showUpdateDot,
+                    showProfileDot = showUpdateDot
                 )
             }
 

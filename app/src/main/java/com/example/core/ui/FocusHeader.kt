@@ -15,9 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
@@ -57,7 +57,12 @@ fun FocusHeader(
      * update state (`UpdateManager.showDot`), so it can never disagree with the Profile → New Updates
      * indicator. It decorates the existing bell rather than adding a second icon.
      */
-    showNotificationDot: Boolean = false
+    showNotificationDot: Boolean = false,
+    /**
+     * The same pending-update dot, mirrored onto the avatar. Two entry points to one piece of state:
+     * whichever the user reaches for, the badge agrees, because both are fed by `UpdateManager.showDot`.
+     */
+    showProfileDot: Boolean = false
 ) {
     val isDark = LocalFocusColors.current.isDark
 
@@ -145,58 +150,82 @@ fun FocusHeader(
                 )
             }
 
-            // Notification button
+            // Notification button. Deliberately styled as a *notification* rather than as one more
+            // neutral icon button in the row: a filled bell, and while an update is pending the
+            // whole button takes the accent fill so the unread state is legible before the badge is.
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .shadow(if (isDark) 0.dp else 2.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
                     .clip(CircleShape)
-                    .background(FocusColors.Surface)
-                    .border(1.dp, FocusColors.CardBorderSubtle, CircleShape)
+                    .background(if (showNotificationDot) FocusColors.Primary else FocusColors.Surface)
+                    .border(
+                        width = 1.dp,
+                        color = if (showNotificationDot) FocusColors.Primary else FocusColors.CardBorderSubtle,
+                        shape = CircleShape
+                    )
                     .clickable(onClick = onNotificationClick)
                     .testTag("notification_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Notifications,
+                    imageVector = Icons.Rounded.Notifications,
                     contentDescription = "Notifications",
-                    tint = FocusColors.TextPrimary,
-                    modifier = Modifier.size(19.dp)
+                    tint = if (showNotificationDot) FocusColors.TextOnDark else FocusColors.TextPrimary,
+                    modifier = Modifier.size(20.dp)
                 )
 
-                // Unread-update indicator. Sits on top of the bell's top-end corner and only occupies
-                // space when lit, so the bell itself never shifts.
+                // Unread-update badge. Sits on the bell's top-end rim and only occupies space when
+                // lit, so the bell itself never shifts. The ring is drawn in the button's own fill
+                // colour so the badge reads as punched out of it either way.
                 if (showNotificationDot) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 5.dp, end = 5.dp)
-                            .size(9.dp)
+                            .padding(top = 4.dp, end = 4.dp)
+                            .size(10.dp)
                             .clip(CircleShape)
                             .background(FocusColors.BlockedRed)
-                            .border(1.5.dp, FocusColors.Surface, CircleShape)
+                            .border(1.5.dp, FocusColors.Primary, CircleShape)
                             .testTag("notification_dot")
                     )
                 }
             }
 
-            // Purple Shield Action Button
+            // Profile button — the user's own avatar rather than a generic shield: the photo they
+            // uploaded from the phone when there is one, otherwise the preset emblem they picked
+            // (UserProfileAvatar owns that fallback, so the header and the profile screen cannot
+            // disagree about which image represents the user).
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .shadow(3.dp, CircleShape, ambientColor = FocusColors.Primary.copy(alpha = 0.3f))
-                    .clip(CircleShape)
-                    .background(FocusColors.Primary)
                     .clickable(onClick = onProfileClick)
                     .testTag("profile_avatar"),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Shield,
-                    contentDescription = "Protection Status & Profile",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                UserProfileAvatar(
+                    photoUri = photoUri,
+                    avatarPresetId = avatarPresetId,
+                    size = 40.dp,
+                    modifier = Modifier.shadow(
+                        3.dp,
+                        CircleShape,
+                        ambientColor = FocusColors.Primary.copy(alpha = 0.3f)
+                    )
                 )
+
+                // Same pending-update badge as the bell, off the same state.
+                if (showProfileDot) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(11.dp)
+                            .clip(CircleShape)
+                            .background(FocusColors.BlockedRed)
+                            .border(2.dp, FocusColors.Background, CircleShape)
+                            .testTag("profile_update_dot")
+                    )
+                }
             }
         }
     }

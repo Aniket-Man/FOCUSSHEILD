@@ -37,8 +37,8 @@ android {
     minSdk = 24
     targetSdk = 35
     // Bumped by hand per release — never per build.
-    versionCode = 3
-    versionName = "1.2.0"
+    versionCode = 4
+    versionName = "1.3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -133,6 +133,18 @@ dependencies {
   implementation(libs.lottie.compose)
   implementation(libs.androidx.glance.appwidget)
   implementation(libs.androidx.glance.material3)
+  implementation(libs.androidx.work.runtime.ktx)
+  // work-runtime's POM asks for androidx.startup:startup-runtime:1.0.0, whose AAR is not in this
+  // machine's offline Gradle cache (only its .pom/.module metadata is), so resolution tries to
+  // fetch it and the build dies with "No cached version available for offline mode". 1.1.1 is
+  // cached *and* is what the graph already prefers via profileinstaller/emoji2 — it is the version
+  // the app has been shipping with all along — so pinning it only stops Gradle reaching for the
+  // absent artifact. It does not change the runtime bytecode in the APK.
+  constraints {
+    implementation("androidx.startup:startup-runtime:1.1.1") {
+      because("1.0.0's AAR is absent from the offline cache; 1.1.1 is cached and already preferred.")
+    }
+  }
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Uncomment to use Firestore:
