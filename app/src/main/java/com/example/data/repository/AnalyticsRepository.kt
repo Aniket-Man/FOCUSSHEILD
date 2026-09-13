@@ -29,6 +29,8 @@ import com.example.feature.analytics.domain.SubjectBreakdown
 import com.example.feature.analytics.domain.TodayStudySummary
 import com.example.feature.analytics.domain.TopicBreakdown
 import com.example.feature.analytics.domain.YouTubeStudyStats
+import com.example.feature.rewards.domain.RewardBadge
+import com.example.feature.rewards.domain.StudyStamp
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -87,6 +89,12 @@ class AnalyticsRepository(
             val allTimeCount = allSessions.size
             val allTimeCompleted = allSessions.count { it.completed }
 
+            // Achievement unlock times come from the same synced session records that produce the
+            // lifetime total above, so both agree by construction — no stored counter to drift (§4).
+            val badgeUnlockTimes = RewardBadge.deriveUnlockTimes(
+                allSessions.map { StudyStamp(it.startTime, it.actualDurationMillis) }
+            )
+
             val hasUsagePermission = context?.let { DeviceUsageStatsHelper.hasUsageStatsPermission(it) } ?: false
             val screenTimeMillis = if (hasUsagePermission && context != null) {
                 DeviceUsageStatsHelper.getTodayTotalScreenTimeMillis(context)
@@ -120,7 +128,8 @@ class AnalyticsRepository(
                 totalScreenTimeMillis = screenTimeMillis,
                 formattedTotalScreenTime = formatDurationToHoursMins(screenTimeMillis),
                 hasUsageAccessPermission = hasUsagePermission,
-                focusToScreenRatioPercentage = focusRatio
+                focusToScreenRatioPercentage = focusRatio,
+                badgeUnlockTimes = badgeUnlockTimes
             )
         }
     }

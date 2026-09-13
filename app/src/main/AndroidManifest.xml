@@ -20,6 +20,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+        Self-update only: the user downloads a newer FocusShield APK and hands it to the system
+        installer. Nothing is installed silently — the OS always shows its own confirmation, and
+        Play Protect / unknown-source restrictions are never bypassed (prompt.txt §9, §10, §21).
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".FocusShieldApp"

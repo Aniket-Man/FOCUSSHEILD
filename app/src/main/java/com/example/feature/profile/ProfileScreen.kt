@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
@@ -88,6 +89,7 @@ import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.feature.settings.SettingsViewModel
+import com.example.feature.rewards.domain.RewardBadge
 import com.example.feature.rewards.ui.ProfileRewardsSection
 import com.example.feature.profile.ui.UserProfileAvatar
 import com.example.feature.profile.ui.EditProfileBottomSheet
@@ -95,6 +97,7 @@ import com.example.FocusShieldApp
 import com.example.cloud.auth.AuthState
 import com.example.cloud.storage.ProfileImageUploader
 import com.example.feature.account.AccountViewModel
+import com.example.feature.update.ui.UpdateViewModel
 import kotlinx.coroutines.launch
 
 @Composable
@@ -107,6 +110,8 @@ fun ProfileScreen(
     onNavigateToAccount: () -> Unit,
     accountViewModel: AccountViewModel,
     onNavigateToOnboarding: () -> Unit = {},
+    updateViewModel: UpdateViewModel,
+    onNavigateToUpdates: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -114,6 +119,10 @@ fun ProfileScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var showEditProfileSheet by remember { mutableStateOf(false) }
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+
+    // Small red dot on "New Updates". It stays lit after "Later" and only clears on a successful
+    // install or an explicit mark-as-read (prompt.txt §7/§18).
+    val showUpdateDot by updateViewModel.showDot.collectAsStateWithLifecycle()
 
     val accountState by accountViewModel.uiState.collectAsStateWithLifecycle()
     val cloudScope = rememberCoroutineScope()
@@ -379,7 +388,7 @@ fun ProfileScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(
-                                            text = "${prefs.claimedRewardIds.size} / 11",
+                                            text = "${uiState.badgeUnlockTimes.size} / ${RewardBadge.ALL_BADGES.size}",
                                             style = MaterialTheme.typography.labelMedium.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 color = FocusColors.EmeraldSuccess,
@@ -423,6 +432,7 @@ fun ProfileScreen(
                         totalLifetimeStudyMillis = uiState.allTimeStudyTimeMillis,
                         allTimeStudyTimeFormatted = uiState.formattedAllTimeStudyTime,
                         claimedRewardIds = uiState.preferences.claimedRewardIds,
+                        badgeUnlockTimes = uiState.badgeUnlockTimes,
                         onClaimReward = { rewardId -> settingsViewModel.claimReward(rewardId) }
                     )
                 }
@@ -553,6 +563,20 @@ fun ProfileScreen(
                             iconTint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
                             onClick = { AccessibilityHelper.openAccessibilitySettings(context) },
                             testTag = "profile_accessibility_row"
+                        )
+
+                        ProfileNavigationRow(
+                            title = "New Updates",
+                            subtitle = if (showUpdateDot) {
+                                "A new FocusShield version is available"
+                            } else {
+                                "Check for the latest version of FocusShield"
+                            },
+                            icon = Icons.Rounded.SystemUpdate,
+                            iconTint = FocusColors.Primary,
+                            onClick = onNavigateToUpdates,
+                            testTag = "profile_updates_row",
+                            showBadge = showUpdateDot
                         )
 
                         ProfileNavigationRow(
@@ -945,7 +969,13 @@ private fun ProfileNavigationRow(
     icon: ImageVector,
     iconTint: Color,
     onClick: () -> Unit,
-    testTag: String = ""
+    testTag: String = "",
+    /**
+     * Small red notification dot beside the title — used by "New Updates" to signal a downloaded
+     * release the user has not installed or dismissed yet. It is deliberately tinted on the icon tile
+     * rather than replacing it, so the row stays readable at a glance.
+     */
+    showBadge: Boolean = false
 ) {
     Box(
         modifier = Modifier
@@ -962,18 +992,33 @@ private fun ProfileNavigationRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(iconTint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
+                modifier = Modifier.size(38.dp)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(iconTint.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                if (showBadge) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(FocusColors.BlockedRed)
+                            .border(1.5.dp, FocusColors.Surface, CircleShape)
+                            .testTag("${testTag}_badge")
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))

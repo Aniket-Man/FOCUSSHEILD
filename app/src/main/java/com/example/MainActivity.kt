@@ -20,6 +20,7 @@ import com.example.core.navigation.FocusNavGraph
 import com.example.data.preferences.FocusPreferences
 import com.example.feature.session.notification.PlanLaunchPayload
 import com.example.feature.session.notification.StudyPlanAlarmScheduler
+import com.example.feature.update.notification.UpdateNotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -27,6 +28,10 @@ class MainActivity : ComponentActivity() {
 
     private val _incomingPlanPayload = MutableStateFlow<PlanLaunchPayload?>(null)
     val incomingPlanPayload = _incomingPlanPayload.asStateFlow()
+
+    /** Set when the app was opened by tapping the "update available" notification (prompt.txt §5). */
+    private val _openUpdatesRequest = MutableStateFlow(false)
+    val openUpdatesRequest = _openUpdatesRequest.asStateFlow()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,13 +67,16 @@ class MainActivity : ComponentActivity() {
             }
 
             val planPayload by incomingPlanPayload.collectAsStateWithLifecycle()
+            val openUpdates by openUpdatesRequest.collectAsStateWithLifecycle()
 
             FocusShieldTheme(darkTheme = isDarkTheme) {
                 FocusNavGraph(
                     incomingPlanPayload = planPayload,
                     onPlanPayloadHandled = {
                         _incomingPlanPayload.value = null
-                    }
+                    },
+                    openUpdatesRequest = openUpdates,
+                    onOpenUpdatesHandled = { _openUpdatesRequest.value = false }
                 )
             }
         }
@@ -78,6 +86,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.example.core.accessibility.AccessibilityHelper.updateState(this)
         com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
+        // Automatic re-check on return to foreground. Cooldown-gated inside the checker, so this is
+        // cheap and never a per-resume network request (prompt.txt §4).
+        try {
+            (application as FocusShieldApp).updateManager.checkInBackground()
+        } catch (_: Exception) {
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -88,6 +102,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
+
+        if (intent.getBooleanExtra(UpdateNotificationHelper.EXTRA_OPEN_UPDATES, false)) {
+            _openUpdatesRequest.value = true
+        }
+
         val isPlanAction = intent.action == StudyPlanAlarmScheduler.ACTION_OPEN_PLAN_SESSION ||
                 intent.getBooleanExtra(StudyPlanAlarmScheduler.EXTRA_START_PLAN_SESSION, false)
 

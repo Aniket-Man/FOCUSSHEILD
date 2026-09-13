@@ -21,8 +21,10 @@ class AppLimitRepository(
 ) {
     private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
-    // --- App-limit data is device-local by decision: limits, daily usage counters and temporary
-    // usage sessions are never uploaded, so nothing here enqueues a sync op.
+    // --- App-limit data is device-local in its entirety — the limit configuration, the daily usage
+    // counters and the temporary usage sessions are all about what *this phone* should enforce, so
+    // nothing here enqueues a sync op. (The study-session block list is a separate feature with its
+    // own repository; it is the one that follows the account.)
 
     fun getTodayDateString(): String = LocalDate.now().format(dateFormat)
 
@@ -101,17 +103,14 @@ class AppLimitRepository(
 
     suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
         appLimitDao.updateDailyLimitMinutes(packageName, minutes)
-
     }
 
     suspend fun updateStrictMode(packageName: String, isStrict: Boolean) {
         appLimitDao.updateStrictMode(packageName, isStrict)
-
     }
 
     suspend fun updateRemindersSetting(packageName: String, showReminders: Boolean) {
         appLimitDao.updateRemindersSetting(packageName, showReminders)
-
     }
 
     suspend fun recordDisciplineStreak(packageName: String) {
@@ -120,13 +119,11 @@ class AppLimitRepository(
         if (limit.lastStreakDate != today) {
             val newStreak = limit.streakDays + 1
             appLimitDao.updateStreak(packageName, newStreak, today)
-
         }
     }
 
     suspend fun resetStreak(packageName: String) {
         appLimitDao.resetStreak(packageName)
-
     }
 
     // --- DAILY USAGE TRACKING ---

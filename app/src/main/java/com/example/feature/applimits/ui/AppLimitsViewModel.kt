@@ -218,8 +218,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
             // Use UsageStatsManager as source of truth for actual usage
-            val systemUsedMillis = DeviceUsageStatsHelper.getTodayAppUsageMillis(app, packageName)
-            val usedMillis = if (systemUsedMillis > 0) systemUsedMillis else (usage?.usedMillis ?: 0L)
+            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(app, packageName)
+            val usedMillis = when (usageResult.status) {
+                com.example.core.util.UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+                else -> (usage?.usedMillis ?: 0L)
+            }
             val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
             val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 
@@ -240,8 +243,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(packageName, todayDate)
             // Use UsageStatsManager as source of truth for actual usage
-            val systemUsedMillis = DeviceUsageStatsHelper.getTodayAppUsageMillis(app, packageName)
-            val usedMillis = if (systemUsedMillis > 0) systemUsedMillis else (usage?.usedMillis ?: 0L)
+            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(app, packageName)
+            val usedMillis = when (usageResult.status) {
+                com.example.core.util.UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+                else -> (usage?.usedMillis ?: 0L)
+            }
             val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
             val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 

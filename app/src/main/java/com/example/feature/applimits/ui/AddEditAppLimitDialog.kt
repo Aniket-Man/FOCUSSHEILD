@@ -78,13 +78,52 @@ import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 
+/** Upper bound on the emergency-use allowance offered by the stepper. */
+private const val MAX_EMERGENCY_USES = 10
+
+/** The round `−` / `+` control used by the emergency-use stepper. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StepperButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = if (enabled) FocusColors.Primary.copy(alpha = 0.14f) else FocusColors.SurfaceSubtle,
+        modifier = Modifier
+            .size(32.dp)
+            .testTag(testTag)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = if (enabled) FocusColors.Primary else FocusColors.TextMuted
+                )
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddEditAppLimitDialog(
     installedApps: List<InstalledAppChoice>,
     editingItem: AppLimitUiItem?,
     onDismiss: () -> Unit,
-    onSave: (packageName: String, appName: String, dailyLimitMinutes: Int, isStrictOverride: Boolean) -> Unit
+    onSave: (
+        packageName: String,
+        appName: String,
+        dailyLimitMinutes: Int,
+        isStrictOverride: Boolean,
+        emergencyUsesAllowed: Int
+    ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -106,6 +145,13 @@ fun AddEditAppLimitDialog(
     }
     var isStrictOverride by remember {
         mutableStateOf(editingItem?.isStrictOverride ?: false)
+    }
+    // How many emergency uses this limit grants once it is reached. Chosen here, on the limit
+    // itself — there is deliberately no separate "emergency duration" popup, and no choice of
+    // duration to make: the emergency window is one fixed length, so the only thing the student
+    // configures is how many times it may be used.
+    var emergencyUsesAllowed by remember {
+        mutableStateOf(editingItem?.emergencyUsesAllowed ?: 1)
     }
     var showStrictWarningDialog by remember { mutableStateOf(false) }
 
@@ -401,6 +447,78 @@ fun AddEditAppLimitDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Emergency-use allowance for this limit. 1 = one unlock opportunity after the
+                // limit is reached; 0 = none, so the limit is absolute. This is a *count*, not a
+                // duration — the emergency window itself is a fixed length.
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(FocusShapes.medium)
+                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.medium),
+                    color = FocusColors.SurfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = null,
+                                tint = if (emergencyUsesAllowed > 0) FocusColors.Primary else FocusColors.TextSecondary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "No. of emergency use",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = FocusColors.TextPrimary
+                                    )
+                                )
+                                Text(
+                                    text = if (emergencyUsesAllowed == 0) {
+                                        "None — the limit is absolute once reached."
+                                    } else {
+                                        "How many times this app may be unlocked after the limit."
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextSecondary)
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StepperButton(
+                                label = "−",
+                                enabled = emergencyUsesAllowed > 0,
+                                onClick = { emergencyUsesAllowed -= 1 },
+                                testTag = "decrease_emergency_uses"
+                            )
+                            Text(
+                                text = emergencyUsesAllowed.toString(),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = FocusColors.TextPrimary
+                                ),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .width(40.dp)
+                                    .testTag("emergency_uses_value")
+                            )
+                            StepperButton(
+                                label = "+",
+                                enabled = emergencyUsesAllowed < MAX_EMERGENCY_USES,
+                                onClick = { emergencyUsesAllowed += 1 },
+                                testTag = "increase_emergency_uses"
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Strict Mode Override Toggle
                 Surface(
                     modifier = Modifier
@@ -498,7 +616,8 @@ fun AddEditAppLimitDialog(
                             app.packageName,
                             app.appName,
                             dailyLimitMinutes.toInt(),
-                            isStrictOverride
+                            isStrictOverride,
+                            emergencyUsesAllowed
                         )
                     },
                     modifier = Modifier

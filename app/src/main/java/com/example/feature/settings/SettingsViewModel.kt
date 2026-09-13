@@ -23,7 +23,9 @@ data class SettingsUiState(
     val isBatteryOptimizationIgnored: Boolean = false,
     val isNotificationListenerGranted: Boolean = false,
     val allTimeStudyTimeMillis: Long = 0L,
-    val formattedAllTimeStudyTime: String = "0m"
+    val formattedAllTimeStudyTime: String = "0m",
+    /** Badge id to the instant it was earned, derived from synced session history. */
+    val badgeUnlockTimes: Map<String, Long> = emptyMap()
 )
 
 class SettingsViewModel(
@@ -74,7 +76,8 @@ class SettingsViewModel(
             isBatteryOptimizationIgnored = inner.isBatteryOptimizationIgnored,
             isNotificationListenerGranted = inner.isNotificationListenerGranted,
             allTimeStudyTimeMillis = summary.allTimeStudyTimeMillis,
-            formattedAllTimeStudyTime = summary.formattedAllTimeStudyTime
+            formattedAllTimeStudyTime = summary.formattedAllTimeStudyTime,
+            badgeUnlockTimes = summary.badgeUnlockTimes
         )
     }.stateIn(
         scope = viewModelScope,

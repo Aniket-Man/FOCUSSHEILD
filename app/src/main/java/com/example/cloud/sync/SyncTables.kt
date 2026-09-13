@@ -16,7 +16,22 @@ object SyncTables {
     const val STUDY_TOPICS = "study_topics"
     const val STUDY_PLANS = "study_plans"
     const val BLOCKED_KEYWORDS = "blocked_keywords" // Room table "keywords"
-    const val DAILY_UNLOCKS = "daily_unlocks"
+
+    // Deliberately NOT synced, despite all four having Room tables. The app-limit system is
+    // device-local in its entirety: it describes what *this phone* should enforce for whoever is
+    // holding it, so a second device must never inherit it.
+    //   app_limits         — the limit configuration itself (daily limit, enabled flag, strict-mode
+    //                        preference, reminders, emergency-allowance count, discipline streak).
+    //   app_limit_sessions — this device's allowance/enforcement episodes ("5 more minutes").
+    //   daily_app_usage    — per-app foreground time, i.e. Android UsageStats-derived data.
+    //   daily_unlocks      — per-day phone unlock counts, equally general device usage statistics.
+    // Every one of these stays in Room, read by the enforcement engine, the app-limit UI and the
+    // widget. None is handed to the sync engine, so none can reach Supabase by any path.
+    //
+    // Note the contrast with BLOCKED_APPS above: that table is the *study-session* block list the
+    // student picks in Start Study Session, and it does follow the account. Both reference the same
+    // Android package names, but they are different features with different persistence semantics —
+    // "YouTube gets 2h/day on this phone" is not "block YouTube while I study".
 
     // History tables (append-only pull; deletes propagate only when performed locally).
     const val SESSION_RECORDS = "session_records"
@@ -79,7 +94,6 @@ val SYNCED_ROOM_TABLES: List<TableMeta> = listOf(
     TableMeta(SyncTables.BLOCKED_WEBSITES, SyncTables.BLOCKED_WEBSITES, "domain", PullMode.RECONCILE),
     TableMeta(SyncTables.STUDY_CHANNELS, SyncTables.STUDY_CHANNELS, "id", PullMode.RECONCILE),
     TableMeta(SyncTables.BLOCKED_KEYWORDS, SyncTables.BLOCKED_KEYWORDS, "", PullMode.RECONCILE),
-    TableMeta(SyncTables.DAILY_UNLOCKS, SyncTables.DAILY_UNLOCKS, "dateString", PullMode.RECONCILE),
     TableMeta(SyncTables.SESSION_RECORDS, SyncTables.SESSION_RECORDS, "id", PullMode.HISTORY),
     TableMeta(SyncTables.STUDY_ACTIVITIES, SyncTables.STUDY_ACTIVITIES, "id", PullMode.HISTORY),
     TableMeta(SyncTables.BREAK_RECORDS, SyncTables.BREAK_RECORDS, "id", PullMode.HISTORY),

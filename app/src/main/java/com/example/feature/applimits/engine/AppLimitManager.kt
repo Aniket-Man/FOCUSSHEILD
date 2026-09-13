@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.example.core.util.DeviceUsageStatsHelper
+import com.example.core.util.UsageResult
 import com.example.core.util.MediaPauseHelper
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.AppLimitSessionEntity
@@ -220,15 +221,20 @@ class AppLimitManager private constructor(
         // Check remaining daily allowance from system usage stats and database
         val dailyLimitMinutes = limit.dailyLimitMinutes
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
-        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, packageName)
+        val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, packageName)
         val dbUsage = usage?.usedMillis ?: 0L
 
-        // Use the higher of system vs DB as the source of truth.
-        // When systemUsage is 0 (missing permission or lagging), fall back to DB.
-        val accumulatedUsed = when {
-            systemUsage > 0 && systemUsage >= dbUsage -> systemUsage
-            dbUsage > 0 -> dbUsage  // System is 0 or lagging — trust DB
-            else -> systemUsage  // Both zero
+        // Use system usage when valid. Only fall back to DB when permission is genuinely denied.
+        val accumulatedUsed = when (usageResult.status) {
+            UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+            UsageResult.UsageStatus.PERMISSION_DENIED -> {
+                // Permission not granted — use DB as fallback (it's the only data we have)
+                dbUsage
+            }
+            else -> {
+                // QUERY_FAILED or NO_DATA — use DB as fallback
+                dbUsage
+            }
         }
 
         val usedMinutes = kotlin.math.round(accumulatedUsed / 60000.0).toInt().coerceAtLeast(0)
@@ -363,7 +369,14 @@ class AppLimitManager private constructor(
         val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
 
         // 1. Synchronously set active session in memory immediately so no window-change race condition occurs
-        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, packageName)
+        val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, packageName)
+        val systemUsage = usageResult.usageMillis
+
+        // Log diagnostic comparison for debugging (especially for YouTube)
+        if (packageName == "com.google.android.youtube") {
+            DeviceUsageStatsHelper.logDiagnosticComparison(appContext, packageName)
+        }
+
         val initialSession = ActiveAppUsageSession(
             packageName = packageName,
             appName = appName,
@@ -525,13 +538,13 @@ class AppLimitManager private constructor(
             val limit = appLimitRepository.getLimitByPackage(session.packageName)
             val todayDate = appLimitRepository.getTodayDateString()
             val usage = appLimitRepository.getUsage(session.packageName, todayDate)
-            val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, session.packageName)
+            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
             val dbUsage = usage?.usedMillis ?: 0L
-            // Use the higher of system vs DB as source of truth
-            val totalDailyUsedMillis = when {
-                systemUsage > 0 && systemUsage >= dbUsage -> systemUsage
-                dbUsage > 0 -> dbUsage
-                else -> systemUsage
+            // Use system usage when valid. Only fall back to DB when permission is genuinely denied.
+            val totalDailyUsedMillis = when (usageResult.status) {
+                UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+                UsageResult.UsageStatus.PERMISSION_DENIED -> dbUsage
+                else -> dbUsage
             }
 
             val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
@@ -593,8 +606,10 @@ class AppLimitManager private constructor(
 
         // Sync the database with UsageStatsManager so historical records are accurate.
         // This ensures usedMillis reflects actual foreground time, not FocusShield timer increments.
-        val systemUsage = DeviceUsageStatsHelper.getTodayAppUsageMillis(appContext, session.packageName)
-        appLimitRepository.syncSystemUsage(session.packageName, session.appName, systemUsage, todayDate)
+        val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
+        if (usageResult.status == UsageResult.UsageStatus.VALID) {
+            appLimitRepository.syncSystemUsage(session.packageName, session.appName, usageResult.usageMillis, todayDate)
+        }
     }
 
     fun launchOverlay(

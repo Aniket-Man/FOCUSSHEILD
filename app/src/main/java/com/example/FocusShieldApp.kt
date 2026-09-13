@@ -85,6 +85,33 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val authRepository by lazy { AuthRepository(this) }
     val connectivityMonitor by lazy { ConnectivityMonitor(this) }
 
+    // GitHub-Releases update checker. The repository is deliberately constructed without a token:
+    // the app ships no GitHub credential, so this is inert (and reports so honestly) while the
+    // FocusShield repository is private. See UpdateRepository for the swap point.
+    val updatePreferences by lazy {
+        com.example.feature.update.data.UpdatePreferences(this)
+    }
+    val updateRepository by lazy {
+        com.example.feature.update.data.GitHubReleaseRepository()
+    }
+    val updateDownloadManager by lazy {
+        com.example.feature.update.data.UpdateDownloadManager(this)
+    }
+    val updateManager by lazy {
+        com.example.feature.update.engine.UpdateManager(
+            context = this,
+            checker = com.example.feature.update.data.UpdateChecker(
+                repository = updateRepository,
+                preferences = updatePreferences,
+                installedVersionName = BuildConfig.VERSION_NAME,
+                isOnline = { connectivityMonitor.isOnline.value }
+            ),
+            preferences = updatePreferences,
+            downloadManager = updateDownloadManager,
+            scope = applicationScope
+        )
+    }
+
     // Cloud-sync stack. Constructed lazily so a local-only install pays nothing until something first
     // requests a sync (e.g. the first enqueue after SyncTracker.init below).
     val cloudInstallState by lazy { CloudInstallState(this) }
@@ -173,6 +200,30 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Initialize session and protection notification channels
         com.example.feature.session.notification.SessionNotificationHelper.initialize(this)
         com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this)
+
+        // Update checker (prompt.txt §4). Restore persisted state so a download that finished before
+        // the process died is still offered, then check once on launch. Both are cooldown-gated and
+        // failure-silent, so this never spams the user or the network.
+        com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
+        applicationScope.launch {
+            try {
+                updateManager.restore()
+                updateManager.checkInBackground()
+            } catch (_: Exception) {
+            }
+        }
+        // Re-check when connectivity comes back, which is the moment a previously-offline check
+        // becomes meaningful. Only the offline → online edge triggers a check.
+        applicationScope.launch {
+            try {
+                var wasOnline = connectivityMonitor.isOnline.value
+                connectivityMonitor.isOnline.collect { online ->
+                    if (online && !wasOnline) updateManager.checkInBackground()
+                    wasOnline = online
+                }
+            } catch (_: Exception) {
+            }
+        }
 
         // Restore any active session from disk that was running prior to process restart
         try {

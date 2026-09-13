@@ -39,7 +39,14 @@ data class TodayStudySummary(
     val totalScreenTimeMillis: Long = 0L,
     val formattedTotalScreenTime: String = "0m",
     val hasUsageAccessPermission: Boolean = false,
-    val focusToScreenRatioPercentage: Int = 0
+    val focusToScreenRatioPercentage: Int = 0,
+    /**
+     * Badge id to the instant it was first earned, derived from the synced session history by
+     * [com.example.feature.rewards.domain.RewardBadge.deriveUnlockTimes]. Derived rather than
+     * stored, so it cannot drift from the session records that are the source of truth (§4) and
+     * cannot be duplicated by a re-sync.
+     */
+    val badgeUnlockTimes: Map<String, Long> = emptyMap()
 )
 
 data class StudyDay(

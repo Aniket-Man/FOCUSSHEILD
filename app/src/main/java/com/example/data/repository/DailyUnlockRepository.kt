@@ -1,9 +1,6 @@
 package com.example.data.repository
 
 import android.util.Log
-import com.example.cloud.sync.CloudJson
-import com.example.cloud.sync.SyncTables
-import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.DailyUnlockDao
 import com.example.data.local.entity.DailyUnlockEntity
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +21,10 @@ import java.util.Locale
  * Unlocks are recorded by the [com.example.core.tracking.PhoneUnlockTracker] whenever the
  * keyguard is dismissed (ACTION_USER_PRESENT). A short debounce window prevents a single
  * unlock burst (screen-on + keyguard events) from double counting.
+ *
+ * This is *device* usage, not FocusShield activity: how often the student picked up their phone
+ * on this handset. It is therefore deliberately local-only — see [com.example.cloud.sync.SyncTables]
+ * — and is never uploaded. The widget reads it straight from Room.
  */
 class DailyUnlockRepository(
     private val dao: DailyUnlockDao,
@@ -73,13 +74,6 @@ class DailyUnlockRepository(
                         )
                     }
                     dao.insert(updated)
-                    // One row per date, keyed by the date itself; SyncTracker coalesces, so a burst
-                    // of unlocks leaves a single pending upsert carrying the final count.
-                    SyncTracker.enqueueUpsert(
-                        SyncTables.DAILY_UNLOCKS,
-                        dateString,
-                        CloudJson.dailyUnlockToJson(updated).toString()
-                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to record unlock", e)

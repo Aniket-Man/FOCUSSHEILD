@@ -102,8 +102,8 @@ class SyncEngine(
      * account's history has to be reproduced from the cloud, and a table left behind would show the
      * *previous* owner's events alongside the restored account's. The only state still surviving a
      * restore is what was never account-level to begin with: the device-local preference keys, and
-     * the tables outside the sync set entirely (the app-limit tables are device-local by decision —
-     * see [SyncTables]).
+     * the tables outside the sync set entirely — the whole app-limit system is device-local by
+     * spec, so neither this device's limits nor its measured usage is restored (see [SyncTables]).
      */
     suspend fun restore(uid: String): SyncCycleOutcome {
         if (!SupabaseConfig.isConfigured) return SyncCycleOutcome.NoSession
@@ -643,16 +643,8 @@ class SyncEngine(
             insert = { bulk.insertScratchCardsMissing(it) },
             clear = { bulk.clearScratchCards() }
         )
-        // daily_unlocks is a natural-key reconcile table.
-        l += bind(
-            meta = TableMeta(SyncTables.DAILY_UNLOCKS, SyncTables.DAILY_UNLOCKS, "dateString", PullMode.RECONCILE),
-            keyOfJson = { it.optString("dateString") },
-            fromJson = { CloudJson.dailyUnlockFromCloud(it) },
-            toJson = { CloudJson.dailyUnlockToJson(it) },
-            readAll = { bulk.dailyUnlocks() },
-            insert = { bulk.upsertDailyUnlocks(it) },
-            clear = { bulk.clearDailyUnlocks() }
-        )
+        // App limits are deliberately absent: the whole app-limit system is device-local, so no
+        // binding exists for `app_limits`, `app_limit_sessions` or `daily_app_usage`. See SyncTables.
         return l
     }
 }

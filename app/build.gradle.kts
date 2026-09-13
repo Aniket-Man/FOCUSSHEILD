@@ -36,8 +36,9 @@ android {
     applicationId = "com.aistudio.focusshield.krtjfp"
     minSdk = 24
     targetSdk = 35
+    // First public release (prompt.txt §24). Bumped by hand per release — never per build.
     versionCode = 1
-    versionName = "1.0"
+    versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

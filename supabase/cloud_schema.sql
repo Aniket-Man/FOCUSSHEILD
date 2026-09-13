@@ -5,9 +5,12 @@
 -- and run it. It is fully idempotent: safe to run again after partial success.
 --
 -- What this sets up
---   1. 19 tables the Android app syncs (Room camelCase columns mirrored 1:1;
+--   1. 15 tables the Android app syncs (Room camelCase columns mirrored 1:1;
 --      every table carries `user_id` uuid + RLS, so a user can only ever see
---      their own rows).
+--      their own rows). One further table, `app_limits`, is LEGACY: it is
+--      created and protected here only so deployments provisioned before the
+--      app-limit system became device-local keep their schema unchanged. The
+--      app no longer syncs, writes, or reads it. See the note further down.
 --   2. RLS enabled + 4 owner-only policies per table (SELECT/INSERT/UPDATE/
 --      DELETE all gated on `auth.uid() = user_id`).
 --   3. Data-API GRANTs to the `authenticated` role (RLS gates rows; GRANT
@@ -16,6 +19,26 @@
 --      revoked from PUBLIC so it is not a client-callable endpoint).
 --   5. Private Storage bucket `profile-images` + owner-only object policies,
 --      matching the app's deterministic object path `profile-images/{uid}/avatar.jpg`.
+--
+-- What is deliberately NOT synced (device-local by design)
+--   The cloud stores what the student does *with FocusShield*, not what they do
+--   on their phone. The App Limit system is device-local in its entirety: a limit
+--   is an instruction about what *this handset* should enforce for whoever is
+--   holding it, so a second device must never inherit it. That leaves no synced
+--   cloud table for any of:
+--     app_limits         — the configuration (daily limit, enabled flag, strict-mode
+--                          preference, reminders, emergency-allowance count, streak).
+--     app_limit_sessions — this device's allowance/enforcement episodes.
+--     daily_app_usage    — per-app foreground time, i.e. Android UsageStats data.
+--     daily_unlocks      — how often this handset was unlocked, equally general
+--                          device usage statistics.
+--   All four stay in Room and never leave the device.
+--
+--   Note the contrast with `blocked_apps`, which IS synced: that is the *study
+--   session* block list the student picks in Start Study Session — a FocusShield
+--   activity that should follow the account. Both reference the same Android
+--   package names, but "YouTube gets 2h/day on this phone" and "block YouTube
+--   while I study" are different features with different persistence semantics.
 --
 -- Prerequisites (app side, NOT this script): enable the "Email" auth provider
 -- in Dashboard > Auth. `local.properties` must define SUPABASE_URL /
@@ -89,6 +112,23 @@ create table if not exists public.blocked_websites (
     primary key (user_id, "domain")
 );
 
+-- ---------------------------------------------------------------------------
+-- LEGACY / NOT SYNCED — `app_limits` (the App Limit configuration: daily limit,
+-- enabled flag, strict-mode preference, reminders, emergency-allowance count,
+-- streak discipline).
+--
+-- The App Limit system is device-local in its entirety, so the Android app no
+-- longer registers this table for sync, no longer enqueues uploads for it, no
+-- longer serializes it, and no longer restores from it. No code path writes a
+-- new row here, and nothing reads the rows that already exist.
+--
+-- The table is nevertheless still created and still protected below (RLS +
+-- owner-only policies + anon revoke). Deployments provisioned before this change
+-- may still hold rows, and dropping a production table to tidy up a schema is
+-- not worth the risk of destroying whatever a student configured there. Drop it
+-- by hand once you are satisfied that data is expendable — this script does not
+-- do it for you.
+-- ---------------------------------------------------------------------------
 create table if not exists public.app_limits (
     user_id uuid not null,
     "packageName" text not null,
@@ -269,24 +309,15 @@ create table if not exists public.blocked_attempts (
     primary key (user_id, "eventId")
 );
 
--- Individual temporary usage sessions inside a limited app (the "unlocked 5 more minutes" episodes).
-create table if not exists public.app_limit_sessions (
-    user_id uuid not null,
-    "id" text not null,
-    "packageName" text,
-    "appName" text,
-    "dateString" text,
-    "startedAt" bigint,
-    "endedAt" bigint,
-    "selectedDurationMillis" bigint,
-    "actualUsedMillis" bigint,
-    "isEmergency" boolean,
-    "endReason" text,
-    "createdAt" bigint,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    primary key (user_id, "id")
-);
+-- NOTE (device-local, deliberately unsynced):
+--   app_limits         — the limit configuration itself. Legacy rows may still exist in older
+--                        deployments (see the note on its create statement above); the app
+--                        neither writes nor reads them, and never syncs them.
+--   app_limit_sessions — individual allowance episodes ("unlocked 5 more minutes"). This is
+--                        current enforcement state, not account configuration, so the device
+--                        determines it. The table stays in Room only.
+--   daily_app_usage    — per-app foreground usage for a day. Android UsageStats-derived data
+--                        must never become cloud history. The table stays in Room only.
 
 -- Scratch-card rewards. The reward text is generated once, at card creation, and is not
 -- reconstructible from anything else — so it has to travel with the account or the card would
@@ -306,33 +337,9 @@ create table if not exists public.scratch_cards (
     primary key (user_id, "sessionId")
 );
 
--- Daily phone-unlock counts, one row per calendar day.
-create table if not exists public.daily_unlocks (
-    user_id uuid not null,
-    "dateString" text not null,
-    "unlockCount" integer,
-    "firstUnlockAt" bigint,
-    "lastUnlockAt" bigint,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    primary key (user_id, "dateString")
-);
-
--- Per-app foreground usage per day. Only the *usage* columns are here: the app's emergency-unlock
--- and bypass columns describe what this device's enforcement engine is currently doing, not account
--- history, so they stay on the device. A pull merges these columns onto the local row and leaves the
--- device-only ones untouched (TableMeta.clearsOnReconcile = false).
-create table if not exists public.daily_app_usage (
-    user_id uuid not null,
-    "packageName" text not null,
-    "dateString" text not null,
-    "appName" text,
-    "usedMillis" bigint,
-    "lastActiveTimestamp" bigint,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    primary key (user_id, "packageName", "dateString")
-);
+-- Daily phone-unlock counts — deliberately absent, see the header note. Counting how often the
+-- student picks up their phone is general device usage statistics (§12), not FocusShield activity.
+-- The Room table of the same name stays on the device for the widget.
 
 -- Whole-document single-row-per-user tables (not stored in Room).
 create table if not exists public.profiles (
@@ -353,7 +360,7 @@ create table if not exists public.user_preferences (
 );
 
 -- ---------------------------------------------------------------------------
--- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (19 tables)
+-- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (16 tables = 15 synced + legacy app_limits)
 -- ---------------------------------------------------------------------------
 -- Each table: enable RLS; four policies SELECT/INSERT/UPDATE/DELETE restricted
 -- to `TO authenticated` with `(select auth.uid()) = user_id` in BOTH USING and
@@ -373,6 +380,9 @@ begin
         'focus_schedules',
         'blocked_apps',
         'blocked_websites',
+        -- Legacy and no longer synced, but kept in this loop deliberately: an older deployment
+        -- may still hold rows, and omitting it here would be the one change that could leave a
+        -- populated table unprotected. See the note on its create statement.
         'app_limits',
         'study_channels',
         'study_subjects',
@@ -383,10 +393,7 @@ begin
         'study_activities',
         'break_records',
         'blocked_attempts',
-        'app_limit_sessions',
         'scratch_cards',
-        'daily_unlocks',
-        'daily_app_usage',
         'profiles',
         'user_preferences'
     ] loop
@@ -410,12 +417,13 @@ end
 $$;
 
 -- (Optional) keep the anon key from even seeing these tables exist in the API.
+-- `app_limits` is included even though it is legacy and unsynced — it is here so an old deployment
+-- that still holds rows cannot be reached with a publishable key.
 revoke all on table public.focus_schedules, public.blocked_apps, public.blocked_websites,
     public.app_limits, public.study_channels, public.study_subjects, public.study_topics,
     public.study_plans, public.blocked_keywords, public.session_records,
     public.study_activities, public.break_records, public.blocked_attempts,
-    public.app_limit_sessions, public.scratch_cards, public.daily_unlocks,
-    public.daily_app_usage, public.profiles, public.user_preferences
+    public.scratch_cards, public.profiles, public.user_preferences
     from anon;
 
 -- ---------------------------------------------------------------------------
@@ -462,7 +470,6 @@ create index if not exists session_records_created_at_idx on public.session_reco
 create index if not exists study_activities_created_at_idx on public.study_activities (created_at);
 create index if not exists break_records_created_at_idx on public.break_records (created_at);
 create index if not exists blocked_attempts_created_at_idx on public.blocked_attempts (created_at);
-create index if not exists app_limit_sessions_created_at_idx on public.app_limit_sessions (created_at);
 create index if not exists scratch_cards_created_at_idx on public.scratch_cards (created_at);
 
 -- ---------------------------------------------------------------------------
@@ -524,11 +531,11 @@ commit;
 --   and tablename in ('focus_schedules','blocked_apps','blocked_websites',
 --     'app_limits','study_channels','study_subjects','study_topics','study_plans',
 --     'blocked_keywords','session_records','study_activities','break_records',
---     'blocked_attempts','app_limit_sessions','scratch_cards','daily_unlocks',
---     'daily_app_usage','profiles','user_preferences');   --> 19
+--     'blocked_attempts','scratch_cards',
+--     'profiles','user_preferences');   --> 16 (15 the app syncs + legacy app_limits)
 --
 -- select count(*) from pg_policies
---   where schemaname in ('public','storage') and policyname like '%_own';  --> 80 total (19 tables x 4 + 4 storage)
+--   where schemaname in ('public','storage') and policyname like '%_own';  --> 68 total (16 tables x 4 + 4 storage)
 --
 -- select id, public from storage.buckets where id='profile-images';        --> public = false
 --

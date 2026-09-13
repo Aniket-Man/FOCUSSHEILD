@@ -4,14 +4,10 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import com.example.data.local.entity.AppLimitEntity
-import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.BlockedAppEntity
 import com.example.data.local.entity.BlockedAttemptEntity
 import com.example.data.local.entity.BlockedWebsiteEntity
 import com.example.data.local.entity.BreakRecordEntity
-import com.example.data.local.entity.DailyAppUsageEntity
-import com.example.data.local.entity.DailyUnlockEntity
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.KeywordEntity
 import com.example.data.local.entity.ScratchCardEntity
@@ -103,15 +99,9 @@ interface CloudBulkDao {
     suspend fun clearBlockedWebsites()
 
     // ---- app_limits -----------------------------------------------------------------
-
-    @Query("SELECT * FROM app_limits")
-    suspend fun appLimits(): List<AppLimitEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAppLimits(rows: List<AppLimitEntity>)
-
-    @Query("DELETE FROM app_limits")
-    suspend fun clearAppLimits()
+    //
+    // Deliberately absent. App limits are device-local in their entirety, so this DAO — which exists
+    // solely to serve the sync engine — must have no way to read or clear them.
 
     // ---- study_channels -------------------------------------------------------------
 
@@ -189,17 +179,6 @@ interface CloudBulkDao {
     @Query("DELETE FROM blocked_attempts")
     suspend fun clearBlockedAttempts()
 
-    // ---- app_limit_sessions (history) -----------------------------------------------
-
-    @Query("SELECT * FROM app_limit_sessions")
-    suspend fun appLimitSessions(): List<AppLimitSessionEntity>
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAppLimitSessionsMissing(rows: List<AppLimitSessionEntity>)
-
-    @Query("DELETE FROM app_limit_sessions")
-    suspend fun clearAppLimitSessions()
-
     // ---- scratch_cards (history) ----------------------------------------------------
 
     @Query("SELECT * FROM scratch_cards")
@@ -211,25 +190,10 @@ interface CloudBulkDao {
     @Query("DELETE FROM scratch_cards")
     suspend fun clearScratchCards()
 
-    // ---- daily_unlocks (reconcile) --------------------------------------------------
-
-    @Query("SELECT * FROM daily_unlocks")
-    suspend fun dailyUnlocks(): List<DailyUnlockEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertDailyUnlocks(rows: List<DailyUnlockEntity>)
-
-    @Query("DELETE FROM daily_unlocks")
-    suspend fun clearDailyUnlocks()
-
-    // ---- daily_app_usage (merge — local enforcement columns survive a pull) ----------
-
-    @Query("SELECT * FROM daily_app_usage")
-    suspend fun dailyAppUsage(): List<DailyAppUsageEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertDailyAppUsage(rows: List<DailyAppUsageEntity>)
-
-    @Query("DELETE FROM daily_app_usage")
-    suspend fun clearDailyAppUsage()
+    // ---- app_limit_sessions, daily_app_usage, daily_unlocks -------------------------
+    //
+    // Deliberately absent. None of these three tables participates in sync: app_limit_sessions is
+    // per-day enforcement history (§13), daily_app_usage is Android usage statistics (§12), and
+    // daily_unlocks is general device usage statistics (§12). They stay in Room, read by the
+    // enforcement engine, the app-limit UI and the widget — never by the sync engine.
 }

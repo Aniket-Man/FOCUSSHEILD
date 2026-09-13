@@ -30,19 +30,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.hypot
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
@@ -55,7 +62,7 @@ import com.example.data.local.entity.ScratchCardEntity
  * The user physically scratches the foil overlay to reveal the reward underneath.
  *
  * @param card The un-revealed scratch card to display.
- * @param onRevealed Called once the card is fully scratched (persists reveal state).
+ * @param onRevealed Called once scratching passes the reveal threshold (persists reveal state).
  * @param onDismiss Called when the user closes the dialog after revealing.
  */
 @Composable
@@ -109,7 +116,7 @@ fun ScratchCardDialog(
                     card = card,
                     foilAlpha = foilAlpha,
                     onScratchProgress = { progress ->
-                        if (progress >= 0.45f && !revealed) {
+                        if (progress >= DEFAULT_REVEAL_THRESHOLD && !revealed) {
                             revealed = true
                         }
                     }
@@ -146,9 +153,18 @@ fun ScratchCardDialog(
 
 /**
  * The interactive scratch surface: reward content sits underneath, and a foil
- * layer on top is erased by drag gestures (BlendMode.Clear inside its own
- * graphics layer so only the foil is erased). A coarse cell grid tracks the
- * scratched percentage without reading pixels back from the GPU.
+ * layer on top is erased by drag gestures.
+ *
+ * `BlendMode.Clear` only erases *within its own compositing layer*, so the foil
+ * Box is given `CompositingStrategy.Offscreen`. Without that layer the clear
+ * blends against the window behind the dialog and the foil is left untouched —
+ * the reward then only ever appeared when [onScratchProgress] crossed the
+ * threshold and the whole layer faded out. With the layer in place the eraser
+ * removes foil exactly where the finger travels, so the reward shows through
+ * progressively from the first touch.
+ *
+ * A coarse cell grid tracks the scratched percentage without reading pixels
+ * back from the GPU.
  */
 @Composable
 private fun ScratchCardSurface(
@@ -160,6 +176,22 @@ private fun ScratchCardSurface(
     // Redraw revision: bumped on every drag so the Canvas invalidates its draw lambda
     val scratchRevision = remember { mutableIntStateOf(0) }
     val scratchedCells = remember { HashSet<Int>() }
+
+    // The hint is drawn into the foil canvas rather than as a sibling, so scratching
+    // erases it along with the foil instead of leaving it floating over the reward.
+    val textMeasurer = rememberTextMeasurer()
+    val hintLayout = remember(textMeasurer) {
+        textMeasurer.measure(
+            text = AnnotatedString("SCRATCH\nHERE"),
+            style = TextStyle(
+                color = Color(0xFF4B5563),
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                lineHeight = 30.sp
+            )
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -211,13 +243,14 @@ private fun ScratchCardSurface(
             )
         }
 
-        // Layer 2: foil overlay, erased by scratching (own graphics layer so
-        // BlendMode.Clear only clears the foil, not the reward underneath)
+        // Layer 2: foil overlay, erased by scratching. The offscreen compositing
+        // strategy is what scopes BlendMode.Clear to the foil alone.
         if (foilAlpha > 0.01f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
                         alpha = foilAlpha
                         shape = RoundedCornerShape(20.dp)
                         clip = true
@@ -226,22 +259,46 @@ private fun ScratchCardSurface(
                         val cellsX = 16
                         val cellsY = 10
                         val cellCount = cellsX * cellsY
+                        var previous = Offset.Unspecified
+
+                        fun report() = onScratchProgress(scratchedCells.size.toFloat() / cellCount)
+
                         detectDragGestures(
                             onDragStart = { offset ->
+                                previous = offset
                                 scratchPath.moveTo(offset.x, offset.y)
+                                // A contour with no line has zero area, so the stroke pass
+                                // cannot render it. An oval gives the touch-down its own
+                                // filled dot, which is what makes a tap reveal foil.
+                                scratchPath.addOval(
+                                    Rect(center = offset, radius = SCRATCH_RADIUS_PX)
+                                )
                                 scratchedCells.add(
                                     cellIndexFor(offset, cellsX, cellsY, size.width.toFloat(), size.height.toFloat())
                                 )
                                 scratchRevision.intValue++
-                                onScratchProgress(scratchedCells.size.toFloat() / cellCount)
+                                report()
                             },
                             onDrag = { change, _ ->
-                                scratchPath.lineTo(change.position.x, change.position.y)
-                                scratchedCells.add(
-                                    cellIndexFor(change.position, cellsX, cellsY, size.width.toFloat(), size.height.toFloat())
+                                change.consume()
+                                val position = change.position
+                                scratchPath.lineTo(position.x, position.y)
+                                // Sample along the segment rather than only at its end: a fast
+                                // flick covers many cells between two pointer events, and
+                                // counting just the endpoint made the progress ratio lag well
+                                // behind what the user had actually scratched away.
+                                markCellsAlong(
+                                    from = previous,
+                                    to = position,
+                                    cellsX = cellsX,
+                                    cellsY = cellsY,
+                                    width = size.width.toFloat(),
+                                    height = size.height.toFloat(),
+                                    out = scratchedCells
                                 )
+                                previous = position
                                 scratchRevision.intValue++
-                                onScratchProgress(scratchedCells.size.toFloat() / cellCount)
+                                report()
                             }
                         )
                     }
@@ -277,25 +334,33 @@ private fun ScratchCardSurface(
                         style = Stroke(width = 3f)
                     )
 
-                    // Erase scratched strokes
+                    // Hint sits on the foil, so it is scratched away with it
+                    drawText(
+                        textLayoutResult = hintLayout,
+                        topLeft = Offset(
+                            (size.width - hintLayout.size.width) / 2f,
+                            (size.height - hintLayout.size.height) / 2f
+                        )
+                    )
+
+                    // Erase scratched strokes. The fill pass is a no-op for the line
+                    // contours (zero area) and fills the touch-down ovals.
                     drawPath(
                         path = scratchPath,
                         color = Color.Transparent,
-                        style = Stroke(width = 55f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        style = Stroke(
+                            width = SCRATCH_RADIUS_PX * 2f,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        ),
+                        blendMode = BlendMode.Clear
+                    )
+                    drawPath(
+                        path = scratchPath,
+                        color = Color.Transparent,
                         blendMode = BlendMode.Clear
                     )
                 }
-
-                // Hint text on top of the foil (non-hit-testable, so drags pass through)
-                Text(
-                    text = "SCRATCH\nHERE",
-                    color = Color(0xFF4B5563),
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 30.sp,
-                    modifier = Modifier.align(Alignment.Center)
-                )
             }
         }
     }
@@ -313,3 +378,44 @@ private fun cellIndexFor(
     val row = (position.y / height * cellsY).toInt().coerceIn(0, cellsY - 1)
     return row * cellsX + col
 }
+
+/**
+ * Adds every cell the segment [from] → [to] passes through, stepping at half a cell so a
+ * fast drag cannot skip over the cells it visibly scratched.
+ */
+private fun markCellsAlong(
+    from: Offset,
+    to: Offset,
+    cellsX: Int,
+    cellsY: Int,
+    width: Float,
+    height: Float,
+    out: MutableSet<Int>
+) {
+    if (width <= 0f || height <= 0f) return
+    if (from == Offset.Unspecified) {
+        out.add(cellIndexFor(to, cellsX, cellsY, width, height))
+        return
+    }
+
+    val dx = to.x - from.x
+    val dy = to.y - from.y
+    val step = (minOf(width / cellsX, height / cellsY) / 2f).coerceAtLeast(1f)
+    val steps = (hypot(dx, dy) / step).toInt().coerceIn(0, MAX_SEGMENT_SAMPLES)
+
+    for (i in 0..steps) {
+        val t = if (steps == 0) 0f else i.toFloat() / steps
+        out.add(
+            cellIndexFor(Offset(from.x + dx * t, from.y + dy * t), cellsX, cellsY, width, height)
+        )
+    }
+}
+
+/** Fraction of the card that must be scratched before the reward is permanently unlocked. */
+private const val DEFAULT_REVEAL_THRESHOLD = 0.45f
+
+/** Foil eraser radius in raw pixels. */
+private const val SCRATCH_RADIUS_PX = 27.5f
+
+/** Upper bound on samples per drag segment, so a huge jump cannot spin the loop. */
+private const val MAX_SEGMENT_SAMPLES = 256

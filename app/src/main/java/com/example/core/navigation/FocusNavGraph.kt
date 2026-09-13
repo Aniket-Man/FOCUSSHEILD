@@ -18,6 +18,7 @@ import com.example.FocusShieldApp
 import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
 import com.example.core.ui.BottomTab
+import com.example.BuildConfig
 import com.example.feature.analytics.AnalyticsScreen
 import com.example.feature.analytics.AnalyticsViewModel
 import com.example.feature.applimits.ui.AppLimitsDashboardScreen
@@ -44,6 +45,10 @@ import com.example.feature.settings.SettingsScreen
 import com.example.feature.settings.SettingsViewModel
 import com.example.feature.account.AccountScreen
 import com.example.feature.account.AccountViewModel
+import com.example.feature.update.domain.UpdateState
+import com.example.feature.update.ui.UpdateAvailableDialog
+import com.example.feature.update.ui.UpdateScreen
+import com.example.feature.update.ui.UpdateViewModel
 
 /**
  * Central FocusShield Navigation Graph.
@@ -58,6 +63,8 @@ fun FocusNavGraph(
     navController: NavHostController = rememberNavController(),
     incomingPlanPayload: PlanLaunchPayload? = null,
     onPlanPayloadHandled: () -> Unit = {},
+    openUpdatesRequest: Boolean = false,
+    onOpenUpdatesHandled: () -> Unit = {},
     homeViewModel: HomeViewModel = viewModel(),
     sessionViewModel: SessionViewModel = viewModel(),
     historyViewModel: HistoryViewModel = viewModel(),
@@ -75,9 +82,34 @@ fun FocusNavGraph(
             FocusShieldApp.instance.cloudInstallState,
             FocusShieldApp.instance.syncGateway
         )
+    },
+    updateViewModel: UpdateViewModel = viewModel {
+        UpdateViewModel(
+            manager = FocusShieldApp.instance.updateManager,
+            installedVersionName = BuildConfig.VERSION_NAME
+        )
     }
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+
+    // The "update available" popup lives at the host level so it can surface wherever the user is,
+    // and — because showPrompt is a persisted, version-keyed flag — it can never reappear on every
+    // navigation (prompt.txt §6).
+    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+    val promptedUpdate = (updateState as? UpdateState.UpdateAvailable)
+        ?.takeIf { it.showPrompt }
+        ?.info
+    if (promptedUpdate != null) {
+        UpdateAvailableDialog(
+            info = promptedUpdate,
+            onDownload = {
+                updateViewModel.onLater()
+                navController.navigate(Screen.Update.route) { launchSingleTop = true }
+                updateViewModel.download()
+            },
+            onLater = { updateViewModel.onLater() }
+        )
+    }
 
     // Automatically navigate to the session page when launched from a Study Plan notification
     LaunchedEffect(incomingPlanPayload) {
@@ -106,6 +138,14 @@ fun FocusNavGraph(
             }
         }
         onPlanPayloadHandled()
+    }
+
+    // Opened by tapping the "update available" notification (prompt.txt §5). Consumed once so a
+    // configuration change or a later navigation cannot re-trigger it.
+    LaunchedEffect(openUpdatesRequest) {
+        if (!openUpdatesRequest) return@LaunchedEffect
+        navController.navigate(Screen.Update.route) { launchSingleTop = true }
+        onOpenUpdatesHandled()
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -225,7 +265,9 @@ fun FocusNavGraph(
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToAccount = { navController.navigate(Screen.Account.route) },
                 accountViewModel = accountViewModel,
-                onNavigateToOnboarding = { navController.navigate(Screen.Onboarding.route) }
+                onNavigateToOnboarding = { navController.navigate(Screen.Onboarding.route) },
+                updateViewModel = updateViewModel,
+                onNavigateToUpdates = { navController.navigate(Screen.Update.route) }
             )
         }
 
@@ -338,6 +380,14 @@ fun FocusNavGraph(
         composable(Screen.Account.route) {
             AccountScreen(
                 accountViewModel = accountViewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // SUB-SCREEN: APP UPDATE (GitHub Releases APK updater)
+        composable(Screen.Update.route) {
+            UpdateScreen(
+                viewModel = updateViewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

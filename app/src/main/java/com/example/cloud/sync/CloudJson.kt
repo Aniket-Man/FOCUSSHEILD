@@ -1,15 +1,11 @@
 package com.example.cloud.sync
 
-import com.example.data.local.entity.AppLimitEntity
-import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.BlockedAppEntity
 import com.example.data.local.entity.BlockedAttemptEntity
 import com.example.data.local.entity.BlockedEventSource
 import com.example.data.local.entity.BlockedEventType
 import com.example.data.local.entity.BlockedWebsiteEntity
 import com.example.data.local.entity.BreakRecordEntity
-import com.example.data.local.entity.DailyAppUsageEntity
-import com.example.data.local.entity.DailyUnlockEntity
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.KeywordEntity
 import com.example.data.local.entity.ScratchCardEntity
@@ -132,33 +128,11 @@ object CloudJson {
     )
 
     // ---- app_limits ------------------------------------------------------------------
-
-    fun appLimitToJson(e: AppLimitEntity): JSONObject = JSONObject()
-        .put("packageName", e.packageName)
-        .put("appName", e.appName)
-        .put("dailyLimitMinutes", e.dailyLimitMinutes)
-        .put("isEnabled", e.isEnabled)
-        .put("isStrictOverride", e.isStrictOverride)
-        .put("showRemindersBeforeLimit", e.showRemindersBeforeLimit)
-        .put("emergencyUsesAllowed", e.emergencyUsesAllowed)
-        .put("streakDays", e.streakDays)
-        .put("lastStreakDate", e.lastStreakDate)
-        .put("createdAt", e.createdAt)
-        .put("updatedAt", e.updatedAt)
-
-    fun appLimitFromCloud(j: JSONObject): AppLimitEntity = AppLimitEntity(
-        packageName = j.optString("packageName"),
-        appName = j.optString("appName"),
-        dailyLimitMinutes = j.int("dailyLimitMinutes", 0),
-        isEnabled = j.bool("isEnabled", true),
-        isStrictOverride = j.bool("isStrictOverride", false),
-        showRemindersBeforeLimit = j.bool("showRemindersBeforeLimit", true),
-        emergencyUsesAllowed = j.int("emergencyUsesAllowed", 1),
-        streakDays = j.int("streakDays", 0),
-        lastStreakDate = j.optString("lastStreakDate", ""),
-        createdAt = j.lng("createdAt", System.currentTimeMillis()),
-        updatedAt = j.lng("updatedAt", System.currentTimeMillis())
-    )
+    //
+    // No mapper: local-only. An app limit is not account configuration — the daily limit, enabled
+    // flag, strict-mode preference, reminder setting and emergency-allowance count all describe what
+    // *this phone* should enforce, so a second device must never inherit them. The row therefore
+    // never enters the sync pipeline at all; it is not merely filtered out on the way to the wire.
 
     // ---- study_channels --------------------------------------------------------------
 
@@ -442,47 +416,15 @@ object CloudJson {
     }
 
     // ---- app_limit_sessions ----------------------------------------------------------
-
-    fun appLimitSessionToJson(e: AppLimitSessionEntity): JSONObject = JSONObject()
-        .put("id", e.id)
-        .put("packageName", e.packageName)
-        .put("appName", e.appName)
-        .put("dateString", e.dateString)
-        .put("startedAt", e.startedAt)
-        .put("endedAt", e.endedAt)
-        .put("selectedDurationMillis", e.selectedDurationMillis)
-        .put("actualUsedMillis", e.actualUsedMillis)
-        .put("isEmergency", e.isEmergency)
-        .put("endReason", e.endReason)
-        .put("createdAt", e.startedAt)
-
-    fun appLimitSessionFromCloud(j: JSONObject): AppLimitSessionEntity = AppLimitSessionEntity(
-        id = j.optString("id"),
-        packageName = j.optString("packageName"),
-        appName = j.optString("appName"),
-        dateString = j.optString("dateString"),
-        startedAt = j.lng("startedAt", 0L),
-        endedAt = j.lng("endedAt", 0L),
-        selectedDurationMillis = j.lng("selectedDurationMillis", 0L),
-        actualUsedMillis = j.lng("actualUsedMillis", 0L),
-        isEmergency = j.bool("isEmergency", false),
-        endReason = j.optString("endReason", "USER_LEFT_APP")
-    )
+    //
+    // No mapper: local-only. These rows describe this device's current allowance/enforcement
+    // episodes ("unlocked 5 more minutes"), and the limit configuration they were granted under is
+    // device-local too — the entire app-limit system stays on the phone.
 
     // ---- daily_unlocks ---------------------------------------------------------------
-
-    fun dailyUnlockToJson(e: DailyUnlockEntity): JSONObject = JSONObject()
-        .put("dateString", e.dateString)
-        .put("unlockCount", e.unlockCount)
-        .put("firstUnlockAt", e.firstUnlockAt)
-        .put("lastUnlockAt", e.lastUnlockAt)
-
-    fun dailyUnlockFromCloud(j: JSONObject): DailyUnlockEntity = DailyUnlockEntity(
-        dateString = j.optString("dateString"),
-        unlockCount = j.int("unlockCount", 0),
-        firstUnlockAt = j.lng("firstUnlockAt", 0L),
-        lastUnlockAt = j.lng("lastUnlockAt", 0L)
-    )
+    //
+    // No mapper: daily_unlocks is local-only. Per-day phone unlock counts are general device usage
+    // statistics (§12), not FocusShield activity, so they never leave the device.
 
     // ---- scratch_cards ---------------------------------------------------------------
     //
@@ -512,32 +454,9 @@ object CloudJson {
 
     // ---- daily_app_usage -------------------------------------------------------------
     //
-    // Only the *usage* columns are account-level. `emergencyUsesCount` and `isBypassedForToday`
-    // are per-device enforcement state (how many emergency unlocks this phone has granted today),
-    // so they stay out of the payload entirely — see SyncEngine's merge binding for this table.
-
-    fun dailyAppUsageToJson(e: DailyAppUsageEntity): JSONObject = JSONObject()
-        .put("packageName", e.packageName)
-        .put("dateString", e.dateString)
-        .put("appName", e.appName)
-        .put("usedMillis", e.usedMillis)
-        .put("lastActiveTimestamp", e.lastActiveTimestamp)
-
-    /** Merges a cloud usage row onto a local enforcement row, preserving local-only columns. */
-    fun dailyAppUsageMerge(local: DailyAppUsageEntity?, remote: JSONObject): DailyAppUsageEntity {
-        val packageName = remote.optString("packageName")
-        val dateString = remote.optString("dateString")
-        return DailyAppUsageEntity(
-            packageName = packageName,
-            dateString = dateString,
-            appName = remote.optString("appName", local?.appName ?: packageName),
-            usedMillis = remote.lng("usedMillis", 0L),
-            emergencyUsedMillis = local?.emergencyUsedMillis ?: 0L,
-            emergencyUsesCount = local?.emergencyUsesCount ?: 0,
-            isBypassedForToday = local?.isBypassedForToday ?: false,
-            lastActiveTimestamp = remote.lng("lastActiveTimestamp", 0L)
-        )
-    }
+    // No mapper: local-only. Per-app foreground usage is Android UsageStats-derived data and must
+    // never become cloud history (§12). The local enforcement columns (`emergencyUsesCount`,
+    // `isBypassedForToday`) are device enforcement state for the same reason (§11).
 
     // ---- user_preferences (account-following subset, stored as one jsonb doc) -------
 

@@ -1,631 +1,852 @@
-FOCUSSHIELD — SEPARATE APP USAGE TRACKING FROM APP-LIMIT ALLOWANCE TIMER
+I want you to implement a complete automatic APK update notification and installation system in my existing FocusShield Android app.
 
-IMPORTANT ARCHITECTURAL CHANGE:
+IMPORTANT:
+Do NOT redesign unrelated parts of the app.
+Do NOT remove or break existing FocusShield features.
+First inspect the existing project architecture, package structure, navigation, Profile screen, notification system, permissions, Gradle configuration, and release/version configuration. Then implement this feature using the project's existing architecture and dependencies wherever possible.
 
-FocusShield currently has its own timer/session mechanism for App Limit overlay sessions.
+GOAL:
 
-DO NOT REMOVE, REPLACE, OR REPURPOSE that timer.
+When I publish a new FocusShield APK release on GitHub, the installed FocusShield app should automatically detect that a newer release exists and notify the user.
 
-The existing FocusShield timer has a valid and different responsibility:
+The update system must have THREE entry points:
 
-It represents the amount of time the user has explicitly selected/allowed from the FocusShield App Limit overlay.
+1. Automatic update popup
+2. Android notification
+3. Profile → New Updates section with a red notification dot
 
-Android UsageStatsManager must become the authoritative source for ACTUAL APPLICATION USAGE.
+-----------------------------------
+1. GITHUB RELEASE UPDATE SOURCE
+-----------------------------------
 
-These two concepts MUST remain completely separate.
+My GitHub repository is:
 
-==================================================
-1. TWO DIFFERENT TIME CONCEPTS
-==================================================
+https://github.com/Aniket-Man/FOCUSSHEILD
 
-Implement and enforce this separation:
+Use GitHub Releases as the update source.
 
-A. ACTUAL APP USAGE
-Source:
-Android UsageStatsManager
-
-Meaning:
-How much time the user actually spent with an application in the foreground.
-
-Used for:
-• App Limit "Used" time
-• Daily usage statistics
-• Home statistics
-• Analytics
-• Historical usage
-• Usage charts
-• Cloud analytics/sync
-• Calculating remaining daily app limit
-
-B. FOCUSSHIELD ALLOWANCE / TEMPORARY SESSION
-Source:
-Existing FocusShield App Limit timer/session system
-
-Meaning:
-How much time the user explicitly grants themselves through the FocusShield overlay.
-
-Used for:
-• Overlay countdown
-• Temporary access duration
-• Remaining allowance
-• Session expiration
-• App-limit enforcement
-• Emergency/bypass sessions
-• Triggering the FocusShield blocking overlay
-
-NEVER treat B as A.
-
-==================================================
-2. EXAMPLE
-==================================================
-
-User has:
-
-Daily YouTube limit = 4 hours
-
-Android UsageStatsManager reports:
-
-YouTube actual foreground usage = 3 hours
-
-User opens the FocusShield App Limit overlay and selects:
-
-"30 minutes"
-
-This means:
-
-actualUsage = 3 hours
-
-temporaryAllowance = 30 minutes
-
-It does NOT mean:
-
-actualUsage = 3h 30m
-
-If the user actually spends only 8 minutes on YouTube during that temporary session:
-
-actualUsage increases according to Android's actual foreground usage.
-
-The FocusShield allowance/session timer remains an enforcement mechanism.
-
-Do NOT add the selected 30 minutes directly to actual usage.
-
-==================================================
-3. USAGESTATSMANAGER AS THE AUTHORITY
-==================================================
-
-Use Android UsageStatsManager for the canonical "actual app usage" calculation.
-
-Prefer:
-
-UsageStatsManager.queryAndAggregateUsageStats()
-
-and:
-
-UsageStats.totalTimeInForeground
-
-where appropriate.
-
-Also inspect UsageEvents if required to correctly handle the currently active foreground interval.
-
-Create/use a single repository/domain-level method for canonical usage, conceptually:
-
-getActualUsageToday(packageName): Long
-
-The returned value must represent actual foreground usage.
-
-All UI and analytics that display "app used time" must ultimately use this canonical value.
-
-==================================================
-4. REMOVE DOUBLE COUNTING
-==================================================
-
-Audit and remove any architecture where:
-
-FocusShield timer
-+
-UsageStatsManager
-=
-actual app usage
-
-This is WRONG.
-
-Also avoid:
-
-maxOf(systemUsage, databaseUsage)
-
-as a generic solution if databaseUsage may itself contain incorrectly accumulated FocusShield timer time.
-
-Do not use the FocusShield temporary-session timer as a source for historical actual usage.
-
-Do not add allowance/session duration directly to DailyAppUsageEntity.usedMillis.
-
-==================================================
-5. KEEP THE EXISTING FOCUSSHIELD TIMER
-==================================================
-
-The existing timer must remain functional.
-
-It should continue controlling:
-
-• selected access duration
-• temporary App Limit sessions
-• countdown UI
-• session expiration
-• enforcement
-• emergency access
-• bypass behavior
+The app should check the latest published GitHub Release.
 
 For example:
 
-User selects 30 minutes.
+Current installed version:
+1.0.0
 
-FocusShield starts:
+Latest GitHub release:
+1.0.1
 
-remainingAllowance = 30 minutes
+Then the app detects:
 
-The countdown may decrement while the user is actually using the protected application according to the existing enforcement design.
+"New update available"
 
-When the allowance reaches zero:
+The GitHub latest-release API should be used.
 
-→ trigger existing App Limit blocking behavior.
+IMPORTANT SECURITY REQUIREMENT:
 
-Do NOT remove this functionality merely because UsageStatsManager is now used for actual usage statistics.
+DO NOT embed a GitHub Personal Access Token, secret, or private credential inside the APK.
 
-==================================================
-6. SEPARATE DATA FIELDS
-==================================================
+If the repository remains PRIVATE, do NOT implement an insecure solution by hardcoding a GitHub token into the Android application.
 
-Audit the existing:
+Design the updater so the release metadata/download URL can later be changed to a secure public endpoint/backend if necessary.
 
-DailyAppUsageEntity
-AppLimitSessionEntity
-AppLimitManager
-AppLimitRepository
-AppLimitsViewModel
-DeviceUsageStatsHelper
+If the repository is PUBLIC, use the unauthenticated latest-release API.
 
-and determine which existing fields currently mix these concepts.
+Do not attempt to bypass GitHub authentication or Play Protect.
 
-Refactor where necessary so the data model has clear semantics.
+-----------------------------------
+2. VERSION DETECTION
+-----------------------------------
 
-Conceptually distinguish:
+Use the Android application's actual:
 
-systemForegroundUsageMillis
-    = actual usage reported by Android
+versionName
+versionCode
 
-temporaryAllowanceMillis
-    = user-selected allowed duration
+from Gradle/package metadata.
 
-remainingAllowanceMillis
-    = remaining temporary access duration
+Compare the installed version against the latest GitHub release.
 
-emergencyUsageMillis
-    = emergency/bypass usage if applicable
+The system must correctly handle versions such as:
 
-enforcementState
-    = local state used by App Limit enforcement
+1.0.0
+1.0.1
+1.1.0
+2.0.0
 
-Do not necessarily create all of these fields if the existing architecture can represent them cleanly.
+Do NOT simply compare strings alphabetically.
 
-The important requirement is semantic separation.
+Prefer a robust semantic-version comparison.
 
-==================================================
-7. DAILY APP LIMIT CALCULATION
-==================================================
+The GitHub release should contain a tag such as:
 
-The daily limit calculation should conceptually be:
+v1.0.1
 
-actualUsageToday
-    = UsageStatsManager actual foreground usage
+The updater should safely normalize:
 
-remainingDailyLimit
-    = dailyLimit - actualUsageToday
+v1.0.1 → 1.0.1
 
-Example:
+before comparison.
 
-Daily limit = 4h
-Actual Android usage = 3h
+If the installed version is equal to or newer than the latest release:
 
-Remaining = 1h
+Do nothing.
 
-If the user opens a FocusShield temporary session for 30 minutes, do NOT immediately change:
+If the latest release is newer:
 
-actualUsageToday
+Mark an update as available.
 
-from 3h to 3h30m.
+-----------------------------------
+3. RELEASE APK ASSET
+-----------------------------------
 
-Only actual application foreground usage changes actualUsageToday.
+The updater should locate the APK attached to the GitHub Release.
 
-==================================================
-8. REAL-TIME ENFORCEMENT
-==================================================
+Expected asset example:
 
-Important:
+FocusShield-v1.0.1.apk
 
-UsageStatsManager is the authoritative source for the user's actual usage statistic.
+or
 
-However, UsageStatsManager may not always provide instantaneous real-time updates.
+app-release.apk
 
-Therefore, preserve the existing foreground detection/enforcement mechanism where useful for real-time App Limit enforcement.
+Do not assume an arbitrary asset is the APK.
 
-Use:
+Prefer an asset whose filename ends with:
 
-• Accessibility foreground-package detection
-• existing FocusShield timer/session logic
-• UsageStatsManager
+.apk
 
-for their appropriate responsibilities.
+The update model should contain at least:
 
-DO NOT make the existing enforcement timer responsible for historical usage accounting.
+- versionName
+- versionCode if available
+- release tag
+- release title
+- release notes/body
+- APK download URL
+- release page URL
+- published date if available
 
-The architecture should be:
+If no APK asset exists:
 
-UsageStatsManager
-        ↓
-actual usage calculation
-        ↓
-statistics / daily limit / analytics
+Do not show an installation button.
 
-Existing FocusShield timer
-        ↓
-temporary allowance
-        ↓
-real-time enforcement
-        ↓
-block overlay
+Show an appropriate message such as:
 
-==================================================
-9. FOREGROUND VALIDATION
-==================================================
+"Update is available, but the APK is not available for download yet."
 
-When calculating actual usage, correctly handle:
+-----------------------------------
+4. AUTOMATIC CHECKING
+-----------------------------------
 
-• app enters foreground
-• app leaves foreground
-• switching to another application
-• Home screen
-• Settings
-• notification shade
-• keyboard/input method
-• screen off
-• device lock
-• screen on
-• split-screen
-• multi-window
-• floating windows
-• background playback
+Implement automatic update checking when appropriate.
 
-Do not count an application simply because its process is alive.
+Check:
 
-Do not count background media playback as foreground usage.
+- when the app starts/resumes
+- when the user opens the app after a significant period
+- when internet connectivity becomes available
 
-Use Android's usage data rather than extending an internal wall-clock timer indefinitely.
+Do NOT make GitHub requests continuously.
 
-==================================================
-10. EXISTING DATABASE DATA
-==================================================
+Avoid excessive API requests.
 
-Audit existing DailyAppUsageEntity records.
+Use a sensible local cache/cooldown.
 
-Determine whether:
+For example:
 
-usedMillis
+Do not check GitHub repeatedly every few seconds.
 
-currently contains:
+Store:
 
-A. Android system usage
-B. FocusShield timer usage
-C. a mixture of both
+lastUpdateCheckTime
+latestKnownVersion
+updateAvailable
 
-If it contains a mixture, migrate/reconcile it safely.
+locally.
 
-Do NOT blindly preserve known incorrect accumulated values.
+The exact implementation should fit the existing project architecture.
 
-For current-day actual usage, Android UsageStatsManager should be able to correct stale/overcounted FocusShield values.
+-----------------------------------
+5. AUTOMATIC UPDATE NOTIFICATION
+-----------------------------------
+
+When a new release is detected, create an Android notification.
 
 Example:
 
-Existing database:
-YouTube = 5h
+Title:
+"FocusShield update available"
 
-Android UsageStatsManager:
-YouTube = 3h
+Body:
+"FocusShield v1.0.1 is now available."
 
-If the 5h was produced by the old incorrect FocusShield timer accumulation, do not continue displaying 5h.
+The notification should open the FocusShield update screen when tapped.
 
-Reconcile it to the authoritative actual usage model.
+Do not create duplicate notifications every time the app starts.
 
-Do not destroy unrelated App Limit configuration.
+Only notify when a new update is newly detected or when appropriate according to the cached state.
 
-==================================================
-11. UI CONSISTENCY
-==================================================
+Use the existing notification infrastructure if the project already has one.
 
-Audit every location that displays app usage.
+Respect Android notification permission requirements.
 
-Examples:
+-----------------------------------
+6. AUTOMATIC POPUP
+-----------------------------------
 
-• App Limits screen
-• App Limit detail screen
-• Home screen
-• Analytics
-• Statistics
-• History
-• charts
-• progress indicators
-• daily usage cards
-• cloud analytics
+When a new update is detected while the user is using FocusShield, show an update dialog/popup.
 
-All "actual usage" displays must use the same canonical usage repository/calculation.
+Example:
 
-There must not be:
+--------------------------------
+FocusShield Update Available
 
-App Limits → UsageStatsManager
+A new version of FocusShield is available.
 
-Home → internal timer
+v1.0.1
 
-Analytics → database accumulator
+[Release Notes]
 
-These must all represent the same actual-usage definition.
+New features...
+Bug fixes...
+Performance improvements...
 
-==================================================
-12. CLOUD SYNC
-==================================================
+[Download Update]
+[Later]
+--------------------------------
 
-Only synchronize ACTUAL APP USAGE data for analytics/statistics according to the existing Supabase architecture.
+The popup must NOT appear repeatedly every time the user navigates between screens.
 
-Do NOT synchronize the temporary FocusShield countdown as if it were actual application usage.
+Once the user selects:
 
-Cloud data should distinguish:
+"Later"
 
-ACTUAL_USAGE / ANALYTICS
+the popup should be suppressed according to a sensible local state/cooldown.
 
-from:
+However, the update must remain visible in:
 
-LOCAL_ENFORCEMENT_STATE
+Profile → New Updates
 
-Temporary enforcement state such as:
+and the notification system.
 
-• remaining countdown
-• current active overlay session
-• current enforcement state
+The user must always be able to manually access the update later.
 
-should generally remain local/device-specific unless the existing product explicitly requires otherwise.
+-----------------------------------
+7. PROFILE SECTION
+-----------------------------------
 
-Meaningful historical usage required for cross-device statistics should be synchronized.
+Modify the existing Profile screen.
 
-==================================================
-13. OFFLINE BEHAVIOR
-==================================================
+Add an option:
 
-FocusShield must continue working offline.
+"New Updates"
 
-If UsageStatsManager is available:
+or:
 
-→ calculate actual usage locally.
+"App Updates"
 
-If network is unavailable:
+Use wording that fits the existing FocusShield UI.
 
-→ App Limit enforcement still works.
+When an update is available:
 
-→ actual usage statistics still work.
+Show a small RED notification dot/badge on this profile option.
 
-→ cloud synchronization waits until connectivity returns.
+Example:
 
-The cloud must never be required for App Limit enforcement.
+New Updates    ●
 
-==================================================
-14. REQUIRED TEST CASES
-==================================================
+The red dot must disappear when the update has been successfully installed OR when the user explicitly marks the update as read, depending on the final architecture.
+
+IMPORTANT:
+
+If the user simply presses "Later", the red dot should remain because the update is still available.
+
+-----------------------------------
+8. UPDATE SCREEN
+-----------------------------------
+
+When the user taps:
+
+Profile → New Updates
+
+open a dedicated update screen.
+
+Design it to match the existing FocusShield UI.
+
+Show:
+
+- Current version
+- Latest version
+- "New update available"
+- Release title
+- Release notes
+- Published date if available
+- APK download/install button
+
+Example:
+
+FocusShield Update
+
+Current version
+v1.0.0
+
+Latest version
+v1.0.1
+
+What's New
+
+• Improved focus session stability
+• Fixed blocking issues
+• Improved performance
+
+[Download & Install]
+
+-----------------------------------
+9. DOWNLOAD FLOW
+-----------------------------------
+
+When the user presses:
+
+"Download & Install"
+
+download the APK from the release asset URL.
+
+Use Android's proper APK installation mechanism.
+
+Do NOT attempt to silently install or replace the application.
+
+The Android operating system must handle the installation.
+
+The app should correctly handle:
+
+- download progress
+- download failure
+- network failure
+- cancelled download
+- invalid/unavailable APK
+- insufficient storage
+- installation permission requirements
+
+After download completes, launch the Android package installer using the appropriate secure Android mechanism such as FileProvider/content URI.
+
+Do NOT expose a raw file:// URI.
+
+Do NOT use unsafe URI handling.
+
+-----------------------------------
+10. UNKNOWN APP INSTALLATION
+-----------------------------------
+
+If Android requires permission to install apps from this source:
+
+Detect the condition.
+
+Explain it clearly to the user.
+
+Provide the appropriate Android system settings route where supported.
+
+Example:
+
+"Android needs permission to install updates downloaded from FocusShield."
+
+[Allow Installation]
+
+Do NOT bypass Android security restrictions.
+
+Do NOT attempt to disable Play Protect.
+
+Do NOT use hidden installation techniques.
+
+The Android package installer remains responsible for installation.
+
+-----------------------------------
+11. DOWNLOAD UI
+-----------------------------------
+
+During download show a proper state:
+
+Downloading update...
+
+0%
+25%
+50%
+75%
+100%
+
+Use the existing FocusShield UI components where possible.
+
+After download:
+
+"Download complete"
+
+then:
+
+"Install Update"
+
+or automatically launch the Android installer if that is the intended UX.
+
+Avoid downloading the same APK repeatedly.
+
+Cache the downloaded APK safely.
+
+Clean up obsolete APK files when appropriate.
+
+-----------------------------------
+12. RELEASE NOTES
+-----------------------------------
+
+Read release notes from the GitHub Release body.
+
+Display them inside the update screen/dialog.
+
+Do not display raw Markdown syntax if it can be reasonably converted into readable UI.
+
+For example:
+
+GitHub:
+
+## What's New
+- Improved blocking
+- Fixed bugs
+
+Display:
+
+What's New
+
+• Improved blocking
+• Fixed bugs
+
+Do not download arbitrary HTML and render it as trusted application UI.
+
+-----------------------------------
+13. UPDATE STATE
+-----------------------------------
+
+Create a clear update state model.
+
+Possible states:
+
+NoUpdate
+Checking
+UpdateAvailable
+Downloading
+Downloaded
+Installing
+Error
+
+Include appropriate error messages.
+
+The update state should survive normal screen recreation.
+
+Do not rely only on Compose UI state.
+
+Persist the important update metadata locally.
+
+-----------------------------------
+14. ARCHITECTURE
+-----------------------------------
+
+Follow the existing FocusShield architecture.
+
+Prefer:
+
+Repository
+    ↓
+UpdateChecker
+    ↓
+UpdateRepository/API
+    ↓
+ViewModel
+    ↓
+Compose UI
+
+Do not place GitHub networking directly inside Composables.
+
+Do not put business logic inside ProfileScreen.
+
+Create reusable components where appropriate.
+
+Example conceptual structure:
+
+update/
+    UpdateInfo.kt
+    UpdateState.kt
+    UpdateRepository.kt
+    GitHubReleaseRepository.kt
+    UpdateChecker.kt
+    UpdateDownloadManager.kt
+
+Adapt names/package locations to the existing project.
+
+Do NOT create duplicate networking infrastructure if the project already has a suitable HTTP layer.
+
+Reuse existing networking code/dependencies where possible.
+
+-----------------------------------
+15. PRIVATE GITHUB REPOSITORY
+-----------------------------------
+
+This is extremely important.
+
+The repository may currently be PRIVATE.
+
+DO NOT put:
+
+GitHub PAT
+GitHub password
+GitHub OAuth secret
+client secret
+
+inside the APK.
+
+Anything embedded inside an Android APK can potentially be extracted.
+
+If the current private repository prevents secure unauthenticated release checking, implement the updater architecture in a way that allows a future secure endpoint.
+
+For now, clearly isolate the GitHub release source behind an interface such as:
+
+UpdateRepository
+
+so the source can later become:
+
+GitHub public release API
+or
+FocusShield backend update API
+
+without rewriting the UI.
+
+-----------------------------------
+16. UPDATE CHECK FAILURE
+-----------------------------------
+
+If GitHub/network is unavailable:
+
+DO NOT show an error popup every time.
+
+The app should continue working normally.
+
+Use cached update information when available.
+
+Only show a meaningful error when the user manually opens the update screen or explicitly tries to check again.
+
+Example:
+
+"Couldn't check for updates."
+
+[Try Again]
+
+-----------------------------------
+17. MANUAL CHECK
+-----------------------------------
+
+Inside:
+
+Profile → New Updates
+
+provide:
+
+"Check for updates"
+
+This allows the user to manually trigger a check.
+
+Show:
+
+"You're using the latest version."
+
+when no update exists.
+
+If an update exists:
+
+show the update information.
+
+-----------------------------------
+18. RED DOT BEHAVIOR
+-----------------------------------
+
+Implement this carefully.
+
+No update:
+
+New Updates
+
+Update available:
+
+New Updates  ●
+
+User presses Later:
+
+New Updates  ●
+
+User opens New Updates:
+
+The update remains available.
+
+Only remove the dot when:
+
+- the update is installed successfully
+OR
+- the user explicitly marks the update as read, if we decide to support that behavior.
+
+Do NOT remove the update simply because the user opened the page.
+
+-----------------------------------
+19. MULTIPLE RELEASES
+-----------------------------------
+
+Suppose the user has:
+
+v1.0.0 installed.
+
+GitHub has:
+
+v1.0.1
+v1.0.2
+v1.1.0
+
+The app should show the newest applicable release:
+
+v1.1.0
+
+It should not force the user to install every intermediate release.
+
+Release notes should correspond to the latest available release.
+
+-----------------------------------
+20. RELEASE SECURITY / VALIDATION
+-----------------------------------
+
+Before installation, validate the downloaded file as much as practical.
+
+At minimum:
+
+- APK extension
+- successful HTTP response
+- non-empty file
+- reasonable content type/response
+- package/application identity where feasible
+- versionCode/versionName where feasible
+
+Do not install a file that obviously isn't an APK.
+
+If practical, support checksum verification using a SHA-256 checksum published with the release.
+
+If checksum verification is implemented, clearly document where the expected checksum comes from.
+
+Do NOT invent a checksum.
+
+-----------------------------------
+21. PLAY PROTECT / ANDROID SECURITY
+-----------------------------------
+
+Do not implement anything intended to bypass:
+
+- Google Play Protect
+- Android package installation restrictions
+- Android permission systems
+- security warnings
+
+FocusShield should work with Android's normal security model.
+
+The updater should use official Android installation APIs.
+
+-----------------------------------
+22. UI QUALITY
+-----------------------------------
+
+The update UI should feel like a native part of FocusShield.
+
+Use the existing:
+
+- typography
+- spacing
+- cards
+- icons
+- colors
+- dark/light theme
+- navigation patterns
+
+Do not create a completely unrelated visual style.
+
+The Profile red dot should be small and polished, not a huge badge.
+
+The update dialog should be clean and modern.
+
+-----------------------------------
+23. TESTING
+-----------------------------------
+
+After implementation, test these cases:
 
 TEST 1:
-
-YouTube actual usage:
-3 hours
-
-FocusShield temporary session:
-30 minutes
+Installed = 1.0.0
+GitHub = 1.0.0
 
 Expected:
-
-Actual usage remains approximately 3 hours until the user actually uses YouTube.
-
-NOT 3h30m.
-
---------------------------------------------------
+No update.
 
 TEST 2:
-
-User selects 30-minute FocusShield session.
-
-User uses YouTube for only 8 minutes.
+Installed = 1.0.0
+GitHub = 1.0.1
 
 Expected:
-
-Actual usage increases by approximately 8 minutes.
-
-The 30-minute selection itself does not become usage.
-
---------------------------------------------------
+Update detected.
+Red dot appears.
+Notification appears.
+Popup appears according to cooldown/state.
 
 TEST 3:
-
-User selects 30 minutes.
-
-Leaves YouTube after 5 minutes.
+User presses Later.
 
 Expected:
-
-Actual usage increases only according to actual foreground usage.
-
-The FocusShield allowance/enforcement state is handled independently.
-
---------------------------------------------------
+Popup closes.
+Red dot remains.
+Update screen still shows update.
 
 TEST 4:
-
-YouTube is playing audio/video in the background while Chrome is foreground.
+User opens Profile → New Updates.
 
 Expected:
-
-YouTube foreground usage does not continue increasing merely because the process/media session remains active.
-
---------------------------------------------------
+Latest release details and release notes appear.
 
 TEST 5:
-
-YouTube foreground for 10 minutes.
-
-Chrome foreground for 20 minutes.
-
-YouTube foreground again for 10 minutes.
+User presses Download & Install.
 
 Expected:
-
-YouTube actual usage ≈ 20 minutes.
-
-NOT 40 minutes.
-
---------------------------------------------------
+APK downloads.
+Progress is shown.
+Android package installer opens securely.
 
 TEST 6:
-
-Screen off for 30 minutes while YouTube process remains alive.
+Network unavailable.
 
 Expected:
-
-No 30-minute foreground usage increase.
-
---------------------------------------------------
+App continues working normally.
+No repeated annoying error popups.
 
 TEST 7:
+Multiple releases exist.
 
-Android UsageStatsManager reports 3h.
-
-Old FocusShield database says 5h.
-
-Determine whether the 5h is old internal-timer accumulation.
-
-If yes:
-
-reconcile actual usage toward approximately 3h.
-
---------------------------------------------------
+Expected:
+Newest release is selected.
 
 TEST 8:
-
-Restart FocusShield.
+Release has no APK asset.
 
 Expected:
-
-Actual usage does not reset or double.
-
-Temporary enforcement session is restored according to its existing session-persistence design.
-
---------------------------------------------------
+Update information is shown but installation is unavailable.
 
 TEST 9:
-
-Device reboot.
+User opens app repeatedly.
 
 Expected:
+No duplicate notification spam.
+No repeated popup spam.
 
-Usage statistics remain consistent with Android UsageStatsManager.
+TEST 10:
+After successful installation.
 
-App Limit configuration remains intact.
+Expected:
+Old update state is cleared when the newly installed version is detected.
 
-==================================================
-15. DO NOT BREAK EXISTING FEATURES
-==================================================
+-----------------------------------
+24. IMPORTANT VERSIONING
+-----------------------------------
 
-Preserve:
+Make sure the existing Gradle version configuration is compatible with this updater.
 
-• App Limits
-• temporary access sessions
-• overlay UI
-• countdown timer
-• emergency sessions
-• bypass-for-today
-• strict mode
-• blocking overlay
-• reminders
-• Accessibility Service
-• Room
-• existing analytics
-• Supabase synchronization
-• offline functionality
+For example:
 
-Do not remove the existing FocusShield timer.
+versionCode = 1
+versionName = "1.0.0"
 
-Do not replace the existing enforcement mechanism with UsageStatsManager.
+Next release:
 
-Instead:
+versionCode = 2
+versionName = "1.0.1"
 
-REFACTOR THE SYSTEM SO THAT:
+Future releases must increment versionCode.
 
-UsageStatsManager
-= ACTUAL USAGE SOURCE
+Do not automatically modify versionCode every time the app builds.
 
-Existing FocusShield Timer
-= USER-SELECTED ALLOWANCE / ENFORCEMENT TIMER
+-----------------------------------
+25. FINAL IMPLEMENTATION REQUIREMENT
+-----------------------------------
 
-These must never be treated as the same measurement.
+Before changing code:
 
-==================================================
-16. FINAL ARCHITECTURE
-==================================================
+1. Inspect the entire existing update/version configuration.
+2. Inspect Profile navigation.
+3. Inspect existing notification implementation.
+4. Inspect existing networking architecture.
+5. Inspect AndroidManifest.
+6. Inspect Gradle configuration.
+7. Inspect existing permission handling.
+8. Identify whether the GitHub repository is currently public/private from the project's intended architecture, but do not add secrets.
+9. Determine the cleanest implementation using existing dependencies.
 
-The final architecture must conceptually be:
-
-                 APP LIMIT SYSTEM
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-          ▼                         ▼
-   ACTUAL APP USAGE          TEMPORARY ACCESS
-          │                         │
-          ▼                         ▼
- UsageStatsManager          FocusShield Timer
-          │                         │
-          ▼                         ▼
- Daily Usage               Remaining Allowance
- Statistics                Enforcement
- Analytics                 Overlay Countdown
- Cloud Analytics           Block Trigger
-          │
-          ▼
- Supabase historical
- analytics synchronization
-
-Do not merge these two branches.
-
-==================================================
-17. FINAL REPORT
-==================================================
+Then implement the complete update system.
 
 After implementation, report:
 
-1. Exact root cause of the current 3h vs 5h discrepancy.
-2. Which files contained the old usage calculation.
-3. Which files were changed.
-4. How UsageStatsManager is now used.
-5. How the existing FocusShield timer remains used.
-6. How actual usage and temporary allowance are separated.
-7. How daily App Limits are calculated.
-8. How real-time enforcement works.
-9. How old incorrect usage is reconciled.
-10. How cloud analytics represents actual usage.
-11. Tests performed.
-12. Any Android/OEM limitations.
+- Files created
+- Files modified
+- Update-check architecture
+- GitHub API/release handling
+- Notification behavior
+- Popup behavior
+- Profile red-dot behavior
+- APK download/install flow
+- Security considerations
+- Any setup still required
+- Exact steps for publishing the first GitHub release
 
-CRITICAL REQUIREMENT:
+IMPORTANT:
+Do not make unrelated changes to FocusShield.
+Do not remove existing functionality.
+Do not hardcode secrets.
+Do not bypass Android security.
+Do not silently install APKs.
+Build the project and fix compilation errors before considering the task complete.VERSION MANAGEMENT — IMPORTANT:
 
-NEVER add the user's selected FocusShield allowance directly to actual app usage.
+Do NOT automatically increment versionCode or versionName on every build.
 
-"TIME USER IS ALLOWED TO USE THE APP"
+The signed APK must use the versionCode and versionName defined in app/build.gradle.kts.
 
-and
+Version numbers are manually/release-controlled.
 
-"TIME USER ACTUALLY USED THE APP"
+For example:
 
-are two different measurements and must remain separate throughout Room, repositories, ViewModels, UI, analytics, and Supabase synchronization.
+First release:
+versionCode = 1
+versionName = "1.0.0"
+
+Second release:
+versionCode = 2
+versionName = "1.0.1"
+
+Third release:
+versionCode = 3
+versionName = "1.1.0"
+
+The update checker must read the actual installed application version from Android/BuildConfig and compare it with the latest GitHub Release.
+
+Do not derive the GitHub version from the APK filename alone.
+
+Do not change the project's version automatically during normal debug or release builds.
+
+When the user creates a new release, they will intentionally update versionCode/versionName, build the signed APK, and upload that APK to the corresponding GitHub Release.Create the next FocusShield GitHub release.
+
+1. Inspect the current versionCode and versionName.
+2. Determine the next appropriate version.
+3. Update versionCode/versionName only for this release.
+4. Build the signed release APK using the existing signing configuration.
+5. Verify the APK builds successfully.
+6. Create the corresponding GitHub tag, for example v1.0.1.
+7. Create a GitHub Release using that tag.
+8. Upload the signed APK as the release asset.
+9. Generate concise release notes based only on the changes actually included in this release.
+10. Publish the release.
+
+Do not expose, print, commit, or modify any signing passwords, keystores, GitHub tokens, or other secrets.
+Do not create a release if the signed APK build fails.
+Before publishing, show me the final versionCode, versionName, tag name, APK filename, and release notes for confirmation.

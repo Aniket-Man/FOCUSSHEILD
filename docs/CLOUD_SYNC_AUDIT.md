@@ -13,7 +13,8 @@ Every ❌ in this audit is now implemented, and the live Supabase project carrie
   `eventType`/`source`, domain/channel/keyword/rule/session/subject/topic/device columns) and
   bound to sync; Room migrated 12 → 13 non-destructively, legacy rows backfilled with
   `eventId = 'legacy-<id>'` and a best-guess type.
-- `scratch_cards` and `daily_unlocks` bound to sync.
+- `scratch_cards` bound to sync. (`daily_unlocks` was bound here too, then deliberately unbound —
+  see the 2026-09-12 update at the foot of this file.)
 - `claimedRewardIds`, `blockedNotificationPackages`, `alwaysBlockedNotificationPackages` moved
   into `accountPreferencesJson`.
 - YouTube Study Mode watch time is now captured (`YouTubeStudyDwellTracker` +
@@ -29,6 +30,11 @@ decision above was walked back for them specifically: `app_limits`, `daily_app_u
 `app_limit_sessions` were dropped from Supabase (migration `drop_app_limit_sync_tables`) and
 removed from `SYNCED_ROOM_TABLES`. Room still owns all three tables and the App Limits feature is
 unaffected — it simply no longer syncs. Supabase is now **16 tables**.
+
+> ⚠️ **Superseded.** A 2026-09-12 revision briefly put `app_limits` back into sync; that was
+> reverted the same day. The App Limit system is device-local in its entirety — the configuration
+> included. The legacy Supabase table is left in place but is no longer written, read or restored.
+> See the 2026-09-12 update at the foot of this file.
 
 Two consequences worth recording:
 
@@ -57,7 +63,7 @@ Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived a
 | Streak (current) | `streakDays` | `StreakCalculator.computeCurrentStreak` | `SessionDao` | `session_records` | ✅ |
 | Weekly bars / labels | `weeklyBars`, `weeklyBarLabels` | `getPeriodAnalyticsFlow(LAST_7_DAYS).dailyChart` | `SessionDao` | `session_records` | ✅ |
 | Today's plan progress | `planCompletionPercentage` | `StudyPlanRepository.getTodayPlansFlow` | `StudyPlanDao` | `study_plans` | ✅ |
-| **Pending reward badge** | `pendingRewardBadge` | `RewardBadge.isUnlocked(allTimeMillis)` **+ `prefs.claimedRewardIds`** | — / DataStore | — | ⚠️ unlock ✅ (from `session_records`), **claim state ❌** |
+| **Pending reward badge** | `pendingRewardBadge` | `RewardBadge.isUnlocked(allTimeMillis)` **+ `prefs.claimedRewardIds`** | — / DataStore | — | ✅ unlock derived from `session_records`; claim state ✅ in `accountPreferencesJson` |
 | Total screen time | `totalScreenTime` | `DeviceUsageStatsHelper` (`UsageStatsManager`) | — | ⚙️ OS query | ⚙️ correctly local |
 | Focus : screen-time ratio | `focusToScreenRatioPercentage` | computed from the two above | — | ⚙️ derived | ⚙️ correctly local |
 | User name / avatar | `userName`, `userAvatarPreset`, `userPhotoUri` | `preferencesFlow` | DataStore | `profiles` | name+preset ✅, `userPhotoUri` ⚙️ device path |
@@ -84,7 +90,7 @@ Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived a
 
 | UI statistic | DAO | Entity | Cloud table |
 |---|---|---|---|
-| Limit configuration (minutes, strict, reminders, emergency allowance) | `AppLimitDao` | `app_limits` | ⚙️ device-local (reversal above) |
+| Limit configuration (minutes, strict, reminders, emergency allowance) | `AppLimitDao` | `app_limits` | ⚙️ device-local — the whole App Limit system is local |
 | **Today's usage progress bar / used minutes** | `DailyAppUsageDao` | `daily_app_usage` | ⚙️ device-local |
 | **Emergency uses consumed / bypassed-today state** | `DailyAppUsageDao` | `daily_app_usage` | ⚙️ device-local |
 | **Limit session history** (start/end, selected vs actual, end reason) | `AppLimitSessionDao` | `app_limit_sessions` | ⚙️ device-local |
@@ -93,10 +99,10 @@ Legend: ✅ already cloud-synced · ❌ **no cloud support** · ⚙️ derived a
 
 | UI statistic | Repository | DAO | Entity | Cloud table |
 |---|---|---|---|---|
-| **Today's phone unlocks** (widget) | `DailyUnlockRepository.getTodayUnlock()` | `DailyUnlockDao` | `daily_unlocks` | ❌ |
-| **Average unlocks / day** (widget) | `DailyUnlockRepository.getAverageUnlocks` | `DailyUnlockDao` | `daily_unlocks` | ❌ |
-| **Scratch card reveal** (session completion screen) | `ScratchCardRepository` | `ScratchCardDao` | `scratch_cards` | ❌ |
-| **Rewards claimed `n / 11`** (Profile) | `prefs.claimedRewardIds` | — | DataStore | ❌ |
+| **Today's phone unlocks** (widget) | `DailyUnlockRepository.getTodayUnlock()` | `DailyUnlockDao` | `daily_unlocks` | ⚙️ local only — general device usage (§12) |
+| **Average unlocks / day** (widget) | `DailyUnlockRepository.getAverageUnlocks` | `DailyUnlockDao` | `daily_unlocks` | ⚙️ local only — general device usage (§12) |
+| **Scratch card reveal** (session completion screen) | `ScratchCardRepository` | `ScratchCardDao` | `scratch_cards` | ✅ `scratch_cards` |
+| **Rewards claimed `n / 11`** (Profile) | `prefs.claimedRewardIds` | — | DataStore | ✅ `accountPreferencesJson` |
 
 ### 1.5 Notification blocking
 
@@ -177,3 +183,107 @@ total screen time, focus:screen ratio, per-app foreground time read from `UsageS
 apps *the user has limited*. Only FocusShield's own app-limit usage rows get persisted.
 
 **Never uploaded (§22):** notification title/text/sender, unrelated device telemetry, secrets.
+
+---
+
+## Update (2026-09-12) — §1 cloud boundary re-derived
+
+The governing principle for the whole boundary is §1: *cloud stores what the student does with
+FocusShield, not everything the student does on their phone.* Applying it cuts one way: the entire
+App Limit system, and the general device-usage tables beside it, stay on the phone.
+
+An earlier revision of this section put `app_limits` back into sync on the grounds that the spec
+names the limit configuration as restorable. That was wrong and it is reverted here. An app limit is
+an instruction about what *this handset* should enforce for whoever is holding it — "YouTube gets 2
+hours a day on this phone" — so a second device must never inherit it. The whole system is local:
+
+| Table | Cloud | Why |
+|---|---|---|
+| `app_limits` | ⚙️ local | the configuration itself: daily limit, enabled flag, strict-mode preference, reminder setting, emergency-allowance count, discipline streak |
+| `daily_app_usage` | ⚙️ local | Android UsageStats foreground time — general device usage |
+| `app_limit_sessions` | ⚙️ local | per-second enforcement state |
+| `daily_unlocks` | ⚙️ local | per-day unlock counts — equally general device usage |
+
+None of the four is registered in `SYNCED_ROOM_TABLES`, none has a `CloudJson` mapper, none has a
+`CloudBulkDao` read, and none has a `SyncEngine` binding. That is deliberately stronger than hiding
+them at the edge: there is no serialization to filter, so there is no code path by which a limit row
+can enter the outbox, a snapshot, or the wire in the first place. Emergency-use state is local for
+the same reason — a second device must not inherit another device's consumed emergency uses.
+
+What *does* follow the account is the **study-session** block list, `blocked_apps` — the apps the
+student selects in Start Study Session → Block Apps. It shares Android package names with the
+app-limit system, but the two are separate features: one is account configuration, the other is a
+per-device enforcement instruction, and they have separate persistence.
+
+**Legacy table left in place (§9).** `public.app_limits` still exists in the live project (0 rows)
+and is still created and protected by `cloud_schema.sql`, with RLS and owner-only policies intact.
+It was not dropped: removing a production table to tidy a schema is not worth the risk of destroying
+data. It is documented there as legacy/non-synced — no new rows are written, no rows are read — and
+can be dropped by hand once the operator is satisfied it is expendable.
+
+**`daily_unlocks` is unbound.** It was bound to sync on 2026-09-10. Per-day phone unlock counts are
+general device usage statistics under §12, so it was removed from `SYNCED_ROOM_TABLES`;
+`DailyUnlockRepository` is now explicitly local-only. The live Supabase table and its 4 rows are
+left in place — dropping a table holding data is a destructive, outward-facing step and has not
+been taken.
+
+**Achievements carry an unlock instant, derived not stored.** §6 asks for "unlock timestamp" and a
+guarantee of "no duplicate achievement records". Storing one would have meant re-creating it on
+reinstall — the exact mechanism that duplicates achievement rows. Instead
+`RewardBadge.deriveUnlockTimes()` walks the synced `session_records` chronologically and computes
+the precise crossing instant for each badge. Session history stays the single source of truth (§4);
+every device derives the same answer; a re-sync cannot double-count.
+
+**Reward badges redesigned (§9/§19).** `BadgeEmblemArt` paints a layered emblem (offset drop
+shadow, gradient face, clipped shading wash, clipped specular highlight, rim bevel) and the section
+now follows the §19 hierarchy: progress HEADER → tiered ACHIEVEMENT SECTIONS → BADGE → scratch card.
+`RewardBadgeCard` is the reusable `(achievement, state, progress, reward)` component §9 asks for.
+Infinite pulse animations now compose only for a claimable badge, not for every unlocked one.
+
+**Known gap, unchanged:** `blockedNotificationsCount` remains a mutable DataStore counter and the
+only record for the "silenced today" figure (§2/§9).
+
+---
+
+## §21 Final audit (2026-09-12)
+
+Verified against the tree at commit `4ae847d` + the working changes described above. ✅ = inspected
+in source; the compile is clean (`:app:compileDebugKotlin` BUILD SUCCESSFUL, 0 errors).
+
+| # | Check | Status | Evidence |
+|---|---|---|---|
+| 1 | Session history in cloud | ✅ | `session_records`, `PullMode.HISTORY`, in `SYNCED_ROOM_TABLES` |
+| 2 | Study time calculable from session history | ✅ | `AnalyticsRepository` — every total is `sumOf { actualDurationMillis }` |
+| 3 | No manual total counter as source of truth | ✅ | no persisted lifetime total exists anywhere; all totals derived |
+| 4 | Achievements in cloud | ✅ | derived from synced `session_records` via `deriveUnlockTimes` |
+| 5 | Achievement progress survives device changes | ✅ | derivation is a pure function of synced history — same on every device |
+| 6 | Rewards in cloud | ✅ | `scratch_cards` (HISTORY) + `claimedRewardIds` in `accountPreferencesJson` |
+| 7 | Scratch rewards survive logout/reinstall/device change | ✅ | `scratch_cards` is a synced HISTORY table |
+| 8 | Scratch card reveals progressively | ✅ | per-touch `drawPath(..., BlendMode.Clear)` over an offscreen layer |
+| 9 | Scratch text not hidden until fully scratched | ✅ | `DEFAULT_REVEAL_THRESHOLD` + `onScratchProgress` |
+| 10 | Reward badges substantially redesigned | ✅ | `BadgeEmblemArt` 5-pass render; `RewardBadgeCard`; §19 hierarchy |
+| 11 | Profile pictures upload to private storage | ✅ | `ProfileImageUploader` — private bucket, `user_id`-scoped path |
+| 12 | Final user-selected crop preserved | ✅ | `ImageCropDialog` produces the cropped bitmap that is uploaded |
+| 13 | Same avatar framing on another device | ✅ | the uploaded object *is* the cropped result, not the original |
+| 14 | Blocked-app configuration syncs | ✅ | `blocked_apps` — the study-session block list |
+| 15 | **App-limit configuration does NOT sync** | ✅ | no mapper, no bulk read, no binding — see the 2026-09-12 update |
+| 16 | Persistent preferences sync | ✅ | `user_preferences` document |
+| 17 | Schedules/plans/subjects/topics sync | ✅ | `focus_schedules`, `study_plans`, `study_subjects`, `study_topics` |
+| 18 | Blocking telemetry syncs where appropriate | ✅ | `blocked_attempts`, reworked to a real event model |
+| 19 | General app-usage history does NOT sync | ✅ | no mapper exists in `CloudJson` |
+| 20 | `daily_app_usage` does NOT sync | ✅ | absent from `SYNCED_ROOM_TABLES` |
+| 21 | UsageStatsManager stays device-local | ✅ | `DeviceUsageStatsHelper` is read-on-device only |
+| 22 | Allowance time NOT added to actual app usage | ✅ | `AppLimitManager`: actual usage comes from UsageStats, never the FocusShield timer |
+| 23 | Study timer NOT confused with phone usage | ✅ | same split; `AppLimitSessionEntity` is a separate table from `DailyAppUsageEntity` |
+| 24 | Offline changes continue working | ✅ | outbox (`SyncTracker`) is written on every local edit |
+| 25 | Pending changes sync on reconnect | ✅ | `SyncEngine.drain()` runs ahead of each cycle |
+| 26 | New-device login restores config/history/rewards/profile | ✅ | `restoreLocked()` via the `RestoreRequired` outcome |
+| 27 | Logout does not delete local data | ✅ | `AuthRepository.signOut()` clears only the session store |
+| 28 | Duplicate cloud records prevented | ✅ | upserts merge on stable keys; badges are derived, so re-sync cannot double-count |
+| 29 | Room migrations remain safe | ✅ | 12 explicit migrations (1→13), no destructive fallback |
+| 30 | No unnecessary dependencies added | ✅ | zero diff in `app/build.gradle.kts` / `libs.versions.toml` |
+| 31 | Existing functionality intact | ✅ | module compiles clean; only pre-existing warnings |
+
+**Outstanding, deliberately not actioned:** the live Supabase `daily_unlocks` table (4 rows) and
+`app_limit_sessions` are now unreferenced by the app but still exist server-side. Dropping them is
+destructive and outward-facing, so it awaits an explicit decision rather than being done silently.

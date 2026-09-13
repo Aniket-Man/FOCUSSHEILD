@@ -37,6 +37,31 @@ enum class BadgeShapeType {
     CROWN_BANNER
 }
 
+/**
+ * One completed focus session reduced to what badge derivation needs: when it started and how
+ * much focus time it contributed. Storage-agnostic on purpose, so the rewards domain never has to
+ * know about Room.
+ */
+data class StudyStamp(
+    val startMillis: Long,
+    val durationMillis: Long
+)
+
+/**
+ * What a badge grants once earned.
+ *
+ * Mirrors the vocabulary the scratch card already uses (`ScratchCardEntity`: type / emoji / title /
+ * message), so both reward surfaces read the same way, and gives each achievement the "related
+ * reward information" it is expected to carry. The relation is the badge id itself — no separate
+ * join table is needed, and re-deriving a badge can never produce an orphaned reward row.
+ */
+data class BadgeReward(
+    val type: String,
+    val emoji: String,
+    val title: String,
+    val message: String
+)
+
 data class RewardBadge(
     val id: String,
     val title: String,
@@ -50,7 +75,8 @@ data class RewardBadge(
     val primaryColorHex: Long,
     val accentColorHex: Long,
     val secondaryGlowHex: Long = primaryColorHex,
-    val quote: String = "Distraction conquered. Focus mastered."
+    val quote: String = "Distraction conquered. Focus mastered.",
+    val reward: BadgeReward
 ) {
     val requiredHoursFloat: Float
         get() = requiredDurationMillis.toFloat() / (1000f * 60f * 60f)
@@ -81,7 +107,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF0284C7,
                 accentColorHex = 0xFF38BDF8,
                 secondaryGlowHex = 0xFF7DD3FC,
-                quote = "A journey of a thousand miles begins with a single focus session."
+                quote = "A journey of a thousand miles begins with a single focus session.",
+                reward = BadgeReward(
+                    type = "EMBLEM",
+                    emoji = "✨",
+                    title = "Focus Spark Emblem",
+                    message = "Your first emblem, struck the moment the engine turned over."
+                )
             ),
             RewardBadge(
                 id = "1_HOUR_STUDY",
@@ -96,7 +128,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFFD97706,
                 accentColorHex = 0xFFFBBF24,
                 secondaryGlowHex = 0xFFFDE68A,
-                quote = "Small daily disciplined hours build unbreakable confidence."
+                quote = "Small daily disciplined hours build unbreakable confidence.",
+                reward = BadgeReward(
+                    type = "TITLE",
+                    emoji = "🚀",
+                    title = "Deep Diver Title",
+                    message = "Wear the Deep Diver title on your profile."
+                )
             ),
             RewardBadge(
                 id = ID_2_HOURS_STUDY,
@@ -111,7 +149,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFFF59E0B,
                 accentColorHex = 0xFFFCD34D,
                 secondaryGlowHex = 0xFFFEF3C7,
-                quote = "Champions are made in the quiet hours when no one is watching."
+                quote = "Champions are made in the quiet hours when no one is watching.",
+                reward = BadgeReward(
+                    type = "TROPHY",
+                    emoji = "🏆",
+                    title = "Champion's Trophy",
+                    message = "The Champion's Trophy takes its place in your case."
+                )
             ),
             RewardBadge(
                 id = "5_HOURS_STUDY",
@@ -126,7 +170,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF10B981,
                 accentColorHex = 0xFF34D399,
                 secondaryGlowHex = 0xFFA7F3D0,
-                quote = "Deep focus turns effort into pure academic brilliance."
+                quote = "Deep focus turns effort into pure academic brilliance.",
+                reward = BadgeReward(
+                    type = "EMBLEM",
+                    emoji = "🛡️",
+                    title = "Scholar Shield",
+                    message = "The Scholar Shield emblem, proof of five disciplined hours."
+                )
             ),
             RewardBadge(
                 id = "10_HOURS_STUDY",
@@ -141,7 +191,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF8B5CF6,
                 accentColorHex = 0xFFC084FC,
                 secondaryGlowHex = 0xFFE9D5FF,
-                quote = "Cognitive stamina is the superpower of the modern scholar."
+                quote = "Cognitive stamina is the superpower of the modern scholar.",
+                reward = BadgeReward(
+                    type = "TITLE",
+                    emoji = "⚡",
+                    title = "Focus Titan Title",
+                    message = "Unlock the Focus Titan title and its amethyst crest."
+                )
             ),
             RewardBadge(
                 id = "20_HOURS_STUDY",
@@ -156,7 +212,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFFF43F5E,
                 accentColorHex = 0xFFFB7185,
                 secondaryGlowHex = 0xFFFFE4E6,
-                quote = "Discipline is choosing between what you want now and what you want most."
+                quote = "Discipline is choosing between what you want now and what you want most.",
+                reward = BadgeReward(
+                    type = "TROPHY",
+                    emoji = "🎖️",
+                    title = "Elite Strategist Medal",
+                    message = "The Elite Strategist Medal, struck in ruby."
+                )
             ),
             RewardBadge(
                 id = "50_HOURS_STUDY",
@@ -171,7 +233,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF06B6D4,
                 accentColorHex = 0xFF22D3EE,
                 secondaryGlowHex = 0xFFCFFAFE,
-                quote = "Pressure transforms coal into unbreakable diamonds."
+                quote = "Pressure transforms coal into unbreakable diamonds.",
+                reward = BadgeReward(
+                    type = "EMBLEM",
+                    emoji = "💎",
+                    title = "Quantum Diamond",
+                    message = "A cyan diamond emblem for the top 1% of focused hours."
+                )
             ),
             RewardBadge(
                 id = "100_HOURS_STUDY",
@@ -186,7 +254,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFFEAB308,
                 accentColorHex = 0xFFFDE047,
                 secondaryGlowHex = 0xFFFEF9C3,
-                quote = "One hundred hours of quiet mastery outshines a thousand words."
+                quote = "One hundred hours of quiet mastery outshines a thousand words.",
+                reward = BadgeReward(
+                    type = "TITLE",
+                    emoji = "👑",
+                    title = "Century Legend Title",
+                    message = "The Century Legend title, backed by one hundred hours."
+                )
             ),
             RewardBadge(
                 id = "200_HOURS_STUDY",
@@ -201,7 +275,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF059669,
                 accentColorHex = 0xFF6EE7B7,
                 secondaryGlowHex = 0xFFD1FAE5,
-                quote = "Unwavering focus turns ambition into inevitable success."
+                quote = "Unwavering focus turns ambition into inevitable success.",
+                reward = BadgeReward(
+                    type = "EMBLEM",
+                    emoji = "🛡️",
+                    title = "Neon Cyber Aegis",
+                    message = "The Neon Cyber Aegis emblem, earned by relentless grit."
+                )
             ),
             RewardBadge(
                 id = "500_HOURS_STUDY",
@@ -216,7 +296,13 @@ data class RewardBadge(
                 primaryColorHex = 0xFF6366F1,
                 accentColorHex = 0xFFA5B4FC,
                 secondaryGlowHex = 0xFFE0E7FF,
-                quote = "The mind, once expanded to deep focus, never returns to distraction."
+                quote = "The mind, once expanded to deep focus, never returns to distraction.",
+                reward = BadgeReward(
+                    type = "EMBLEM",
+                    emoji = "🌌",
+                    title = "Celestial Prism",
+                    message = "A prism of starlight, reserved for the apex few."
+                )
             ),
             RewardBadge(
                 id = "1000_HOURS_STUDY",
@@ -231,9 +317,58 @@ data class RewardBadge(
                 primaryColorHex = 0xFFEC4899,
                 accentColorHex = 0xFFF472B6,
                 secondaryGlowHex = 0xFFFCE7F3,
-                quote = "Immortal dedication. Unstoppable mastery. Legacy achieved."
+                quote = "Immortal dedication. Unstoppable mastery. Legacy achieved.",
+                reward = BadgeReward(
+                    type = "TROPHY",
+                    emoji = "🌟",
+                    title = "Immortal Crown",
+                    message = "The Cosmic Mythic Crown. The pinnacle, finally earned."
+                )
             )
         )
+
+        /**
+         * Derives each badge's unlock instant from the session history, rather than storing one.
+         *
+         * §4 makes session history the single source of truth for study time, so a persisted
+         * `unlockedAt` could drift from it — and worse, a reinstall or a device change would have
+         * to *re-create* it, which is exactly how duplicate achievement records appear. Deriving it
+         * instead means every device reaches the same answer from the same synced `session_records`
+         * set, and re-syncing can never double-count.
+         *
+         * Sessions are walked chronologically while their focus time accumulates. A badge unlocks at
+         * the precise moment the running total reaches its requirement — partway through the session
+         * that crossed the line, not at that session's end.
+         *
+         * @return badge id to unlock epoch millis, for every badge already earned. A badge missing
+         *   from the map is still locked.
+         */
+        fun deriveUnlockTimes(
+            stamps: Collection<StudyStamp>,
+            badges: List<RewardBadge> = ALL_BADGES
+        ): Map<String, Long> {
+            if (stamps.isEmpty() || badges.isEmpty()) return emptyMap()
+
+            val ordered = stamps.sortedBy { it.startMillis }
+            val thresholds = badges.sortedBy { it.requiredDurationMillis }
+            val unlockTimes = HashMap<String, Long>(thresholds.size)
+
+            var cumulative = 0L
+            var next = 0
+            for (stamp in ordered) {
+                val duration = stamp.durationMillis.coerceAtLeast(0L)
+                val after = cumulative + duration
+                // `after >= requirement` guarantees the remaining gap fits inside this session.
+                while (next < thresholds.size && after >= thresholds[next].requiredDurationMillis) {
+                    val badge = thresholds[next]
+                    val gap = badge.requiredDurationMillis - cumulative
+                    unlockTimes[badge.id] = stamp.startMillis + gap
+                    next++
+                }
+                cumulative = after
+            }
+            return unlockTimes
+        }
     }
 }
 

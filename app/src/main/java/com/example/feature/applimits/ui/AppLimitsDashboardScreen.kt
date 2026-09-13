@@ -247,12 +247,13 @@ fun AppLimitsDashboardScreen(
                 showAddDialog = false
                 editingItem = null
             },
-            onSave = { packageName, appName, dailyLimitMinutes, isStrictOverride ->
+            onSave = { packageName, appName, dailyLimitMinutes, isStrictOverride, emergencyUsesAllowed ->
                 viewModel.saveLimit(
                     packageName = packageName,
                     appName = appName,
                     dailyLimitMinutes = dailyLimitMinutes,
-                    isStrictOverride = isStrictOverride
+                    isStrictOverride = isStrictOverride,
+                    emergencyUsesAllowed = emergencyUsesAllowed
                 )
                 showAddDialog = false
                 editingItem = null

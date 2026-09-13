@@ -8,6 +8,7 @@ build/
 *.jks
 *.keystore
 keystore.properties
+keystore.txt
 
 # Kotlin compiler session data (transient heartbeat files)
 .kotlin/
