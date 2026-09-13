@@ -10,8 +10,49 @@ build/
 keystore.properties
 keystore.txt
 
+# Local environment file (the real one may hold cloud keys). .env.example IS tracked.
+.env
+
+# Build outputs. Never commit an APK/AAB: releases are published as GitHub Release
+# assets and fetched by the in-app updater (see docs/UPDATE_SYSTEM.md), so a checked-in
+# binary is dead weight that goes stale. app/FocusShield.apk was committed by accident
+# in the initial commit precisely because this pattern was missing.
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.hprof
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Logs and crash dumps
+*.log
+
 # Kotlin compiler session data (transient heartbeat files)
 .kotlin/
+
+# Vendored reference project: a separate Android app (com.zenlock.focusguard) kept only
+# as an algorithm reference. FocusShield's own code just cites the "Zenlock Classifier
+# pattern" in comments, so this folder is not part of the app and stays local.
+zenlock_repo/
+
+# One-off local patch scripts; their edits are already applied to the source.
+insert_glass.py
+patch.py
+
+# Local tooling / project metadata, not source.
+opencode.json
+metadata.json
+
+# The APK-updater specification, kept locally rather than published.
+# The shipped behaviour is documented in docs/UPDATE_SYSTEM.md.
+prompt.txt
 
 # Claude Code local session data
 .claude/
