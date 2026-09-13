@@ -7,6 +7,7 @@ import com.example.feature.update.data.UpdateDownloadException
 import com.example.feature.update.data.UpdateDownloadManager
 import com.example.feature.update.data.UpdatePreferences
 import com.example.feature.update.data.UpdateSourceUnavailableException
+import com.example.feature.update.domain.DownloadProgress
 import com.example.feature.update.domain.UpdateInfo
 import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.notification.UpdateNotificationHelper
@@ -181,10 +182,10 @@ class UpdateManager(
         if (downloadJob?.isActive == true) return
 
         downloadJob = scope.launch {
-            _state.value = UpdateState.Downloading(0)
+            _state.value = UpdateState.Downloading(DownloadProgress(percent = 0))
             try {
-                val file = downloadManager.download(info) { percent ->
-                    _state.value = UpdateState.Downloading(percent)
+                val file = downloadManager.download(info) { progress ->
+                    _state.value = UpdateState.Downloading(progress)
                 }
                 preferences.recordDownload(info.versionName, file.absolutePath)
                 _state.value = UpdateState.Downloaded(info, file)

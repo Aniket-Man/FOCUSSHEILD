@@ -32,7 +32,7 @@ sealed interface UpdateState {
         val showPrompt: Boolean = true
     ) : UpdateState
 
-    data class Downloading(val percent: Int) : UpdateState
+    data class Downloading(val progress: DownloadProgress) : UpdateState
 
     data class Downloaded(val info: UpdateInfo, val file: File) : UpdateState
 
@@ -40,4 +40,24 @@ sealed interface UpdateState {
 
     /** @param isCheckFailure true when the *check* failed (offline, private repo) rather than a download. */
     data class Failed(val message: String, val isCheckFailure: Boolean = false) : UpdateState
+}
+
+/**
+ * Byte-level progress for one in-flight download.
+ *
+ * [percent] is **null** when the server never declared a `Content-Length` — a chunked or
+ * transparently-gzipped CDN response. In that case there is no honest percentage to show, so the UI
+ * renders an indeterminate indicator plus [bytesReceived] instead of a number. Fabricating one, or
+ * letting the bar sit at a motionless 0%, is exactly the bug this type exists to prevent.
+ */
+data class DownloadProgress(
+    val percent: Int?,
+    val bytesReceived: Long = 0L,
+    val totalBytes: Long = -1L
+) {
+    /** True when a real percentage is available and the UI may show a determinate bar. */
+    val isDeterminate: Boolean get() = percent != null
+
+    /** 0f..1f for the determinate bar; 0f (unused) while indeterminate. */
+    val fraction: Float get() = ((percent ?: 0) / 100f).coerceIn(0f, 1f)
 }

@@ -7,7 +7,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.StatFs
 import androidx.core.content.FileProvider
+import com.example.feature.update.domain.DownloadProgress
 import com.example.feature.update.domain.UpdateInfo
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -41,16 +43,17 @@ class UpdateDownloadManager(
 ) {
 
     /**
-     * Downloads [info]'s APK into app-private cache, reporting integer progress.
+     * Downloads [info]'s APK into app-private cache, reporting real byte progress.
      *
-     * @param onProgress called with 0..100 on the calling dispatcher's thread; never 100 until the
-     *   bytes are on disk and validated.
+     * @param onProgress invoked on the IO dispatcher as bytes arrive. **Never 100 until the bytes are
+     *   on disk and validated.** [DownloadProgress.percent] is null when the server declared no
+     *   `Content-Length`, which the UI must render as indeterminate rather than inventing a number.
      * @return the validated APK file.
      * @throws UpdateDownloadException on any failure, including a cancelled coroutine.
      */
     suspend fun download(
         info: UpdateInfo,
-        onProgress: (Int) -> Unit
+        onProgress: (DownloadProgress) -> Unit
     ): File = withContext(Dispatchers.IO) {
         val url = info.apkUrl
             ?: throw UpdateDownloadException(
@@ -73,11 +76,16 @@ class UpdateDownloadManager(
             // GitHub release assets are served from a CDN that is happy without this, but sending it
             // keeps the call consistent with the API client and avoids opaque CDN rejections.
             .header("User-Agent", "FocusShield-Android")
+            // Ask for the bytes verbatim. OkHttp transparently requests gzip by default, and a CDN
+            // that honours it responds with `Content-Encoding: gzip` and **no** `Content-Length` —
+            // which is what left the progress bar pinned at 0%. An APK is an already-deflated ZIP, so
+            // compression buys nothing here anyway.
+            .header("Accept-Encoding", "identity")
             .get()
             .build()
 
         try {
-            onProgress(0)
+            onProgress(DownloadProgress(percent = 0))
             val response = try {
                 client.newCall(request).execute()
             } catch (e: IOException) {
@@ -91,6 +99,10 @@ class UpdateDownloadManager(
 
                 val body = res.body ?: throw UpdateDownloadException("Download failed: the server sent no data.")
                 val declaredLength = body.contentLength()
+                // A negative length means the server never said how big the APK is. That is not a
+                // failure — it just means there is no honest percentage to show, so the loop below
+                // reports bytes received and the UI goes indeterminate.
+                val knownLength = declaredLength > 0
                 if (declaredLength == 0L) {
                     throw UpdateDownloadException("Download failed: the file is empty.")
                 }
@@ -100,12 +112,18 @@ class UpdateDownloadManager(
                     throw UpdateDownloadException("Download failed: the server did not return an app file.")
                 }
                 // If the server declares a size, make sure it fits before streaming (prompt.txt §9).
-                if (declaredLength > 0) ensureSpaceFor(dir, declaredLength + MIN_FREE_BYTES)
+                if (knownLength) ensureSpaceFor(dir, declaredLength + MIN_FREE_BYTES)
 
                 var total = 0L
                 var lastPercent = -1
+                var lastReportedBytes = 0L
+                if (!knownLength) {
+                    onProgress(DownloadProgress(percent = null, bytesReceived = 0L, totalBytes = -1L))
+                }
                 body.byteStream().use { input ->
-                    partial.outputStream().use { output ->
+                    // Buffered: the loop below writes in DEFAULT_BUFFER_SIZE chunks, and an unbuffered
+                    // FileOutputStream turns each one into a syscall.
+                    BufferedOutputStream(partial.outputStream()).use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
                             currentCoroutineContext().ensureActive()
@@ -113,12 +131,20 @@ class UpdateDownloadManager(
                             if (read == -1) break
                             output.write(buffer, 0, read)
                             total += read
-                            if (declaredLength > 0) {
+                            if (knownLength) {
+                                // Real progress from real bytes — never a timer (prompt.txt §"FIX DOWNLOAD
+                                // PROGRESS"). Emitted only when the integer percentage actually moves.
                                 val percent = ((total * 100) / declaredLength).toInt().coerceIn(0, 100)
                                 if (percent != lastPercent) {
                                     lastPercent = percent
-                                    onProgress(percent)
+                                    onProgress(
+                                        DownloadProgress(percent, bytesReceived = total, totalBytes = declaredLength)
+                                    )
                                 }
+                            } else if (total - lastReportedBytes >= BYTES_PROGRESS_STEP) {
+                                // Indeterminate: still tick the byte counter so the user can see it moving.
+                                lastReportedBytes = total
+                                onProgress(DownloadProgress(percent = null, bytesReceived = total, totalBytes = -1L))
                             }
                         }
                         output.flush()
@@ -142,7 +168,8 @@ class UpdateDownloadManager(
         // Validate before the file is ever offered to the installer.
         validateApk(target)
 
-        onProgress(100)
+        // 100 only once the bytes are closed on disk and validated as an APK of this app.
+        onProgress(DownloadProgress(percent = 100, bytesReceived = target.length(), totalBytes = target.length()))
         cleanUpObsolete(dir, keepName = target.name)
         target
     }
@@ -253,6 +280,12 @@ class UpdateDownloadManager(
     companion object {
         /** Free space kept in reserve beyond the download itself. */
         private const val MIN_FREE_BYTES = 20L * 1024 * 1024
+
+        /**
+         * How many bytes must arrive before the indeterminate path reports again. Keeps a long
+         * download from flooding the UI with state writes while still visibly ticking.
+         */
+        private const val BYTES_PROGRESS_STEP = 256L * 1024
 
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

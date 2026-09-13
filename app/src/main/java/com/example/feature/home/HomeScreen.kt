@@ -111,6 +111,13 @@ fun HomeScreen(
     onNavigateToAppLimits: () -> Unit = {},
     onNavigateToStrictMode: () -> Unit = {},
     onStartPlanSession: (StudyPlanItem) -> Unit = {},
+    /** Opens the update details screen (Profile → New Updates shares the same destination). */
+    onNavigateToUpdate: () -> Unit = {},
+    /**
+     * Lit red dot on the header bell. Sourced from the single app-wide update state, so the bell and
+     * Profile → New Updates always agree (prompt.txt §5/§6).
+     */
+    showUpdateDot: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -151,9 +158,12 @@ fun HomeScreen(
                 FocusHeader(
                     photoUri = uiState.userPhotoUri,
                     avatarPresetId = uiState.userAvatarPreset,
-                    onNotificationClick = { /* notification click */ },
+                    // Tapping the bell opens the pending update when there is one; with nothing
+                    // pending it stays inert rather than opening an empty notification centre.
+                    onNotificationClick = { if (showUpdateDot) onNavigateToUpdate() },
                     onProfileClick = onNavigateToProfile,
-                    onThemeToggle = { viewModel.toggleThemeMode() }
+                    onThemeToggle = { viewModel.toggleThemeMode() },
+                    showNotificationDot = showUpdateDot
                 )
             }
 

@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.feature.update.domain.DownloadProgress
 import com.example.feature.update.domain.UpdateInfo
 import com.example.feature.update.domain.UpdateState
 
@@ -169,7 +170,7 @@ fun UpdateScreen(
                 )
 
                 is UpdateState.Downloading -> DownloadingContent(
-                    percent = current.percent,
+                    progress = current.progress,
                     onCancel = { viewModel.cancelDownload() }
                 )
 
@@ -305,9 +306,10 @@ private fun AvailableContent(
 }
 
 @Composable
-private fun DownloadingContent(percent: Int, onCancel: () -> Unit) {
+private fun DownloadingContent(progress: DownloadProgress, onCancel: () -> Unit) {
+    val determinate = progress.isDeterminate
     val animated by animateFloatAsState(
-        targetValue = percent / 100f,
+        targetValue = progress.fraction,
         animationSpec = tween(300),
         label = "updateDownloadProgress"
     )
@@ -335,16 +337,17 @@ private fun DownloadingContent(percent: Int, onCancel: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Progress",
+                    text = if (determinate) "Progress" else "Downloading",
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.SemiBold,
                         color = FocusColors.TextPrimary
                     ),
                     modifier = Modifier.weight(1f)
                 )
-                // Show the exact percentage the spec calls out (prompt.txt §11).
+                // The exact percentage when the server gave us a total; otherwise the bytes received
+                // so far. Never a fabricated number (prompt.txt §"UNKNOWN CONTENT LENGTH").
                 Text(
-                    text = "$percent%",
+                    text = progress.percent?.let { "$it%" } ?: formatBytes(progress.bytesReceived),
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = FocusColors.Primary
@@ -353,15 +356,25 @@ private fun DownloadingContent(percent: Int, onCancel: () -> Unit) {
                 )
             }
             Spacer(modifier = Modifier.height(FocusSpacing.md))
-            LinearProgressIndicator(
-                progress = { animated },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(50)),
-                color = FocusColors.Primary,
-                trackColor = FocusColors.SurfaceSubtle
-            )
+            val barModifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(50))
+            if (determinate) {
+                LinearProgressIndicator(
+                    progress = { animated },
+                    modifier = barModifier,
+                    color = FocusColors.Primary,
+                    trackColor = FocusColors.SurfaceSubtle
+                )
+            } else {
+                // No Content-Length: an honest indeterminate bar beats a bar frozen at 0%.
+                LinearProgressIndicator(
+                    modifier = barModifier,
+                    color = FocusColors.Primary,
+                    trackColor = FocusColors.SurfaceSubtle
+                )
+            }
         }
     }
 
@@ -372,6 +385,17 @@ private fun DownloadingContent(percent: Int, onCancel: () -> Unit) {
         testTag = "update_cancel_download_button",
         onClick = onCancel
     )
+}
+
+/**
+ * `15_728_640` → `15.0 MB`. Used only on the indeterminate path, where the honest thing to show is
+ * how much has arrived rather than a percentage nobody can compute.
+ */
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+    bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
+    bytes >= 1024L -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 @Composable

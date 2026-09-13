@@ -185,6 +185,9 @@ fun FocusNavGraph(
     ) {
         // 1. HOME / FOCUS TAB
         composable(Screen.Home.route) {
+            // Same state object the Profile "New Updates" row reads, so the bell dot and the Profile
+            // dot can never disagree (prompt.txt §7: one central update state, not two).
+            val showUpdateDot by updateViewModel.showDot.collectAsStateWithLifecycle()
             HomeScreen(
                 viewModel = homeViewModel,
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
@@ -198,6 +201,8 @@ fun FocusNavGraph(
                 onNavigateToBlockedApps = { navController.navigate(Screen.BlockedApps.route) },
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
+                onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
+                showUpdateDot = showUpdateDot,
                 onStartPlanSession = { planItem ->
                     sessionViewModel.configureForStudyPlan(
                         subjectName = planItem.subject,

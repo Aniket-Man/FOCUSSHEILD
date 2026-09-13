@@ -51,7 +51,13 @@ fun FocusHeader(
     avatarPresetId: String = "SHIELD",
     onNotificationClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
-    onThemeToggle: () -> Unit = {}
+    onThemeToggle: () -> Unit = {},
+    /**
+     * Draws the small red "new notification" dot on the bell. Driven by the single application-wide
+     * update state (`UpdateManager.showDot`), so it can never disagree with the Profile → New Updates
+     * indicator. It decorates the existing bell rather than adding a second icon.
+     */
+    showNotificationDot: Boolean = false
 ) {
     val isDark = LocalFocusColors.current.isDark
 
@@ -157,6 +163,21 @@ fun FocusHeader(
                     tint = FocusColors.TextPrimary,
                     modifier = Modifier.size(19.dp)
                 )
+
+                // Unread-update indicator. Sits on top of the bell's top-end corner and only occupies
+                // space when lit, so the bell itself never shifts.
+                if (showNotificationDot) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 5.dp, end = 5.dp)
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(FocusColors.BlockedRed)
+                            .border(1.5.dp, FocusColors.Surface, CircleShape)
+                            .testTag("notification_dot")
+                    )
+                }
             }
 
             // Purple Shield Action Button
