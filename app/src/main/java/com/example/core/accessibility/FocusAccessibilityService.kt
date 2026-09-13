@@ -169,7 +169,12 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val eventType = event.eventType
+        // typeWindowsChanged is declared in accessibility_service_config.xml and both foreground
+        // tracking and the app-limit gate below test for it explicitly — but it used to be dropped
+        // here, so those branches were unreachable and FocusShield noticed far fewer app switches
+        // (and therefore re-checked app limits far less often) than it was written to.
         if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
             eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED
         ) {

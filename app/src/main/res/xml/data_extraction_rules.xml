@@ -1,19 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
+   FocusShield data extraction rules.
+
+   FocusShield must never restore its own state from Auto Backup or device transfer.
+   The previous (empty template) version excluded nothing, so Android restored
+   shared_prefs/focus_shield_sync_prefs.xml on a fresh install — including
+   `onboarding_completed = true` — and FocusNavGraph then resolved its start
+   destination to Home, skipping onboarding entirely.
+
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
+        <exclude domain="file" path="datastore" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
+        <exclude domain="file" path="datastore" />
     </device-transfer>
-    -->
 </data-extraction-rules>

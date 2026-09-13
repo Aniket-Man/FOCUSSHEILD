@@ -47,6 +47,19 @@ class AppLimitOverlayActivity : ComponentActivity() {
         const val EXTRA_EMERGENCY_ALLOWED = "extra_emergency_allowed"
         const val EXTRA_IS_STRICT = "extra_is_strict"
         const val EXTRA_STREAK_DAYS = "extra_streak_days"
+
+        /**
+         * The overlay instance that is currently resumed, or null.
+         *
+         * AppLimitManager verifies its launches against this: `Context.startActivity()` does NOT
+         * throw when Android's background-activity-start rules silently drop a launch, so the
+         * absence of an exception proves nothing. Without a real signal the "time's up" popup
+         * could fail to appear with no error and no retry.
+         */
+        @Volatile
+        private var visibleInstance: AppLimitOverlayActivity? = null
+
+        val isVisible: Boolean get() = visibleInstance != null
     }
 
     private val overlayParamsState = MutableStateFlow<AppLimitOverlayParams?>(null)
@@ -180,6 +193,32 @@ class AppLimitOverlayActivity : ComponentActivity() {
         setIntent(intent)
         MediaPauseHelper.pauseMedia(this)
         overlayParamsState.value = extractParams(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        visibleInstance = this
+    }
+
+    override fun onPause() {
+        // Only clear the marker if we are still the instance it points at — a newer overlay may
+        // already have resumed while this one was pausing.
+        if (visibleInstance === this) visibleInstance = null
+        super.onPause()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Replaces the old android:noHistory="true" behaviour, which is intentionally gone (see
+        // AndroidManifest) because it left a dying singleInstance record that swallowed the next
+        // relaunch. The overlay must still not linger as a stale, invisible task once something
+        // else owns the screen — e.g. after GLOBAL_ACTION_HOME or an app switch.
+        if (!isChangingConfigurations) finish()
+    }
+
+    override fun onDestroy() {
+        if (visibleInstance === this) visibleInstance = null
+        super.onDestroy()
     }
 }
 

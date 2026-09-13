@@ -521,55 +521,78 @@ class AppLimitManager private constructor(
 
     private fun handleSessionExpired(session: ActiveAppUsageSession) {
         scope.launch {
-            val actualUsed = session.elapsedMillis
-            val endReason = if (session.isEmergency) "EMERGENCY_EXPIRED" else if (session.isDailyLimitExhausted) "DAILY_LIMIT_REACHED" else "TIMER_EXPIRED"
-            saveSessionRecord(session, actualUsed, endReason)
-
-            _activeSession.value = null
-            stopTicker()
-
-            // Clear debounce timestamp so the next foreground change re-checks the limit immediately
-            clearOverlayDebounce(session.packageName)
-
-            // 1. Pause media immediately (overlay will be displayed directly over the app without minimizing to home first)
-            MediaPauseHelper.pauseMedia(appContext)
-
-            // 2. Query updated total daily usage from system and database
-            val limit = appLimitRepository.getLimitByPackage(session.packageName)
-            val todayDate = appLimitRepository.getTodayDateString()
-            val usage = appLimitRepository.getUsage(session.packageName, todayDate)
-            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
-            val dbUsage = usage?.usedMillis ?: 0L
-            // Use system usage when valid. Only fall back to DB when permission is genuinely denied.
-            val totalDailyUsedMillis = when (usageResult.status) {
-                UsageResult.UsageStatus.VALID -> usageResult.usageMillis
-                UsageResult.UsageStatus.PERMISSION_DENIED -> dbUsage
-                else -> dbUsage
+            try {
+                finalizeExpiredSession(session)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Recording the session row, syncing usage or looking up the limit must never be
+                // able to leave the user unblocked. If any of it throws, drop the session and
+                // force the popup anyway — previously an exception here killed the coroutine
+                // before launchOverlay() ran, and the allowance silently never expired.
+                Log.e(tag, "Failed to finalise expiry for ${session.appName}; forcing overlay anyway", e)
+                _activeSession.value = null
+                stopTicker()
+                clearOverlayDebounce(session.packageName)
+                launchOverlay(
+                    packageName = session.packageName,
+                    appName = session.appName,
+                    mode = AppLimitOverlayMode.SESSION_COMPLETE,
+                    forceLaunch = true
+                )
             }
-
-            val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
-            val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
-
-            val totalDailyUsedMinutes = kotlin.math.round(totalDailyUsedMillis / 60000.0).toInt().coerceAtLeast(0)
-            val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
-            val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
-
-            // 3. Trigger overlay popup with forceLaunch
-            launchOverlay(
-                packageName = session.packageName,
-                appName = session.appName,
-                mode = if (!isDailyExhausted) AppLimitOverlayMode.SESSION_COMPLETE else AppLimitOverlayMode.DAILY_LIMIT_REACHED,
-                selectedMinutes = (session.selectedDurationMillis / 60000L).toInt(),
-                usedMinutes = totalDailyUsedMinutes,
-                remainingDailyMinutes = remainingDailyMinutes,
-                dailyLimitMinutes = dailyLimitMinutes,
-                emergencyUsesCount = usage?.emergencyUsesCount ?: 0,
-                emergencyUsesAllowed = limit?.emergencyUsesAllowed ?: 1,
-                isStrict = session.isStrict,
-                streakDays = limit?.streakDays ?: 0,
-                forceLaunch = true
-            )
         }
+    }
+
+    private suspend fun finalizeExpiredSession(session: ActiveAppUsageSession) {
+        val actualUsed = session.elapsedMillis
+        val endReason = if (session.isEmergency) "EMERGENCY_EXPIRED" else if (session.isDailyLimitExhausted) "DAILY_LIMIT_REACHED" else "TIMER_EXPIRED"
+        saveSessionRecord(session, actualUsed, endReason)
+
+        _activeSession.value = null
+        stopTicker()
+
+        // Clear debounce timestamp so the next foreground change re-checks the limit immediately
+        clearOverlayDebounce(session.packageName)
+
+        // 1. Pause media immediately (overlay will be displayed directly over the app without minimizing to home first)
+        MediaPauseHelper.pauseMedia(appContext)
+
+        // 2. Query updated total daily usage from system and database
+        val limit = appLimitRepository.getLimitByPackage(session.packageName)
+        val todayDate = appLimitRepository.getTodayDateString()
+        val usage = appLimitRepository.getUsage(session.packageName, todayDate)
+        val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
+        val dbUsage = usage?.usedMillis ?: 0L
+        // Use system usage when valid. Only fall back to DB when permission is genuinely denied.
+        val totalDailyUsedMillis = when (usageResult.status) {
+            UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+            UsageResult.UsageStatus.PERMISSION_DENIED -> dbUsage
+            else -> dbUsage
+        }
+
+        val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
+        val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
+
+        val totalDailyUsedMinutes = kotlin.math.round(totalDailyUsedMillis / 60000.0).toInt().coerceAtLeast(0)
+        val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
+        val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
+
+        // 3. Trigger overlay popup with forceLaunch
+        launchOverlay(
+            packageName = session.packageName,
+            appName = session.appName,
+            mode = if (!isDailyExhausted) AppLimitOverlayMode.SESSION_COMPLETE else AppLimitOverlayMode.DAILY_LIMIT_REACHED,
+            selectedMinutes = (session.selectedDurationMillis / 60000L).toInt(),
+            usedMinutes = totalDailyUsedMinutes,
+            remainingDailyMinutes = remainingDailyMinutes,
+            dailyLimitMinutes = dailyLimitMinutes,
+            emergencyUsesCount = usage?.emergencyUsesCount ?: 0,
+            emergencyUsesAllowed = limit?.emergencyUsesAllowed ?: 1,
+            isStrict = session.isStrict,
+            streakDays = limit?.streakDays ?: 0,
+            forceLaunch = true
+        )
     }
 
     private fun finalizeAndStopSession(reason: String) {
@@ -612,6 +635,15 @@ class AppLimitManager private constructor(
         }
     }
 
+    /** In-flight overlay relaunch/verify loops, one per package. */
+    private val overlayLaunchJobs = ConcurrentHashMap<String, Job>()
+
+    /** How long to wait after a launch attempt before asking whether it actually landed. */
+    private val overlayVerifyDelayMs = 1_200L
+
+    /** Bounded attempts so a transient failure self-heals without spamming the user. */
+    private val maxOverlayLaunchAttempts = 4
+
     fun launchOverlay(
         packageName: String,
         appName: String,
@@ -635,8 +667,13 @@ class AppLimitManager private constructor(
         lastOverlayLaunchPerPackage[packageName] = now
 
         MediaPauseHelper.pauseMedia(appContext)
+
         val intent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            // NEW_TASK only. CLEAR_TOP/SINGLE_TOP used to hand the intent back to the previous
+            // overlay's (singleInstance, noHistory) activity record while it was finishing, and
+            // Android dropped the launch without throwing — the popup then never reappeared after
+            // the user's allowance expired. Each launch must get a fresh instance.
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
             putExtra(AppLimitOverlayActivity.EXTRA_PACKAGE_NAME, packageName)
             putExtra(AppLimitOverlayActivity.EXTRA_APP_NAME, appName)
             putExtra(AppLimitOverlayActivity.EXTRA_OVERLAY_MODE, mode.name)
@@ -650,53 +687,80 @@ class AppLimitManager private constructor(
             putExtra(AppLimitOverlayActivity.EXTRA_STREAK_DAYS, streakDays)
         }
 
-        // Try multiple strategies to launch the overlay, ensuring it appears even after session expiry
-        var launched = false
-        val service = com.example.core.accessibility.FocusAccessibilityService.instance
-        try {
-            if (service != null) {
-                service.startActivity(intent)
-                launched = true
-                Log.i(tag, "Launched AppLimitOverlayActivity via FocusAccessibilityService for $packageName (mode=$mode)")
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "FocusAccessibilityService failed to start overlay: ${e.message}")
-        }
+        startOverlayAndVerify(packageName, intent)
+    }
 
-        if (!launched) {
-            try {
-                appContext.startActivity(intent)
-                launched = true
-                Log.i(tag, "Launched AppLimitOverlayActivity via appContext for $packageName (mode=$mode)")
-            } catch (e: Exception) {
-                Log.e(tag, "appContext failed to start overlay: ${e.message}")
-            }
-        }
+    /**
+     * Launches the overlay and then *verifies* it actually reached the screen.
+     *
+     * `Context.startActivity()` does not throw when Android's background-activity-start
+     * restriction silently discards the launch — it only logs. Treating "no exception" as
+     * success is what let the expiry popup vanish with no error and no retry, leaving the user
+     * unblocked. Here every attempt is confirmed against a real signal and retried if it misses.
+     */
+    private fun startOverlayAndVerify(packageName: String, intent: Intent) {
+        overlayLaunchJobs[packageName]?.cancel()
+        overlayLaunchJobs[packageName] = scope.launch {
+            var attempt = 0
+            while (attempt < maxOverlayLaunchAttempts) {
+                val attemptedAt = System.currentTimeMillis()
+                attemptOverlayLaunch(intent)
 
-        if (!launched) {
-            // Last resort: try with NEW_TASK flag only
-            try {
-                val fallbackIntent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    putExtra(AppLimitOverlayActivity.EXTRA_PACKAGE_NAME, packageName)
-                    putExtra(AppLimitOverlayActivity.EXTRA_APP_NAME, appName)
-                    putExtra(AppLimitOverlayActivity.EXTRA_OVERLAY_MODE, mode.name)
-                    putExtra(AppLimitOverlayActivity.EXTRA_SELECTED_MINUTES, selectedMinutes)
-                    putExtra(AppLimitOverlayActivity.EXTRA_USED_MINUTES, usedMinutes)
-                    putExtra(AppLimitOverlayActivity.EXTRA_REMAINING_DAILY_MINUTES, remainingDailyMinutes)
-                    putExtra(AppLimitOverlayActivity.EXTRA_DAILY_LIMIT_MINUTES, dailyLimitMinutes)
-                    putExtra(AppLimitOverlayActivity.EXTRA_EMERGENCY_COUNT, emergencyUsesCount)
-                    putExtra(AppLimitOverlayActivity.EXTRA_EMERGENCY_ALLOWED, emergencyUsesAllowed)
-                    putExtra(AppLimitOverlayActivity.EXTRA_IS_STRICT, isStrict)
-                    putExtra(AppLimitOverlayActivity.EXTRA_STREAK_DAYS, streakDays)
+                delay(overlayVerifyDelayMs)
+
+                if (AppLimitOverlayActivity.isVisible) {
+                    Log.i(tag, "AppLimitOverlayActivity confirmed on screen for $packageName (attempt ${attempt + 1})")
+                    return@launch
                 }
-                appContext.startActivity(fallbackIntent)
-                Log.i(tag, "Launched AppLimitOverlayActivity via fallback intent for $packageName (mode=$mode)")
-            } catch (e: Exception) {
-                Log.e(tag, "All overlay launch strategies failed for $packageName: ${e.message}", e)
+
+                // The user already resolved the prompt (started a session, used an emergency
+                // pass) or turned the limit off. Either way the overlay is no longer wanted, so
+                // stop — otherwise the retry would pop the blocker back up over them.
+                if (!shouldStillShowOverlay(packageName)) {
+                    Log.i(tag, "Overlay no longer required for $packageName; stopping relaunch attempts")
+                    return@launch
+                }
+
+                attempt++
+                if (attempt >= maxOverlayLaunchAttempts) break
+                Log.w(tag, "Overlay not on screen for $packageName; retrying (attempt ${attempt + 1}/$maxOverlayLaunchAttempts, wasAttemptedAt=$attemptedAt)")
             }
+            Log.e(tag, "Could not display AppLimitOverlayActivity for $packageName after $maxOverlayLaunchAttempts attempts")
         }
     }
+
+    /**
+     * One launch attempt. Prefers the accessibility service (an enabled service is exempt from the
+     * background-activity-start restriction moreso than a plain app context), falling back to the
+     * app context. Never assumes the attempt succeeded — see [startOverlayAndVerify].
+     */
+    private fun attemptOverlayLaunch(intent: Intent) {
+        val service = com.example.core.accessibility.FocusAccessibilityService.instance
+        if (service != null) {
+            try {
+                service.startActivity(intent)
+                return
+            } catch (e: Exception) {
+                Log.w(tag, "FocusAccessibilityService failed to start overlay: ${e.message}")
+            }
+        }
+        try {
+            appContext.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(tag, "appContext failed to start overlay: ${e.message}")
+        }
+    }
+
+    /**
+     * True while the app-limit engine still wants the block on screen for [packageName].
+     * Used to stop the relaunch loop once the user has resolved the prompt.
+     */
+    private suspend fun shouldStillShowOverlay(packageName: String): Boolean =
+        when (checkAppLimitDecision(packageName)) {
+            is AppLimitDecision.REQUIRE_USAGE_SELECTION,
+            is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> true
+            else -> false
+        }
 
     companion object {
         @Volatile

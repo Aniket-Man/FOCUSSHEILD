@@ -60,13 +60,21 @@
             android:noHistory="true"
             android:theme="@style/Theme.BlockOverlay" />
 
+        <!--
+            Deliberately a plain `standard` activity WITHOUT singleInstance/noHistory.
+
+            With singleInstance + noHistory, the instance from the first block stayed as a
+            finishing root of its own task. When the allowance timer later expired and
+            AppLimitManager relaunched the overlay with CLEAR_TOP|SINGLE_TOP, Android handed the
+            intent back to that dying record instead of creating a new instance and silently
+            dropped the launch — so the "time's up" popup never came back after the user chose
+            "use for N minutes". A fresh instance per launch is what makes it reappear.
+        -->
         <activity
             android:name=".feature.applimits.ui.AppLimitOverlayActivity"
             android:exported="false"
             android:taskAffinity=""
             android:excludeFromRecents="true"
-            android:launchMode="singleInstance"
-            android:noHistory="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.TransparentOverlay" />
