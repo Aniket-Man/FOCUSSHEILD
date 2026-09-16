@@ -172,7 +172,7 @@ fun ProfileRewardsSection(
 }
 
 /** Badge id is claimed when it is earned and its reward has not been collected yet. */
-private fun RewardBadge.isClaimable(totalLifetimeStudyMillis: Long, claimedRewardIds: Set<String>) =
+internal fun RewardBadge.isClaimable(totalLifetimeStudyMillis: Long, claimedRewardIds: Set<String>) =
     isUnlocked(totalLifetimeStudyMillis) && !claimedRewardIds.contains(id)
 
 private fun RewardBadge.visualState(
@@ -867,7 +867,7 @@ private fun BadgeStateChip(
  * claim action when a reward is still waiting.
  */
 @Composable
-private fun BadgeDetailDialog(
+internal fun BadgeDetailDialog(
     badge: RewardBadge,
     totalLifetimeStudyMillis: Long,
     isClaimed: Boolean,

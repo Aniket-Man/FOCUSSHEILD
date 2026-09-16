@@ -35,6 +35,7 @@ import com.example.feature.home.HomeViewModel
 import com.example.feature.onboarding.OnboardingScreen
 import com.example.feature.planner.PlannerScreen
 import com.example.feature.profile.ProfileScreen
+import com.example.feature.rewards.ui.RewardsScreen
 import com.example.feature.session.ActiveSessionScreen
 import com.example.feature.session.ModeSelectionScreen
 import com.example.feature.session.SessionSetupScreen
@@ -269,6 +270,7 @@ fun FocusNavGraph(
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToAccount = { navController.navigate(Screen.Account.route) },
+                onNavigateToRewards = { navController.navigate(Screen.Rewards.route) },
                 accountViewModel = accountViewModel,
                 onNavigateToOnboarding = { navController.navigate(Screen.Onboarding.route) },
                 updateViewModel = updateViewModel,
@@ -393,6 +395,14 @@ fun FocusNavGraph(
         composable(Screen.Update.route) {
             UpdateScreen(
                 viewModel = updateViewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // SUB-SCREEN: REWARDS & MILESTONES (All badges, tiers, and claims)
+        composable(Screen.Rewards.route) {
+            RewardsScreen(
+                settingsViewModel = settingsViewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

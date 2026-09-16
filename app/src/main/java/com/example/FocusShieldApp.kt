@@ -216,7 +216,10 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // The triggers below all need the app to be in use, so arm the periodic worker too — it is
         // what notices a release published while FocusShield stays closed. Idempotent (unique work,
         // KEEP), network-constrained, and gated by the same cooldown as every other check.
-        com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
+        try {
+            com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
+        } catch (_: Throwable) {
+        }
         applicationScope.launch {
             try {
                 updateManager.restore()

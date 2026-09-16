@@ -92,6 +92,7 @@ import com.example.core.design.FocusSpacing
 import com.example.feature.settings.SettingsViewModel
 import com.example.feature.rewards.domain.RewardBadge
 import com.example.feature.rewards.ui.ProfileRewardsSection
+import com.example.feature.rewards.ui.ProfileRewardsSummarySection
 import com.example.feature.profile.ui.UserProfileAvatar
 import com.example.feature.profile.ui.EditProfileBottomSheet
 import com.example.FocusShieldApp
@@ -113,6 +114,7 @@ fun ProfileScreen(
     onNavigateToOnboarding: () -> Unit = {},
     updateViewModel: UpdateViewModel,
     onNavigateToUpdates: () -> Unit = {},
+    onNavigateToRewards: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -433,13 +435,14 @@ fun ProfileScreen(
                     }
                 }
 
-                // Rewards & Milestones Section (Horizontal Carousel Cards)
+                // Rewards & Milestones Summary (Current Achieved & Upcoming Badges only)
                 item {
-                    ProfileRewardsSection(
+                    ProfileRewardsSummarySection(
                         totalLifetimeStudyMillis = uiState.allTimeStudyTimeMillis,
                         allTimeStudyTimeFormatted = uiState.formattedAllTimeStudyTime,
                         claimedRewardIds = uiState.preferences.claimedRewardIds,
                         badgeUnlockTimes = uiState.badgeUnlockTimes,
+                        onNavigateToAllRewards = onNavigateToRewards,
                         onClaimReward = { rewardId -> settingsViewModel.claimReward(rewardId) }
                     )
                 }
