@@ -169,7 +169,11 @@ fun AddEditAppLimitDialog(
     val presetMinutes = listOf(10, 15, 20, 30, 45, 60, 90, 120)
 
     androidx.activity.compose.BackHandler(enabled = true) {
-        onDismiss()
+        if (selectedApp != null && editingItem == null) {
+            selectedApp = null
+        } else {
+            onDismiss()
+        }
     }
 
     ModalBottomSheet(
@@ -179,75 +183,93 @@ fun AddEditAppLimitDialog(
         dragHandle = null,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.80f)
-                .navigationBarsPadding()
-                .padding(FocusSpacing.xl)
-                .verticalScroll(rememberScrollState())
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        if (editingItem == null && selectedApp == null) {
+            // STEP 1: Full-height app picker with search and scrollable apps list
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .navigationBarsPadding()
+                    .padding(horizontal = FocusSpacing.xl, vertical = FocusSpacing.lg)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.PrimaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Timer,
-                            contentDescription = null,
-                            tint = FocusColors.Primary,
-                            modifier = Modifier.size(20.dp)
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(FocusColors.PrimaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = null,
+                                tint = FocusColors.Primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Set App Limit",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = FocusColors.TextPrimary
+                            )
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = FocusColors.TextSecondary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = if (editingItem != null) "Edit App Limit" else "Set App Limit",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
+                        text = "1. Choose Application",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold,
                             color = FocusColors.TextPrimary
                         )
                     )
-                }
-
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = FocusColors.TextSecondary
+                    Text(
+                        text = "${filteredApps.size} apps",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = FocusColors.TextMuted
+                        )
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Step 1: App Selection (if adding new)
-            if (editingItem == null && selectedApp == null) {
-                Text(
-                    text = "1. Choose Application",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary
-                    )
-                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search installed apps...") },
+                    placeholder = { Text("Search installed apps...", color = FocusColors.TextMuted) },
                     leadingIcon = {
-                        Icon(Icons.Rounded.Search, contentDescription = null, tint = FocusColors.TextSecondary)
+                        Icon(Icons.Rounded.Search, contentDescription = "Search", tint = FocusColors.TextSecondary)
                     },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Rounded.Close, contentDescription = "Clear search", tint = FocusColors.TextSecondary)
+                            }
+                        }
+                    } else null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("app_limit_search_input"),
@@ -255,82 +277,150 @@ fun AddEditAppLimitDialog(
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = FocusColors.Primary,
-                        unfocusedBorderColor = FocusColors.CardBorder
+                        unfocusedBorderColor = FocusColors.CardBorder,
+                        focusedTextColor = FocusColors.TextPrimary,
+                        unfocusedTextColor = FocusColors.TextPrimary
                     )
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                ) {
-                    items(filteredApps, key = { it.packageName }) { app ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(FocusShapes.medium)
-                                .clickable { selectedApp = app }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (app.icon != null) {
-                                Image(
-                                    bitmap = app.icon.toBitmap(80, 80).asImageBitmap(),
-                                    contentDescription = app.appName,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(FocusColors.SurfaceVariant),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Rounded.Apps, contentDescription = null, tint = FocusColors.TextSecondary)
+                if (filteredApps.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (searchQuery.isNotBlank()) "No apps matching \"$searchQuery\"" else "No installed apps found",
+                            style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(filteredApps, key = { it.packageName }) { app ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(FocusShapes.medium)
+                                    .clickable { selectedApp = app }
+                                    .padding(vertical = 8.dp, horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (app.icon != null) {
+                                    Image(
+                                        bitmap = app.icon.toBitmap(80, 80).asImageBitmap(),
+                                        contentDescription = app.appName,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(FocusColors.SurfaceVariant),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Rounded.Apps, contentDescription = null, tint = FocusColors.TextSecondary)
+                                    }
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.width(12.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = app.appName,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary
-                                    )
-                                )
-                                Text(
-                                    text = app.packageName,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = FocusColors.TextMuted
-                                    ),
-                                    maxLines = 1
-                                )
-                            }
-
-                            if (app.isAlreadyLimited) {
-                                Surface(
-                                    shape = RoundedCornerShape(100.dp),
-                                    color = FocusColors.AmberOrange.copy(alpha = 0.12f)
-                                ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Configured",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FocusColors.AmberOrange,
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        text = app.appName,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FocusColors.TextPrimary
+                                        )
                                     )
+                                    Text(
+                                        text = app.packageName,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = FocusColors.TextMuted
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+
+                                if (app.isAlreadyLimited) {
+                                    Surface(
+                                        shape = RoundedCornerShape(100.dp),
+                                        color = FocusColors.AmberOrange.copy(alpha = 0.12f)
+                                    ) {
+                                        Text(
+                                            text = "Configured",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = FocusColors.AmberOrange,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            } else if (selectedApp != null) {
+            }
+        } else if (selectedApp != null) {
+            // STEP 2: Limit configuration with selected app, presets, slider, and settings
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = FocusSpacing.xl, vertical = FocusSpacing.lg)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(FocusColors.PrimaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = null,
+                                tint = FocusColors.Primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (editingItem != null) "Edit App Limit" else "Set App Limit",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = FocusColors.TextPrimary
+                            )
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = FocusColors.TextSecondary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
                 // Selected App Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
