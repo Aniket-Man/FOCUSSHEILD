@@ -542,7 +542,18 @@ class FocusAccessibilityService : AccessibilityService() {
                 val sessionActiveWithYouTubeStudyMode = isSessionRunningOrPaused && (protectionState?.isYouTubeStudyModeEnabled == true)
                 val sessionActiveWithBrowserStudyMode = isSessionRunningOrPaused && (protectionState?.isBrowserStudyModeEnabled == true)
 
+                // The blocker for this app is already on screen: nothing to decide, and nothing to
+                // launch. Without this the gate re-raised the popup on every event the limited app
+                // emitted from *behind* the blocker (500 ms throttle) — a new activity instance on
+                // top of the one being read, each one finishing the previous one. A launch that
+                // lands in that handshake is dropped silently, which is how the blocker could
+                // disappear for good; the storm also re-sent the media-pause key and re-scanned the
+                // node tree five times a second while the user was trying to read the popup.
+                val isBlockerOnScreen = com.example.feature.applimits.ui.AppLimitOverlayActivity
+                    .isVisibleFor(rawPackageName)
+
                 if (!isExcludedFromAppLimits(rawPackageName) &&
+                    !isBlockerOnScreen &&
                     !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
                     !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
                 ) {
@@ -561,7 +572,8 @@ class FocusAccessibilityService : AccessibilityService() {
                             when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
                                 is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
                                     Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName} ($rawPackageName)")
-                                    MediaPauseHelper.pauseMedia(applicationContext)
+                                    // Media is paused by AppLimitManager.launchOverlay itself, once per
+                                    // launch request rather than once per accessibility event.
                                     if (isYouTubePackage) {
                                         val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                         clickPauseButtonInNodeTree(currentRoot)
@@ -584,7 +596,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 }
                                 is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
                                     Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName} ($rawPackageName). Enforcing blocker.")
-                                    MediaPauseHelper.pauseMedia(applicationContext)
+                                    // Media is paused by AppLimitManager.launchOverlay itself (see above).
                                     if (isYouTubePackage) {
                                         val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                         clickPauseButtonInNodeTree(currentRoot)

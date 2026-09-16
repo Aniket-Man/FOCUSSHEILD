@@ -2,6 +2,7 @@ package com.example.feature.applimits.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -59,7 +60,22 @@ class AppLimitOverlayActivity : ComponentActivity() {
         @Volatile
         private var visibleInstance: AppLimitOverlayActivity? = null
 
+        /** Package of the app whose block [visibleInstance] is showing. */
+        @Volatile
+        private var visiblePackageName: String? = null
+
         val isVisible: Boolean get() = visibleInstance != null
+
+        /**
+         * True while the blocker *for [packageName]* is the overlay currently on screen.
+         *
+         * This is the per-app signal the launch pipeline needs: it is what stops a second overlay
+         * being pushed on top of the one the user is looking at (which finishes the first instance
+         * and can have its own launch dropped in the handshake), and it is how a verified launch is
+         * recognised for the app it belongs to.
+         */
+        fun isVisibleFor(packageName: String): Boolean =
+            visibleInstance != null && visiblePackageName == packageName
     }
 
     private val overlayParamsState = MutableStateFlow<AppLimitOverlayParams?>(null)
@@ -91,6 +107,25 @@ class AppLimitOverlayActivity : ComponentActivity() {
             isStrict = isStrict,
             streakDays = streakDays
         )
+    }
+
+    /**
+     * Returns the user to the limited app and closes the blocker.
+     *
+     * Always called on the main thread: the emergency path runs its database work off the main
+     * thread and comes back through `onResult`, and both `startActivity` and `finish` must happen
+     * on the UI thread.
+     */
+    private fun openLimitedAppAndFinish(packageName: String) {
+        try {
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                startActivity(launchIntent)
+            }
+        } catch (_: Exception) {
+        }
+        finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,25 +168,25 @@ class AppLimitOverlayActivity : ComponentActivity() {
                                 appName = data.appName,
                                 durationMinutes = durationMinutes
                             )
-                            try {
-                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
-                                if (launchIntent != null) {
-                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                                    startActivity(launchIntent)
-                                }
-                            } catch (_: Exception) {}
-                            finish()
+                            openLimitedAppAndFinish(data.packageName)
                         },
                         onUseEmergency = {
-                            AppLimitManager.instance.startEmergencySession(data.packageName, data.appName)
-                            try {
-                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
-                                if (launchIntent != null) {
-                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                                    startActivity(launchIntent)
+                            // Only step aside once the pass has actually been spent. An emergency
+                            // pass can be refused (the day's allowance is already used up, and the
+                            // count this popup was built with can be one launch old); dismissing
+                            // the blocker anyway left the app completely unblocked with no session
+                            // running and no blocker to come back to.
+                            AppLimitManager.instance.startEmergencySession(data.packageName, data.appName) { started ->
+                                if (started) {
+                                    openLimitedAppAndFinish(data.packageName)
+                                } else {
+                                    Toast.makeText(
+                                        applicationContext,
+                                        "No emergency passes left for ${data.appName} today.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
-                            } catch (_: Exception) {}
-                            finish()
+                            }
                         },
                         onEnableStrictMode = {
                             CoroutineScope(Dispatchers.IO).launch {
@@ -165,14 +200,7 @@ class AppLimitOverlayActivity : ComponentActivity() {
                         onTurnOffAndResetStreak = {
                             AppLimitStrictModeEngine.instance.onUserQuitLimit(data.packageName)
                             AppLimitManager.instance.leaveBlockForToday(data.packageName)
-                            try {
-                                val launchIntent = packageManager.getLaunchIntentForPackage(data.packageName)
-                                if (launchIntent != null) {
-                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-                                    startActivity(launchIntent)
-                                }
-                            } catch (_: Exception) {}
-                            finish()
+                            openLimitedAppAndFinish(data.packageName)
                         },
                         onGoToHome = {
                             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
@@ -192,18 +220,25 @@ class AppLimitOverlayActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         MediaPauseHelper.pauseMedia(this)
-        overlayParamsState.value = extractParams(intent)
+        val params = extractParams(intent)
+        overlayParamsState.value = params
+        // Same instance, possibly a different app now — keep the per-app marker truthful.
+        if (visibleInstance === this) visiblePackageName = params.packageName
     }
 
     override fun onResume() {
         super.onResume()
+        visiblePackageName = overlayParamsState.value?.packageName
         visibleInstance = this
     }
 
     override fun onPause() {
         // Only clear the marker if we are still the instance it points at — a newer overlay may
         // already have resumed while this one was pausing.
-        if (visibleInstance === this) visibleInstance = null
+        if (visibleInstance === this) {
+            visibleInstance = null
+            visiblePackageName = null
+        }
         super.onPause()
     }
 
@@ -217,7 +252,10 @@ class AppLimitOverlayActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (visibleInstance === this) visibleInstance = null
+        if (visibleInstance === this) {
+            visibleInstance = null
+            visiblePackageName = null
+        }
         super.onDestroy()
     }
 }

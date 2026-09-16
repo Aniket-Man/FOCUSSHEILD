@@ -166,6 +166,14 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             preferencesRepository = preferencesRepository,
             blockedAttemptRepository = blockedAttemptRepository
         )
+        // Re-arm a temporary App Limit session that outlived the process. Without this the timer
+        // (and the "time's up" blocker it raises) died with the process, so a session the user had
+        // chosen simply never ended.
+        try {
+            com.example.feature.applimits.engine.AppLimitManager.instance.restoreSessionFromDisk()
+        } catch (e: Exception) {
+            android.util.Log.e("FocusShieldApp", "Error restoring app limit session on startup: ${e.message}")
+        }
         com.example.feature.applimits.engine.AppLimitStrictModeEngine.initialize(
             context = this,
             repository = appLimitRepository
