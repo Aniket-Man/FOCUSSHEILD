@@ -10,23 +10,16 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
-// Read optional Supabase cloud configuration from local.properties (gitignored). Declared
-// BEFORE the android {} block on purpose: defaultConfig.buildConfigField interpolates these
-// values at configuration time, and a forward reference (vals declared after android {}) reads
-// null and bakes the literal string "null" into BuildConfig — which makes SupabaseConfig report
-// "not configured". Optional by design: absent keys leave BuildConfig.SUPABASE_URL blank and the
-// app runs fully offline. The anon key is a publishable client key, never a service_role/secret key.
-val focusShieldLocalProperties = Properties().apply {
-    val file = rootProject.file("local.properties")
+val envProperties = Properties().apply {
+    val file = rootProject.file(".env")
     if (file.exists()) file.inputStream().use { load(it) }
 }
-fun optionalCloudProperty(key: String): String {
-    val value = focusShieldLocalProperties.getProperty(key) ?: System.getenv(key) ?: ""
-    // Escape for safe interpolation into a Java String literal in generated BuildConfig.
+fun optionalProperty(key: String): String {
+    val value = envProperties.getProperty(key) ?: System.getenv(key) ?: ""
     return value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
-val supabaseUrl = optionalCloudProperty("SUPABASE_URL")
-val supabaseAnonKey = optionalCloudProperty("SUPABASE_ANON_KEY")
+val supabaseUrl = optionalProperty("SUPABASE_URL")
+val supabaseAnonKey = optionalProperty("SUPABASE_ANON_KEY")
 
 android {
   namespace = "com.example"
@@ -42,7 +35,6 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    // Optional Supabase cloud config (see helper above). Empty when not configured.
     buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
     buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
   }
@@ -97,6 +89,8 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.add("SUPABASE_URL")
+  ignoreList.add("SUPABASE_ANON_KEY")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
