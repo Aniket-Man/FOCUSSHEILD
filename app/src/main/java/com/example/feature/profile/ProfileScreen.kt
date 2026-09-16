@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -231,9 +232,8 @@ fun ProfileScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 600.dp)
-                    .padding(horizontal = FocusSpacing.screenHorizontal)
-                    .navigationBarsPadding(),
+                    .widthIn(max = 600.dp),
+                contentPadding = PaddingValues(bottom = FocusSpacing.xxl),
                 verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
             ) {
                 // Profile Card Hero
@@ -243,6 +243,7 @@ fun ProfileScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
                             .clip(FocusShapes.card)
                             .background(FocusColors.Surface)
                             .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
@@ -412,18 +413,24 @@ fun ProfileScreen(
                 // Account & Cloud Backup (optional; local-first until the user signs in)
                 item {
                     val authenticated = accountState.auth is AuthState.Authenticated
-                    ProfileNavigationRow(
-                        title = "Account & Cloud Backup",
-                        subtitle = if (authenticated) {
-                            "Cloud backup on • Manage your account, sync, or sign out"
-                        } else {
-                            "Optional — everything stays on this device until you sign in"
-                        },
-                        icon = if (authenticated) Icons.Rounded.CloudDone else Icons.Rounded.Shield,
-                        iconTint = if (authenticated) FocusColors.EmeraldSuccess else FocusColors.Primary,
-                        onClick = onNavigateToAccount,
-                        testTag = "profile_account_nav_row"
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
+                    ) {
+                        ProfileNavigationRow(
+                            title = "Account & Cloud Backup",
+                            subtitle = if (authenticated) {
+                                "Cloud backup on • Manage your account, sync, or sign out"
+                            } else {
+                                "Optional — everything stays on this device until you sign in"
+                            },
+                            icon = if (authenticated) Icons.Rounded.CloudDone else Icons.Rounded.Shield,
+                            iconTint = if (authenticated) FocusColors.EmeraldSuccess else FocusColors.Primary,
+                            onClick = onNavigateToAccount,
+                            testTag = "profile_account_nav_row"
+                        )
+                    }
                 }
 
                 // Rewards & Milestones Section (Horizontal Carousel Cards)
@@ -439,225 +446,249 @@ fun ProfileScreen(
 
                 // Theme Switcher Section (Dark / Light / System)
                 item {
-                    Text(
-                        text = "APP THEME & APPEARANCE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.5.sp
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
+                    ) {
+                        Text(
+                            text = "APP THEME & APPEARANCE",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp
+                            )
                         )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ThemeShifterCard(
-                        currentThemeMode = uiState.preferences.themeMode,
-                        onThemeSelected = { mode ->
-                            settingsViewModel.updateThemeMode(mode)
-                        }
-                    )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ThemeShifterCard(
+                            currentThemeMode = uiState.preferences.themeMode,
+                            onThemeSelected = { mode ->
+                                settingsViewModel.updateThemeMode(mode)
+                            }
+                        )
+                    }
                 }
 
                 // Session History Section
                 item {
-                    Text(
-                        text = "STUDY LOGS & SESSIONS",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.5.sp
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
+                    ) {
+                        Text(
+                            text = "STUDY LOGS & SESSIONS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp
+                            )
                         )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ProfileNavigationRow(
-                        title = "Session History",
-                        subtitle = "View detailed logs, subject distribution, and duration records",
-                        icon = Icons.Rounded.History,
-                        iconTint = FocusColors.Primary,
-                        onClick = onNavigateToHistory,
-                        testTag = "profile_session_history_row"
-                    )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ProfileNavigationRow(
+                            title = "Session History",
+                            subtitle = "View detailed logs, subject distribution, and duration records",
+                            icon = Icons.Rounded.History,
+                            iconTint = FocusColors.Primary,
+                            onClick = onNavigateToHistory,
+                            testTag = "profile_session_history_row"
+                        )
+                    }
                 }
 
                 // Shield Protections & Controls
                 item {
-                    Text(
-                        text = "SHIELD & CONTROLS",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val isDeviceAdminActive by settingsViewModel.isDeviceAdminActive.collectAsStateWithLifecycle()
-                    val pendingDeviceAdminRequest by settingsViewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
-                    val deviceAdminLauncher = rememberLauncherForActivityResult(
-                        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
                     ) {
-                        settingsViewModel.onDeviceAdminRequestResult()
-                    }
-
-                    LaunchedEffect(pendingDeviceAdminRequest) {
-                        if (pendingDeviceAdminRequest) {
-                            deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
+                        Text(
+                            text = "SHIELD & CONTROLS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val isDeviceAdminActive by settingsViewModel.isDeviceAdminActive.collectAsStateWithLifecycle()
+                        val pendingDeviceAdminRequest by settingsViewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
+                        val deviceAdminLauncher = rememberLauncherForActivityResult(
+                            contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+                        ) {
+                            settingsViewModel.onDeviceAdminRequestResult()
                         }
-                    }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // Prevent Uninstall Protection Switch — activates Device Admin
-                        ProfileSwitchRow(
-                            title = "Prevent App Uninstall",
-                            subtitle = when {
-                                uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive ->
-                                    "Active — Device Admin enabled, uninstallation blocked"
-                                uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive ->
-                                    "Pending — Tap to activate Device Admin protection"
-                                else ->
-                                    "Disabled — Prevents deleting FocusShield during study"
-                            },
-                            icon = Icons.Rounded.Shield,
-                            iconTint = when {
-                                uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive -> FocusColors.EmeraldSuccess
-                                uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive -> FocusColors.AmberOrange
-                                else -> FocusColors.Primary
-                            },
-                            checked = uiState.preferences.isBlockUninstallEnabled,
-                            onCheckedChange = { checked ->
-                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                        title = "App Uninstall Protection",
-                                        description = "system settings to prevent FocusShield from being uninstalled",
-                                        onGranted = { settingsViewModel.updateBlockUninstall(true) }
-                                    )
+                        LaunchedEffect(pendingDeviceAdminRequest) {
+                            if (pendingDeviceAdminRequest) {
+                                deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Prevent Uninstall Protection Switch — activates Device Admin
+                            ProfileSwitchRow(
+                                title = "Prevent App Uninstall",
+                                subtitle = when {
+                                    uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive ->
+                                        "Active — Device Admin enabled, uninstallation blocked"
+                                    uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive ->
+                                        "Pending — Tap to activate Device Admin protection"
+                                    else ->
+                                        "Disabled — Prevents deleting FocusShield during study"
+                                },
+                                icon = Icons.Rounded.Shield,
+                                iconTint = when {
+                                    uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive -> FocusColors.EmeraldSuccess
+                                    uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive -> FocusColors.AmberOrange
+                                    else -> FocusColors.Primary
+                                },
+                                checked = uiState.preferences.isBlockUninstallEnabled,
+                                onCheckedChange = { checked ->
+                                    if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                        pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                            title = "App Uninstall Protection",
+                                            description = "system settings to prevent FocusShield from being uninstalled",
+                                            onGranted = { settingsViewModel.updateBlockUninstall(true) }
+                                        )
+                                    } else {
+                                        settingsViewModel.updateBlockUninstall(checked)
+                                    }
+                                },
+                                testTag = "profile_prevent_uninstall_switch"
+                            )
+
+                            ProfileNavigationRow(
+                                title = "Approved Study Channels",
+                                subtitle = "YouTube Study Mode allowlist & Shorts blocker",
+                                icon = Icons.Rounded.SmartDisplay,
+                                iconTint = Color(0xFFEF4444),
+                                onClick = onNavigateToStudyChannels,
+                                testTag = "profile_study_channels_row"
+                            )
+
+                            ProfileNavigationRow(
+                                title = "Strict Mode Rules & Anti-Cheating",
+                                subtitle = "Configure emergency pauses, break rules, and PIN protection",
+                                icon = Icons.Rounded.Security,
+                                iconTint = FocusColors.Primary,
+                                onClick = onNavigateToStrictMode,
+                                testTag = "profile_strict_mode_row"
+                            )
+
+                            ProfileNavigationRow(
+                                title = "Accessibility Blocker Service",
+                                subtitle = if (uiState.isAccessibilityEnabled) "Service active and ready" else "Permission required — Tap to enable",
+                                icon = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                                iconTint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
+                                onClick = { AccessibilityHelper.openAccessibilitySettings(context) },
+                                testTag = "profile_accessibility_row"
+                            )
+
+                            ProfileNavigationRow(
+                                title = "New Updates",
+                                subtitle = if (showUpdateDot) {
+                                    "A new FocusShield version is available"
                                 } else {
-                                    settingsViewModel.updateBlockUninstall(checked)
-                                }
-                            },
-                            testTag = "profile_prevent_uninstall_switch"
-                        )
+                                    "Check for the latest version of FocusShield"
+                                },
+                                icon = Icons.Rounded.SystemUpdate,
+                                iconTint = FocusColors.Primary,
+                                onClick = onNavigateToUpdates,
+                                testTag = "profile_updates_row",
+                                showBadge = showUpdateDot
+                            )
 
-                        ProfileNavigationRow(
-                            title = "Approved Study Channels",
-                            subtitle = "YouTube Study Mode allowlist & Shorts blocker",
-                            icon = Icons.Rounded.SmartDisplay,
-                            iconTint = Color(0xFFEF4444),
-                            onClick = onNavigateToStudyChannels,
-                            testTag = "profile_study_channels_row"
-                        )
-
-                        ProfileNavigationRow(
-                            title = "Strict Mode Rules & Anti-Cheating",
-                            subtitle = "Configure emergency pauses, break rules, and PIN protection",
-                            icon = Icons.Rounded.Security,
-                            iconTint = FocusColors.Primary,
-                            onClick = onNavigateToStrictMode,
-                            testTag = "profile_strict_mode_row"
-                        )
-
-                        ProfileNavigationRow(
-                            title = "Accessibility Blocker Service",
-                            subtitle = if (uiState.isAccessibilityEnabled) "Service active and ready" else "Permission required — Tap to enable",
-                            icon = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
-                            iconTint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
-                            onClick = { AccessibilityHelper.openAccessibilitySettings(context) },
-                            testTag = "profile_accessibility_row"
-                        )
-
-                        ProfileNavigationRow(
-                            title = "New Updates",
-                            subtitle = if (showUpdateDot) {
-                                "A new FocusShield version is available"
-                            } else {
-                                "Check for the latest version of FocusShield"
-                            },
-                            icon = Icons.Rounded.SystemUpdate,
-                            iconTint = FocusColors.Primary,
-                            onClick = onNavigateToUpdates,
-                            testTag = "profile_updates_row",
-                            showBadge = showUpdateDot
-                        )
-
-                        ProfileNavigationRow(
-                            title = "App Tour & System Setup Wizard",
-                            subtitle = "Revisit the 3-step onboarding and permissions walkthrough",
-                            icon = Icons.Rounded.Security,
-                            iconTint = FocusColors.Primary,
-                            onClick = onNavigateToOnboarding,
-                            testTag = "profile_onboarding_row"
-                        )
+                            ProfileNavigationRow(
+                                title = "App Tour & System Setup Wizard",
+                                subtitle = "Revisit the 3-step onboarding and permissions walkthrough",
+                                icon = Icons.Rounded.Security,
+                                iconTint = FocusColors.Primary,
+                                onClick = onNavigateToOnboarding,
+                                testTag = "profile_onboarding_row"
+                            )
+                        }
                     }
                 }
 
                 // Study Defaults
                 item {
-                    Text(
-                        text = "DEFAULT STUDY PREFERENCES",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(FocusSpacing.lg),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.HourglassBottom,
-                                contentDescription = null,
-                                tint = FocusColors.Primary,
-                                modifier = Modifier.size(20.dp)
+                        Text(
+                            text = "DEFAULT STUDY PREFERENCES",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Default Timer Duration",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary
-                                    )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(FocusShapes.card)
+                                .background(FocusColors.Surface)
+                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                                .padding(FocusSpacing.lg),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.HourglassBottom,
+                                    contentDescription = null,
+                                    tint = FocusColors.Primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Text(
-                                    text = "${uiState.preferences.defaultTimerMinutes} minutes per standard study block",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Default Timer Duration",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FocusColors.TextPrimary
+                                        )
                                     )
-                                )
+                                    Text(
+                                        text = "${uiState.preferences.defaultTimerMinutes} minutes per standard study block",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary
+                                        )
+                                    )
+                                }
                             }
-                        }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.Schedule,
-                                contentDescription = null,
-                                tint = FocusColors.AmberOrange,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Pomodoro Default Intervals",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Schedule,
+                                    contentDescription = null,
+                                    tint = FocusColors.AmberOrange,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Text(
-                                    text = "${uiState.preferences.pomodoroFocusMinutes}m Focus • ${uiState.preferences.pomodoroShortBreakMinutes}m Break • ${uiState.preferences.pomodoroCycles} Cycles",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Pomodoro Default Intervals",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FocusColors.TextPrimary
+                                        )
                                     )
-                                )
+                                    Text(
+                                        text = "${uiState.preferences.pomodoroFocusMinutes}m Focus • ${uiState.preferences.pomodoroShortBreakMinutes}m Break • ${uiState.preferences.pomodoroCycles} Cycles",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
@@ -665,55 +696,61 @@ fun ProfileScreen(
 
                 // About FocusShield
                 item {
-                    Text(
-                        text = "ABOUT FOCUSSHIELD",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            letterSpacing = 0.5.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(FocusSpacing.lg)
+                            .padding(horizontal = FocusSpacing.screenHorizontal)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(FocusColors.PrimaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Security,
-                                    contentDescription = null,
-                                    tint = FocusColors.Primary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "FocusShield v1.0",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = FocusColors.TextPrimary
+                        Text(
+                            text = "ABOUT FOCUSSHIELD",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(FocusShapes.card)
+                                .background(FocusColors.Surface)
+                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                                .padding(FocusSpacing.lg)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(FocusColors.PrimaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Security,
+                                        contentDescription = null,
+                                        tint = FocusColors.Primary,
+                                        modifier = Modifier.size(22.dp)
                                     )
-                                )
-                                Text(
-                                    text = "Local-First Study & Anti-Distraction Engine for JEE & NEET",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary,
-                                        fontSize = 12.sp
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "FocusShield v1.0",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = FocusColors.TextPrimary
+                                        )
                                     )
-                                )
+                                    Text(
+                                        text = "Local-First Study & Anti-Distraction Engine for JEE & NEET",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
                             }
                         }
                     }

@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
+import com.example.core.design.FocusSpacing
 import com.example.feature.rewards.domain.BadgeTier
 import com.example.feature.rewards.domain.RewardBadge
 import java.text.SimpleDateFormat
@@ -115,11 +116,13 @@ fun ProfileRewardsSection(
 
         if (claimableBadges.isNotEmpty()) {
             Spacer(modifier = Modifier.height(10.dp))
-            ClaimableCallout(
-                count = claimableBadges.size,
-                accentColor = Color(claimableBadges.first().primaryColorHex),
-                onClick = { selectedBadgeForDetail = claimableBadges.first() }
-            )
+            Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
+                ClaimableCallout(
+                    count = claimableBadges.size,
+                    accentColor = Color(claimableBadges.first().primaryColorHex),
+                    onClick = { selectedBadgeForDetail = claimableBadges.first() }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -238,7 +241,11 @@ private fun AchievementsHeader(
     nextBadge: RewardBadge?,
     nextProgress: Float
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = FocusSpacing.screenHorizontal)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -485,8 +492,9 @@ private fun BadgeFilterRow(
     claimableCount: Int
 ) {
     LazyRow(
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 2.dp)
+        contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal)
     ) {
         val options = listOf(
             BadgeFilter.ALL to "All ($totalCount)",
@@ -535,7 +543,12 @@ private fun BadgeCollectionRow(
     onClaim: (String) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = FocusSpacing.screenHorizontal),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelMedium.copy(
@@ -562,8 +575,9 @@ private fun BadgeCollectionRow(
         }
         Spacer(modifier = Modifier.height(8.dp))
         LazyRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp)
+            contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = 4.dp)
         ) {
             items(badges, key = { it.id }) { badge ->
                 RewardBadgeCard(
