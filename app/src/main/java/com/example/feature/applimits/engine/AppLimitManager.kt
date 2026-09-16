@@ -149,7 +149,7 @@ class AppLimitManager private constructor(
         // Yesterday's allowance is over; a stale snapshot must not re-arm it today.
         if (snapshot.dateString != appLimitRepository.getTodayDateString()) {
             Log.i(tag, "Discarding app limit session snapshot from ${snapshot.dateString}")
-            sessionStore.clear()
+            clearPersistedSession()
             return
         }
 
