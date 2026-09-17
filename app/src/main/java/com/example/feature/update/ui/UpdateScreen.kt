@@ -104,22 +104,42 @@ fun UpdateScreen(
         val intent = pendingInstall
         pendingInstall = null
         if (intent != null && viewModel.canInstallPackages()) {
-            installLauncher.launch(intent)
+            try {
+                installLauncher.launch(intent)
+            } catch (_: Exception) {
+                viewModel.cancelInstall()
+            }
+        } else {
+            // Permission was declined (or Android returned without granting it). Do not leave the
+            // screen stuck in Installing; the validated APK can still be installed later.
+            viewModel.cancelInstall()
         }
     }
 
     fun startInstall() {
         val intent = viewModel.createInstallIntent() ?: return
+        // This synchronous transition both renders the waiting state and makes a rapid second tap a
+        // no-op, because createInstallIntent() only accepts Downloaded.
+        viewModel.beginInstall()
         if (viewModel.canInstallPackages()) {
-            installLauncher.launch(intent)
+            try {
+                installLauncher.launch(intent)
+            } catch (_: Exception) {
+                viewModel.cancelInstall()
+            }
         } else {
             pendingInstall = intent
-            unknownSourcesLauncher.launch(
-                Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    android.net.Uri.parse("package:${context.packageName}")
+            try {
+                unknownSourcesLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:${context.packageName}")
+                    )
                 )
-            )
+            } catch (_: Exception) {
+                pendingInstall = null
+                viewModel.cancelInstall()
+            }
         }
     }
 
@@ -188,9 +208,8 @@ fun UpdateScreen(
                 )
 
                 UpdateState.Installing -> StatusContent(
-                    // Reached only if a future build learns the installer's outcome. The handoff
-                    // itself happens in the system installer, which the app cannot observe
-                    // (prompt.txt §9).
+                    // The system installer owns the actual operation. This state covers the handoff
+                    // and prevents another install launch while Android's UI is in front.
                     icon = { CircularProgressIndicator(color = FocusColors.Primary, strokeWidth = 2.dp) },
                     title = "Waiting for the installer…",
                     message = "Confirm the installation in the Android dialog to finish updating FocusShield.",

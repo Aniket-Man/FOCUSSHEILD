@@ -80,7 +80,9 @@ class UpdateChecker(
             // release, which happens on a local build. Any dismissal still pending for this version
             // is stale now, so it is cleared rather than left to resurface (prompt.txt §23 TEST 10).
             preferences.recordCheck(info.versionName, failed = false)
-            preferences.clearForInstalled(info.versionName)
+            // Clear against the running build, not the remote tag. They differ when a local/dev build
+            // is ahead of the latest published release.
+            preferences.clearForInstalled(installedVersionName)
             UpdateCheckResult.UpToDate
         }
     }

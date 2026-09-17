@@ -36,6 +36,7 @@ sealed interface UpdateState {
 
     data class Downloaded(val info: UpdateInfo, val file: File) : UpdateState
 
+    /** The validated APK has been handed to Android's permission/installer flow. */
     data object Installing : UpdateState
 
     /** @param isCheckFailure true when the *check* failed (offline, private repo) rather than a download. */
