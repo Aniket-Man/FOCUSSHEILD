@@ -48,4 +48,10 @@ class UpdateViewModel(
 
     /** The installer intent, or null if there is nothing downloaded. */
     fun createInstallIntent(): Intent? = manager.createInstallIntent()
+
+    /** Transitions Downloaded → Installing immediately before handing control to Android. */
+    fun beginInstall() = manager.beginInstall()
+
+    /** Restores Downloaded when the user declines the unknown-sources permission. */
+    fun cancelInstall() = manager.cancelInstall()
 }

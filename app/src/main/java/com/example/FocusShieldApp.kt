@@ -108,7 +108,8 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             ),
             preferences = updatePreferences,
             downloadManager = updateDownloadManager,
-            scope = applicationScope
+            scope = applicationScope,
+            installedVersionName = BuildConfig.VERSION_NAME
         )
     }
 

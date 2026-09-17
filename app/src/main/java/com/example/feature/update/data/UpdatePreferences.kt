@@ -56,7 +56,12 @@ data class UpdatePrefs(
     val latestInfoJson: String? = null
 )
 
-class UpdatePreferences(private val context: Context) {
+class UpdatePreferences internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    private val now: () -> Long = System::currentTimeMillis
+) {
+
+    constructor(context: Context) : this(context.updateDataStore)
 
     private object Keys {
         val LAST_CHECK_TIME = longPreferencesKey("last_check_time")
@@ -70,7 +75,7 @@ class UpdatePreferences(private val context: Context) {
         val LATEST_INFO_JSON = stringPreferencesKey("latest_info_json")
     }
 
-    val flow: Flow<UpdatePrefs> = context.updateDataStore.data
+    val flow: Flow<UpdatePrefs> = dataStore.data
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
         .map { prefs ->
             UpdatePrefs(
@@ -90,19 +95,19 @@ class UpdatePreferences(private val context: Context) {
 
     /** Records the outcome of a check. [latestVersion] is null when the check failed. */
     suspend fun recordCheck(latestVersion: String?, failed: Boolean) {
-        context.updateDataStore.edit { prefs ->
-            prefs[Keys.LAST_CHECK_TIME] = System.currentTimeMillis()
+        dataStore.edit { prefs ->
+            prefs[Keys.LAST_CHECK_TIME] = now()
             prefs[Keys.LAST_CHECK_FAILED] = failed
             if (latestVersion != null) prefs[Keys.LATEST_KNOWN_VERSION] = latestVersion
         }
     }
 
     suspend fun markDismissed(version: String) {
-        context.updateDataStore.edit { it[Keys.DISMISSED_VERSION] = version }
+        dataStore.edit { it[Keys.DISMISSED_VERSION] = version }
     }
 
     suspend fun markNotified(version: String) {
-        context.updateDataStore.edit { it[Keys.NOTIFIED_VERSION] = version }
+        dataStore.edit { it[Keys.NOTIFIED_VERSION] = version }
     }
 
     /**
@@ -110,45 +115,62 @@ class UpdatePreferences(private val context: Context) {
      * Profile red dot (prompt.txt §7/§18).
      */
     suspend fun markRead(version: String) {
-        context.updateDataStore.edit { it[Keys.READ_VERSION] = version }
+        dataStore.edit { it[Keys.READ_VERSION] = version }
     }
 
     /** Persists (or clears, with null) the serialized offer so it survives process death. */
     suspend fun setLatestInfoJson(json: String?) {
-        context.updateDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             if (json == null) prefs.remove(Keys.LATEST_INFO_JSON) else prefs[Keys.LATEST_INFO_JSON] = json
         }
     }
 
     suspend fun recordDownload(version: String, path: String) {
-        context.updateDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             prefs[Keys.DOWNLOADED_VERSION] = version
             prefs[Keys.DOWNLOADED_PATH] = path
         }
     }
 
     suspend fun clearDownload() {
-        context.updateDataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             prefs.remove(Keys.DOWNLOADED_VERSION)
             prefs.remove(Keys.DOWNLOADED_PATH)
         }
     }
 
     /**
-     * Clears state belonging to a release that has since been installed, keeping the check history.
-     * Called when the running build is already at or past the version we were nagging about, so a
-     * fresh install does not keep showing "update available" (prompt.txt §23 TEST 10).
+     * Clears every piece of release-specific state once the running build is current.
+     *
+     * These values are intentionally removed unconditionally. The installed build may be ahead of
+     * the published build (for example, a local build), in which case keys belonging to the older
+     * remote version are just as stale as keys whose version exactly matches [version]. In
+     * particular, the serialized offer must go: retaining it can resurrect an installed update on
+     * the next process start and turn the Profile red dot back on.
      */
     suspend fun clearForInstalled(version: String) {
-        context.updateDataStore.edit { prefs ->
-            if (prefs[Keys.DISMISSED_VERSION] == version) prefs.remove(Keys.DISMISSED_VERSION)
-            if (prefs[Keys.NOTIFIED_VERSION] == version) prefs.remove(Keys.NOTIFIED_VERSION)
-            if (prefs[Keys.READ_VERSION] == version) prefs.remove(Keys.READ_VERSION)
-            if (prefs[Keys.DOWNLOADED_VERSION] == version) {
-                prefs.remove(Keys.DOWNLOADED_VERSION)
-                prefs.remove(Keys.DOWNLOADED_PATH)
-            }
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.DISMISSED_VERSION)
+            prefs.remove(Keys.NOTIFIED_VERSION)
+            prefs.remove(Keys.READ_VERSION)
+            prefs.remove(Keys.DOWNLOADED_VERSION)
+            prefs.remove(Keys.DOWNLOADED_PATH)
+            prefs.remove(Keys.LATEST_INFO_JSON)
             prefs[Keys.LATEST_KNOWN_VERSION] = version
+        }
+    }
+
+    /**
+     * Drops an internally inconsistent cached offer and makes the next automatic check immediately
+     * due. This can happen if the process dies after recording a newly published version but before
+     * its full [com.example.feature.update.domain.UpdateInfo] JSON has been persisted.
+     */
+    suspend fun discardStaleOfferForRefresh() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.DOWNLOADED_VERSION)
+            prefs.remove(Keys.DOWNLOADED_PATH)
+            prefs.remove(Keys.LATEST_INFO_JSON)
+            prefs[Keys.LAST_CHECK_TIME] = 0L
         }
     }
 }

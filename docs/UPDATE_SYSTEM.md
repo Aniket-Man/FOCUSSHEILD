@@ -139,9 +139,12 @@ the cloud-synced `FocusPreferencesRepository` — update bookkeeping is about *t
 never uploaded.
 
 Beyond the scalars, the last known `UpdateInfo` is stored as JSON so a cold start can render the
-update screen before any network call. `UpdateManager.restore()` rehydrates `UpdateState.Downloaded`
-when `downloadedPath` still exists on disk and `downloadedVersion` still matches, so a process death
-mid-flow does not lose a finished download.
+update screen before any network call. `UpdateManager.restore()` first rejects offers that are equal
+to or older than the running `BuildConfig.VERSION_NAME`; this clears stale red-dot, notification,
+JSON, and download state even when the app was updated externally. It rehydrates
+`UpdateState.Downloaded` only when `downloadedPath` still exists on disk, `downloadedVersion` still
+matches, and no newer `latestKnownVersion` was recorded. A mismatched partial cache is discarded and
+forces an immediate fresh check rather than offering an obsolete APK.
 
 ## 9. Release checklist (§24, and prompt.txt lines 809–852)
 
@@ -166,5 +169,6 @@ notes for confirmation first.
   single device far below that.
 - Release notes are parsed as a small markdown subset (headings, bullets, `**bold**`, `` `code` ``)
   locally; no HTML is fetched or rendered as trusted UI (§12).
-- `UpdateState.Installing` is declared in the state model but is not currently produced — the
-  installer is a separate process the app cannot observe past `ActivityResult`.
+- Android's installer is a separate process, so `UpdateState.Installing` represents the hand-off and
+  prevents duplicate launches; the app determines the outcome by checking the installed version
+  again when the installer returns.

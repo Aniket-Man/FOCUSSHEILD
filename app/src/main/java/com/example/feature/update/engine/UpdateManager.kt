@@ -6,8 +6,8 @@ import com.example.feature.update.data.UpdateCheckResult
 import com.example.feature.update.data.UpdateDownloadException
 import com.example.feature.update.data.UpdateDownloadManager
 import com.example.feature.update.data.UpdatePreferences
-import com.example.feature.update.data.UpdateSourceUnavailableException
 import com.example.feature.update.domain.DownloadProgress
+import com.example.feature.update.domain.SemanticVersion
 import com.example.feature.update.domain.UpdateInfo
 import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.notification.UpdateNotificationHelper
@@ -45,7 +45,8 @@ class UpdateManager(
     private val checker: UpdateChecker,
     private val preferences: UpdatePreferences,
     private val downloadManager: UpdateDownloadManager,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val installedVersionName: String
 ) {
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -58,31 +59,81 @@ class UpdateManager(
     /** Serialises checks so a resume-triggered check cannot race a manual one. */
     private val checkMutex = Mutex()
 
+    /** Keeps restore/cache writes from interleaving with a completed network result. */
+    private val stateMutex = Mutex()
+
     /** The update currently on offer, if any. Kept separately from [state] so it survives a failure. */
     private var current: UpdateInfo? = null
 
     private var downloadJob: Job? = null
 
+    /** Downloaded state retained while Android's installer (or its permission screen) is in front. */
+    private var installCandidate: UpdateState.Downloaded? = null
+
     /** Restores any persisted update state. Safe to call once, from `Application.onCreate`. */
     fun restore() {
         scope.launch {
-            val prefs = preferences.current()
-            val restored = prefs.latestInfoJson?.let(::decodeInfo)
-            if (restored == null) return@launch
+            val needsFreshCheck = stateMutex.withLock {
+                val prefs = preferences.current()
+                val rawInfo = prefs.latestInfoJson
+                val restored = rawInfo?.let(::decodeInfo)
 
-            // A downloaded APK that is still on disk means the user was one tap from installing.
-            val path = prefs.downloadedPath
-            if (prefs.downloadedVersion == restored.versionName && path != null) {
-                val file = File(path)
-                if (file.exists() && file.length() > 0) {
+                if (restored == null) {
+                    current = null
+                    _showDot.value = false
+                    // Invalid JSON cannot be safely offered. Discard it atomically and bypass the
+                    // cooldown so the full release metadata is fetched again.
+                    if (rawInfo != null) {
+                        discardStaleOffer()
+                        true
+                    } else {
+                        false
+                    }
+                } else if (!isNewerThanInstalled(restored)) {
+                    // The app may have been updated through our installer, a file manager, or ADB.
+                    // Detect that before restoring any UI so neither the old offer nor its
+                    // notification can survive the new process.
+                    clearInstalledOffer()
+                    false
+                } else if (prefs.latestKnownVersion?.let {
+                        SemanticVersion.isNewer(it, restored.versionName)
+                    } == true
+                ) {
+                    // recordCheck() is written before the complete UpdateInfo. If the process dies
+                    // between those writes, latestKnownVersion is the only evidence that this APK is
+                    // obsolete. Remove it and force a complete check instead of offering a downgrade.
+                    discardStaleOffer()
+                    true
+                } else {
                     current = restored
-                    _state.value = UpdateState.Downloaded(restored, file)
+
+                    // A downloaded APK that is still on disk means the user was one tap from
+                    // installing. It is restored only when it belongs to the current cached offer.
+                    val path = prefs.downloadedPath
+                    if (prefs.downloadedVersion == restored.versionName && path != null) {
+                        val file = File(path)
+                        if (file.exists() && file.length() > 0) {
+                            _state.value = UpdateState.Downloaded(restored, file)
+                        } else {
+                            preferences.clearDownload()
+                            _state.value = UpdateState.UpdateAvailable(restored, showPrompt = false)
+                        }
+                    } else {
+                        if (prefs.downloadedVersion != null || path != null) {
+                            preferences.clearDownload()
+                            downloadManager.cleanUpObsolete(keepName = null)
+                        }
+                        _state.value = UpdateState.UpdateAvailable(restored, showPrompt = false)
+                    }
                     refreshDot()
-                    return@launch
+                    false
                 }
-                preferences.clearDownload()
             }
-            refreshDot()
+
+            // Usually Application.onCreate also requests a background check. Calling it here for an
+            // inconsistent cache makes restore correct on its own; checkMutex and the cooldown make
+            // the duplicate launch harmless.
+            if (needsFreshCheck) runBackgroundCheck()
         }
     }
 
@@ -105,23 +156,36 @@ class UpdateManager(
      * Both paths funnel through here so the cooldown rule still lives in exactly one place.
      */
     suspend fun runBackgroundCheck() {
-        val result = checkMutex.withLock { checker.check(manual = false) }
-        applyResult(result, manual = false)
+        checkMutex.withLock {
+            val result = checker.check(manual = false)
+            stateMutex.withLock { applyResult(result, manual = false) }
+        }
     }
 
     /** User-initiated check from Profile → New Updates. Bypasses the cooldown and may report failure. */
     fun checkManually() {
         scope.launch {
-            _state.value = UpdateState.Checking
-            val result = checkMutex.withLock { checker.check(manual = true) }
-            applyResult(result, manual = true)
+            checkMutex.withLock {
+                stateMutex.withLock { _state.value = UpdateState.Checking }
+                val result = checker.check(manual = true)
+                stateMutex.withLock { applyResult(result, manual = true) }
+            }
         }
     }
 
     private suspend fun applyResult(result: UpdateCheckResult, manual: Boolean) {
         when (result) {
             is UpdateCheckResult.Available -> {
+                // UpdateChecker already enforces this comparison. Keep the guard here as a final
+                // invariant so a stale/custom checker result can never light the dot for the build
+                // that is currently installed.
+                if (!isNewerThanInstalled(result.info)) {
+                    clearInstalledOffer()
+                    return
+                }
+
                 current = result.info
+                installCandidate = null
                 val prefs = preferences.current()
 
                 if (checker.shouldNotify(prefs, result.info)) {
@@ -139,13 +203,7 @@ class UpdateManager(
                 refreshDot()
             }
 
-            UpdateCheckResult.UpToDate -> {
-                current = null
-                persistInfo(null)
-                UpdateNotificationHelper.clear(context)
-                _state.value = UpdateState.UpToDate
-                refreshDot()
-            }
+            UpdateCheckResult.UpToDate -> clearInstalledOffer()
 
             is UpdateCheckResult.Failed -> {
                 // An automatic failure leaves whatever we already knew on screen, and says nothing.
@@ -168,21 +226,25 @@ class UpdateManager(
 
     /** "Later" on the popup: hides the dialog for this version, keeps everything else. */
     fun dismissPrompt() {
-        val info = current ?: return
         scope.launch {
-            preferences.markDismissed(info.versionName)
-            _state.value = UpdateState.UpdateAvailable(info = info, showPrompt = false)
-            refreshDot()
+            stateMutex.withLock {
+                val info = current ?: return@withLock
+                preferences.markDismissed(info.versionName)
+                _state.value = UpdateState.UpdateAvailable(info = info, showPrompt = false)
+                refreshDot()
+            }
         }
     }
 
     /** Explicit "mark as read" — one of only two ways the red dot goes away (prompt.txt §7). */
     fun markRead() {
-        val info = current ?: return
         scope.launch {
-            preferences.markRead(info.versionName)
-            UpdateNotificationHelper.clear(context)
-            refreshDot()
+            stateMutex.withLock {
+                val info = current ?: return@withLock
+                preferences.markRead(info.versionName)
+                UpdateNotificationHelper.clear(context)
+                refreshDot()
+            }
         }
     }
 
@@ -238,6 +300,30 @@ class UpdateManager(
         }
     }
 
+    /**
+     * Moves the state machine into the installer hand-off and prevents duplicate install taps.
+     * Android performs the installation in a separate activity; the result callback re-checks the
+     * installed version to decide whether this becomes UpToDate or returns to an available update.
+     */
+    fun beginInstall() {
+        val downloaded = _state.value as? UpdateState.Downloaded ?: return
+        installCandidate = downloaded
+        _state.value = UpdateState.Installing
+    }
+
+    /** Returns to the downloaded state when the unknown-sources permission screen is dismissed. */
+    fun cancelInstall() {
+        val candidate = installCandidate
+        installCandidate = null
+        if (_state.value is UpdateState.Installing && candidate != null) {
+            _state.value = if (candidate.file.exists() && candidate.file.length() > 0) {
+                candidate
+            } else {
+                current?.let { UpdateState.UpdateAvailable(it, showPrompt = false) } ?: UpdateState.Idle
+            }
+        }
+    }
+
     /** True when the OS still needs the user to grant "install unknown apps" for FocusShield. */
     fun canInstallPackages(): Boolean = downloadManager.canInstallPackages()
 
@@ -254,21 +340,94 @@ class UpdateManager(
     /** Called by the ViewModel when the screen opens, so a cached offer is shown without a re-check. */
     fun refreshFromCache() {
         scope.launch {
-            if (_state.value is UpdateState.Downloaded || _state.value is UpdateState.Downloading) return@launch
-            val info = current ?: preferences.current().latestInfoJson?.let(::decodeInfo)
-            current = info
-            _state.value = when {
-                info != null -> UpdateState.UpdateAvailable(info, showPrompt = false)
-                else -> _state.value
+            val needsFreshCheck = stateMutex.withLock {
+                if (
+                    _state.value is UpdateState.Downloaded ||
+                    _state.value is UpdateState.Downloading ||
+                    _state.value is UpdateState.Installing
+                ) {
+                    return@withLock false
+                }
+
+                val prefs = preferences.current()
+                val rawInfo = prefs.latestInfoJson
+                val info = current ?: rawInfo?.let(::decodeInfo)
+
+                when {
+                    info == null && rawInfo != null -> {
+                        current = null
+                        discardStaleOffer()
+                        true
+                    }
+
+                    info != null && !isNewerThanInstalled(info) -> {
+                        // Do not trust cache ordering: this check protects the update screen even if
+                        // it opens before the asynchronous Application.restore() coroutine finishes.
+                        clearInstalledOffer()
+                        false
+                    }
+
+                    info != null && prefs.latestKnownVersion?.let {
+                        SemanticVersion.isNewer(it, info.versionName)
+                    } == true -> {
+                        current = null
+                        discardStaleOffer()
+                        true
+                    }
+
+                    info != null -> {
+                        current = info
+                        _state.value = UpdateState.UpdateAvailable(info, showPrompt = false)
+                        refreshDot()
+                        false
+                    }
+
+                    else -> {
+                        current = null
+                        _showDot.value = false
+                        false
+                    }
+                }
             }
-            refreshDot()
+
+            if (needsFreshCheck) runBackgroundCheck()
         }
     }
 
     private suspend fun refreshDot() {
         val info = current
-        _showDot.value = info != null && preferences.current().readVersion != info.versionName
+        // Defense in depth: stale in-memory/cache state must never advertise a version that the
+        // running BuildConfig is already at or beyond.
+        if (info == null || !isNewerThanInstalled(info)) {
+            _showDot.value = false
+            return
+        }
+        _showDot.value = preferences.current().readVersion != info.versionName
     }
+
+    /** Clears persisted, in-memory, on-disk, and notification state for an installed offer. */
+    private suspend fun clearInstalledOffer() {
+        current = null
+        installCandidate = null
+        preferences.clearForInstalled(installedVersionName)
+        downloadManager.cleanUpObsolete(keepName = null)
+        UpdateNotificationHelper.clear(context)
+        _state.value = UpdateState.UpToDate
+        _showDot.value = false
+    }
+
+    /** Discards mismatched cache records and makes the next check bypass the cooldown. */
+    private suspend fun discardStaleOffer() {
+        current = null
+        installCandidate = null
+        downloadManager.cleanUpObsolete(keepName = null)
+        preferences.discardStaleOfferForRefresh()
+        _state.value = UpdateState.Idle
+        _showDot.value = false
+    }
+
+    private fun isNewerThanInstalled(info: UpdateInfo): Boolean =
+        SemanticVersion.isNewer(info.versionName, installedVersionName)
 
     private suspend fun persistInfo(info: UpdateInfo?) {
         preferences.setLatestInfoJson(info?.let(::encodeInfo))
