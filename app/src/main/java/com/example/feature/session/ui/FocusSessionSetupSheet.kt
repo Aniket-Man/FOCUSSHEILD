@@ -1,4 +1,4 @@
-package com.example.feature.session.ui
+﻿package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -54,6 +54,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
+import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
+import com.example.feature.session.SpecialAppOption
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,11 +68,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.core.accessibility.AccessibilityFeaturePromptInfo
-import com.example.core.accessibility.AccessibilityHelper
-import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
-import com.example.feature.session.SpecialAppOption
-import kotlinx.coroutines.launch
 import com.example.core.design.FocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
@@ -149,8 +150,8 @@ fun FocusSessionSetupSheet(
             transitionSpec = {
                 if (targetState == SetupSubView.MAIN && initialState != SetupSubView.MAIN) {
                     // When returning to MAIN, slide down (exit up)
-                    slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300)) togetherWith
-                        slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300))
+                    slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) togetherWith
+                        slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300))
                 } else if (targetState != SetupSubView.MAIN && initialState == SetupSubView.MAIN) {
                     // When leaving MAIN, slide up from bottom
                     slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) togetherWith
@@ -417,7 +418,7 @@ private fun FocusSetupMainContent(
                         Text(
                             text = when (setupState.selectedMode) {
                                 SessionMode.TIMER -> "${setupState.durationMinutes} mins"
-                                SessionMode.STOPWATCH -> "0 -> ∞"
+                                SessionMode.STOPWATCH -> "0 -> Γê₧"
                                 SessionMode.POMODORO -> "${setupState.pomodoroFocusMinutes} mins"
                             },
                             style = MaterialTheme.typography.bodyLarge.copy(
@@ -532,19 +533,20 @@ private fun FocusSetupMainContent(
                                             .clip(CircleShape)
                                     )
                                 } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF2B52B6)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Language,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF2B52B6)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Language,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
