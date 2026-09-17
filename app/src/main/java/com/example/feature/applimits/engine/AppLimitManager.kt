@@ -198,8 +198,12 @@ class AppLimitManager private constructor(
                 Log.e(tag, "Initial load active limits error: ${e.message}")
             }
             appLimitRepository.getActiveLimitsFlow().collectLatest { limits ->
+                // Atomic swap: build a new map then replace the reference to avoid
+                // a window where enabledLimits is empty during repopulation.
+                val updated = ConcurrentHashMap<String, AppLimitEntity>()
+                limits.forEach { updated[it.packageName] = it }
                 enabledLimits.clear()
-                limits.forEach { enabledLimits[it.packageName] = it }
+                enabledLimits.putAll(updated)
             }
         }
     }
@@ -209,6 +213,8 @@ class AppLimitManager private constructor(
      */
     fun isPackageLimited(packageName: String): Boolean {
         if (enabledLimits.containsKey(packageName)) return true
+        // Fallback: if the in-memory cache hasn't loaded yet, do a synchronous DB read.
+        // This path is only hit during early startup before the Flow collector populates the cache.
         return try {
             val fromDb = kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 appLimitRepository.getLimitByPackage(packageName)
