@@ -1,10 +1,16 @@
 package com.example.feature.session.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -140,131 +146,152 @@ fun FocusSessionSetupSheet(
             }
         }
 
-        when (activeSubView) {
-            SetupSubView.MAIN -> {
-                FocusSetupMainContent(
-                    setupState = setupState,
-                    onModeSelected = { viewModel.selectMode(it) },
-                    onOpenFocusTimePicker = { activeSubView = SetupSubView.FOCUS_TIME },
-                    onOpenBreakPicker = { activeSubView = SetupSubView.BREAK },
-                    onOpenSelectApps = { activeSubView = SetupSubView.SELECT_APPS },
-                    onToggleStrictMode = { viewModel.toggleStrictMode(it) },
-                    onToggleYouTubeStudyMode = { enabled ->
-                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "YouTube Study Mode",
-                                description = "YouTube study channels and distractive video feeds",
-                                onGranted = { viewModel.toggleYouTubeStudyMode(true) }
-                            )
-                        } else {
-                            viewModel.toggleYouTubeStudyMode(enabled)
+        AnimatedContent(
+            targetState = activeSubView,
+            transitionSpec = {
+                if (targetState == SetupSubView.MAIN && initialState != SetupSubView.MAIN) {
+                    // When returning to MAIN, slide down (exit up)
+                    slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300)) togetherWith
+                        slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300))
+                } else if (targetState != SetupSubView.MAIN && initialState == SetupSubView.MAIN) {
+                    // When leaving MAIN, slide up from bottom
+                    slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) togetherWith
+                        slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300))
+                } else {
+                    // Between non-MAIN views, cross-fade
+                    fadeIn(tween(250)) + expandVertically(tween(250)) togetherWith
+                        fadeOut(tween(250)) + shrinkVertically(tween(250))
+                }
+            },
+            contentKey = { it },
+            modifier = Modifier.fillMaxWidth()
+        ) { subView ->
+            when (subView) {
+                SetupSubView.MAIN -> {
+                    FocusSetupMainContent(
+                        setupState = setupState,
+                        onModeSelected = { viewModel.selectMode(it) },
+                        onOpenFocusTimePicker = { activeSubView = SetupSubView.FOCUS_TIME },
+                        onOpenBreakPicker = { activeSubView = SetupSubView.BREAK },
+                        onOpenSelectApps = { activeSubView = SetupSubView.SELECT_APPS },
+                        onToggleStrictMode = { viewModel.toggleStrictMode(it) },
+                        onToggleYouTubeStudyMode = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "YouTube Study Mode",
+                                    description = "YouTube study channels and distractive video feeds",
+                                    onGranted = { viewModel.toggleYouTubeStudyMode(true) }
+                                )
+                            } else {
+                                viewModel.toggleYouTubeStudyMode(enabled)
+                            }
+                        },
+                        onToggleBrowserStudyMode = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "Browser Study Mode",
+                                    description = "distracting websites while allowing study sites",
+                                    onGranted = { viewModel.toggleBrowserStudyMode(true) }
+                                )
+                            } else {
+                                viewModel.toggleBrowserStudyMode(enabled)
+                            }
+                        },
+                        onToggleBlockHomeScreen = { viewModel.toggleBlockHomeScreen(it) },
+                        onToggleBlockUninstall = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "App Uninstall Protection",
+                                    description = "system settings to prevent FocusShield from being uninstalled",
+                                    onGranted = { viewModel.toggleBlockUninstall(true) }
+                                )
+                            } else {
+                                viewModel.toggleBlockUninstall(enabled)
+                            }
+                        },
+                        onToggleBlockSplitScreen = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "Split Screen Blocker",
+                                    description = "split screen multi-window mode",
+                                    onGranted = { viewModel.toggleBlockSplitScreen(true) }
+                                )
+                            } else {
+                                viewModel.toggleBlockSplitScreen(enabled)
+                            }
+                        },
+                        onToggleBlockFloatingWindow = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "Floating Window Blocker",
+                                    description = "picture-in-picture and floating windows",
+                                    onGranted = { viewModel.toggleBlockFloatingWindow(true) }
+                                )
+                            } else {
+                                viewModel.toggleBlockFloatingWindow(enabled)
+                            }
+                        },
+                        onToggleDeepFocusExpanded = { viewModel.toggleDeepFocusExpanded() },
+                        onStartFocusNow = {
+                            val started = viewModel.startSession()
+                            if (started) {
+                                onStartFocus()
+                            }
                         }
-                    },
-                    onToggleBrowserStudyMode = { enabled ->
-                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "Browser Study Mode",
-                                description = "distracting websites while allowing study sites",
-                                onGranted = { viewModel.toggleBrowserStudyMode(true) }
-                            )
-                        } else {
-                            viewModel.toggleBrowserStudyMode(enabled)
-                        }
-                    },
-                    onToggleBlockHomeScreen = { viewModel.toggleBlockHomeScreen(it) },
-                    onToggleBlockUninstall = { enabled ->
-                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "App Uninstall Protection",
-                                description = "system settings to prevent FocusShield from being uninstalled",
-                                onGranted = { viewModel.toggleBlockUninstall(true) }
-                            )
-                        } else {
-                            viewModel.toggleBlockUninstall(enabled)
-                        }
-                    },
-                    onToggleBlockSplitScreen = { enabled ->
-                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "Split Screen Blocker",
-                                description = "split screen multi-window mode",
-                                onGranted = { viewModel.toggleBlockSplitScreen(true) }
-                            )
-                        } else {
-                            viewModel.toggleBlockSplitScreen(enabled)
-                        }
-                    },
-                    onToggleBlockFloatingWindow = { enabled ->
-                        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "Floating Window Blocker",
-                                description = "picture-in-picture and floating windows",
-                                onGranted = { viewModel.toggleBlockFloatingWindow(true) }
-                            )
-                        } else {
-                            viewModel.toggleBlockFloatingWindow(enabled)
-                        }
-                    },
-                    onToggleDeepFocusExpanded = { viewModel.toggleDeepFocusExpanded() },
-                    onStartFocusNow = {
-                        val started = viewModel.startSession()
-                        if (started) {
-                            onStartFocus()
-                        }
-                    }
-                )
-            }
+                    )
+                }
 
-            SetupSubView.FOCUS_TIME -> {
-                FocusTimePickerSheet(
-                    selectedMinutes = setupState.durationMinutes,
-                    onMinutesSelect = { viewModel.setDuration(it) },
-                    onClose = { activeSubView = SetupSubView.MAIN }
-                )
-            }
+                SetupSubView.FOCUS_TIME -> {
+                    FocusTimePickerSheet(
+                        selectedMinutes = setupState.durationMinutes,
+                        onMinutesSelect = { viewModel.setDuration(it) },
+                        onClose = { activeSubView = SetupSubView.MAIN }
+                    )
+                }
 
-            SetupSubView.BREAK -> {
-                BreakSetupSheet(
-                    numberOfBreaks = setupState.numberOfBreaks,
-                    breakDurationMinutes = setupState.breakDurationMinutes,
-                    onNumberOfBreaksChange = { viewModel.setNumberOfBreaks(it) },
-                    onBreakDurationChange = { viewModel.setBreakDuration(it) },
-                    onBack = { activeSubView = SetupSubView.MAIN }
-                )
-            }
+                SetupSubView.BREAK -> {
+                    BreakSetupSheet(
+                        numberOfBreaks = setupState.numberOfBreaks,
+                        breakDurationMinutes = setupState.breakDurationMinutes,
+                        onNumberOfBreaksChange = { viewModel.setNumberOfBreaks(it) },
+                        onBreakDurationChange = { viewModel.setBreakDuration(it) },
+                        onBack = { activeSubView = SetupSubView.MAIN }
+                    )
+                }
 
-            SetupSubView.SELECT_APPS -> {
-                SelectAppsToBlockSheet(
-                    youtubeOption = setupState.youtubeOption,
-                    browserOption = setupState.browserOption,
-                    isDistractingMasterEnabled = setupState.isDistractingMasterEnabled,
-                    blockedAppPackages = setupState.blockedAppPackages,
-                    onYoutubeOptionChange = { option ->
-                        if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "YouTube Study Mode",
-                                description = "YouTube study channels and distractive video feeds",
-                                onGranted = { viewModel.setYoutubeOption(SpecialAppOption.STUDY_MODE) }
-                            )
-                        } else {
-                            viewModel.setYoutubeOption(option)
-                        }
-                    },
-                    onBrowserOptionChange = { option ->
-                        if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                title = "Browser Study Mode",
-                                description = "distracting websites and search results",
-                                onGranted = { viewModel.setBrowserOption(SpecialAppOption.STUDY_MODE) }
-                            )
-                        } else {
-                            viewModel.setBrowserOption(option)
-                        }
-                    },
-                    onToggleDistractingMaster = { enabled, allPkgs -> viewModel.toggleDistractingMaster(enabled, allPkgs) },
-                    onToggleAppBlocked = { pkg, blocked -> viewModel.toggleAppBlocked(pkg, blocked) },
-                    onClose = { activeSubView = SetupSubView.MAIN }
-                )
+                SetupSubView.SELECT_APPS -> {
+                    SelectAppsToBlockSheet(
+                        youtubeOption = setupState.youtubeOption,
+                        browserOption = setupState.browserOption,
+                        isDistractingMasterEnabled = setupState.isDistractingMasterEnabled,
+                        blockedAppPackages = setupState.blockedAppPackages,
+                        onYoutubeOptionChange = { option ->
+                            if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "YouTube Study Mode",
+                                    description = "YouTube study channels and distractive video feeds",
+                                    onGranted = { viewModel.setYoutubeOption(SpecialAppOption.STUDY_MODE) }
+                                )
+                            } else {
+                                viewModel.setYoutubeOption(option)
+                            }
+                        },
+                        onBrowserOptionChange = { option ->
+                            if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = "Browser Study Mode",
+                                    description = "distracting websites and search results",
+                                    onGranted = { viewModel.setBrowserOption(SpecialAppOption.STUDY_MODE) }
+                                )
+                            } else {
+                                viewModel.setBrowserOption(option)
+                            }
+                        },
+                        onToggleDistractingMaster = { enabled, allPkgs -> viewModel.toggleDistractingMaster(enabled, allPkgs) },
+                        onToggleAppBlocked = { pkg, blocked -> viewModel.toggleAppBlocked(pkg, blocked) },
+                        onClose = { activeSubView = SetupSubView.MAIN }
+                    )
+                }
             }
         }
     }
