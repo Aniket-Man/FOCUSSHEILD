@@ -2,7 +2,6 @@ package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -55,12 +54,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
-import com.example.core.accessibility.AccessibilityFeaturePromptInfo
-import com.example.core.accessibility.AccessibilityHelper
-import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
-import com.example.feature.session.SpecialAppOption
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +62,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.core.accessibility.AccessibilityFeaturePromptInfo
+import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
+import com.example.feature.session.SpecialAppOption
+import kotlinx.coroutines.launch
 import com.example.core.design.FocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
@@ -523,15 +521,17 @@ private fun FocusSetupMainContent(
                             Spacer(modifier = Modifier.width((-4).dp))
 
                             // Browser / Chrome Icon
-                            if (installedBrowsers.isNotEmpty() && installedBrowsers.first().icon != null) {
-                                Image(
-                                    bitmap = installedBrowsers.first().icon!!.toImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                )
-                            } else {
+                            if (installedBrowsers.isNotEmpty()) {
+                                val browserIcon = installedBrowsers.first().icon
+                                if (browserIcon != null) {
+                                    Image(
+                                        bitmap = browserIcon.toImageBitmap(),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                    )
+                                } else {
                                 Box(
                                     modifier = Modifier
                                         .size(22.dp)

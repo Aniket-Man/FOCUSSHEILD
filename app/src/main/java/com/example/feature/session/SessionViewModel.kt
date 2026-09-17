@@ -723,8 +723,8 @@ class SessionViewModel(
     }
 
     private fun persistSessionRecord(session: FocusSession, isCompleted: Boolean, isCancelled: Boolean) {
-        if (persistedSessionIds.contains(session.id)) return
-        persistedSessionIds.add(session.id)
+        // Atomic check-and-add: add() returns false if already present, preventing duplicate persists.
+        if (!persistedSessionIds.add(session.id)) return
 
         val actualStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
             session = session,
