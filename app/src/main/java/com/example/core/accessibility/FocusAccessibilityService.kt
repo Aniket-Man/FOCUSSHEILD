@@ -37,6 +37,7 @@ class FocusAccessibilityService : AccessibilityService() {
         var isServiceRunning: Boolean = false
             private set
 
+        @Volatile
         var instance: FocusAccessibilityService? = null
             private set
     }
