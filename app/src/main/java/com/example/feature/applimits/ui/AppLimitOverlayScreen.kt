@@ -359,13 +359,16 @@ fun AppLimitOverlayScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             if (appIconDrawable != null) {
-                                Image(
-                                    bitmap = appIconDrawable!!.toBitmap(64, 64).asImageBitmap(),
-                                    contentDescription = appName,
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                )
+                                val bitmap = appIconDrawable?.toBitmap(64, 64)
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = appName,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                    )
+                                }
                             } else {
                                 Icon(
                                     imageVector = Icons.Rounded.Apps,
