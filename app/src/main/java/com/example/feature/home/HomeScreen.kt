@@ -549,22 +549,43 @@ fun StudyPlanDialog(
     var customSubjectText by remember { mutableStateOf("") }
     var isCustomSubject by remember { mutableStateOf(!subjects.contains(initialPlan?.subject ?: "Physics")) }
 
-    val startMins = StudyPlanRepository.parseTimeToMinutes(startTimeText)
-    val endMins = StudyPlanRepository.parseTimeToMinutes(endTimeText)
-    val durationMins = StudyPlanRepository.calculateDurationMinutes(startMins, endMins)
-    val durationDisplay = StudyPlanRepository.formatDurationHoursMins(durationMins)
+    // Strictly parsed. The write path used to read these through `parseTimeToMinutes`, whose 08:00
+    // placeholder came from the same silent-default family as the scheduler's: typing "9" into the
+    // start field was saved as 08:00 and produced a five-minute plan. The form now refuses it.
+    val startMins = StudyPlanRepository.parseTimeToMinutesOrNull(startTimeText)
+    val endMins = StudyPlanRepository.parseTimeToMinutesOrNull(endTimeText)
+    val timesError = when {
+        startMins == null || endMins == null -> "Enter both times as HH:mm"
+        startMins == endMins -> "Start and end time must differ"
+        else -> null
+    }
+    val durationMins: Int? = if (startMins != null && endMins != null && startMins != endMins) {
+        StudyPlanRepository.calculateDurationMinutes(startMins, endMins)
+    } else {
+        null
+    }
+    val durationDisplay = durationMins
+        ?.let { StudyPlanRepository.formatDurationHoursMins(it) }
+        ?: "—"
 
-    // Overlap check in dialog
-    val hasOverlap = existingPlans.any { other ->
-        if (initialPlan != null && other.id == initialPlan.id) return@any false
-        val otherStart = StudyPlanRepository.parseTimeToMinutes(other.startTime)
-        val otherEnd = StudyPlanRepository.parseTimeToMinutes(other.endTime)
-        // Checks collision
-        (startMins < otherEnd && endMins > otherStart)
+    // Overlap check in dialog. A stored plan whose times cannot be parsed is skipped instead of
+    // being assumed to start at 08:00, which could both hide and invent a collision.
+    val hasOverlap = if (startMins != null && endMins != null && startMins != endMins) {
+        existingPlans.any { other ->
+            if (initialPlan != null && other.id == initialPlan.id) return@any false
+            val otherStart = StudyPlanRepository.parseTimeToMinutesOrNull(other.startTime)
+                ?: return@any false
+            val otherEnd = StudyPlanRepository.parseTimeToMinutesOrNull(other.endTime)
+                ?: return@any false
+            // Checks collision
+            startMins < otherEnd && endMins > otherStart
+        }
+    } else {
+        false
     }
 
     val finalSubject = if (isCustomSubject && customSubjectText.isNotBlank()) customSubjectText else selectedSubject
-    val isFormValid = topicText.isNotBlank() && finalSubject.isNotBlank()
+    val isFormValid = topicText.isNotBlank() && finalSubject.isNotBlank() && timesError == null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -738,7 +759,8 @@ fun StudyPlanDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Duration: $durationDisplay ($durationMins min)",
+                            text = durationMins?.let { "Duration: $durationDisplay ($it min)" }
+                                ?: "Duration: $durationDisplay",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.Primary,
                                 fontWeight = FontWeight.Bold,
@@ -757,6 +779,18 @@ fun StudyPlanDialog(
                             )
                         )
                     }
+                }
+
+                if (timesError != null) {
+                    Text(
+                        text = timesError,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = FocusColors.CoralWarning,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp
+                        ),
+                        modifier = Modifier.testTag("plan_time_error")
+                    )
                 }
 
                 // Optional Notes

@@ -7,7 +7,6 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.example.data.local.entity.StudyPlanEntity
-import com.example.data.repository.StudyPlanRepository
 import java.util.Calendar
 
 /**
@@ -58,11 +57,25 @@ object StudyPlanAlarmScheduler {
         }
 
         val triggerMillis = calculateTriggerMillis(plan.targetDate, plan.startTime)
-        val now = System.currentTimeMillis()
+        if (triggerMillis == null) {
+            // `startTime` is not a valid HH:mm clock time. Guessing a default here (the old code used
+            // 08:00) would fire a reminder at a time the plan does not say, so the plan is skipped and
+            // the invalid value is reported instead. Fixing the plan re-arms it.
+            Log.w(
+                TAG,
+                "Plan '${plan.subjectName}' (${plan.id}) has an invalid startTime " +
+                    "'${plan.startTime}'; no reminder scheduled."
+            )
+            cancelPlanReminder(context, plan.id)
+            return
+        }
 
-        // Only schedule if trigger time is in the future
+        val now = System.currentTimeMillis()
         if (triggerMillis <= now) {
+            // Today's slot has passed: arm nothing, and drop any earlier alarm so an edited plan
+            // cannot leave a stale reminder behind.
             Log.d(TAG, "Skipping past plan: ${plan.subjectName} at ${plan.startTime}")
+            cancelPlanReminder(context, plan.id)
             return
         }
 
@@ -86,40 +99,21 @@ object StudyPlanAlarmScheduler {
 
         val pendingIntent = PendingIntent.getBroadcast(context, requestCode, intent, flags)
 
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
-                } else {
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerMillis,
-                    pendingIntent
-                )
-            } else {
-                alarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerMillis,
-                    pendingIntent
-                )
-            }
-            Log.d(TAG, "Scheduled reminder for ${plan.subjectName} at $triggerMillis (${plan.startTime})")
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Exact alarm permission not granted, falling back to inexact alarm", e)
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to schedule alarm for plan ${plan.id}", e)
+        // Shared with FocusScheduleAlarmScheduler: exact when the platform allows it, a logged
+        // inexact fallback otherwise, never a silent success. See ExactAlarmGate.
+        when (
+            val result = ExactAlarmGate.arm(
+                context = context,
+                alarmManager = alarmManager,
+                triggerAtMillis = triggerMillis,
+                operation = pendingIntent,
+                label = "study-plan reminder for '${plan.subjectName}'"
+            )
+        ) {
+            is ExactAlarmGate.ArmResult.Failed ->
+                Log.e(TAG, "Failed to schedule alarm for plan ${plan.id}: ${result.reason}")
+            else ->
+                Log.d(TAG, "Reminder for ${plan.subjectName} at $triggerMillis (${plan.startTime}) -> $result")
         }
     }
 
@@ -177,26 +171,32 @@ object StudyPlanAlarmScheduler {
                 alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
             }
             Log.d(TAG, "Scheduled Midnight Daily Reset at $triggerMillis")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to schedule midnight daily reset", e)
+        } catch (e: SecurityException) {
+            // No alarm permission on this build/OEM: the reset also runs on the next launch
+            // (FocusShieldApp seeds today's plans), so this is reported rather than fatal.
+            Log.e(TAG, "Midnight daily reset could not be armed (permission): ${e.message}")
+        } catch (e: IllegalStateException) {
+            Log.e(TAG, "Midnight daily reset could not be armed: ${e.message}")
         }
     }
 
     /**
-     * Computes the epoch timestamp in millis for a plan given targetDate and startTime (e.g. "16:30").
+     * Epoch millis of [startTime] on the calendar date of [targetDate], or null when [startTime] is
+     * not a valid `HH:mm` clock time.
+     *
+     * Returning null (instead of the previous silent 08:00 fallback) is what lets the caller skip an
+     * unusable plan and say so, rather than reminding the student at a time the plan never specified.
+     * Parsing is delegated to [ScheduleTime], the single strict parser shared with the automated
+     * schedule feature.
      */
-    fun calculateTriggerMillis(targetDate: Long, startTime: String): Long {
-        val startMins = StudyPlanRepository.parseTimeToMinutes(startTime)
-        val hour = (startMins / 60) % 24
-        val minute = startMins % 60
-
-        val calendar = Calendar.getInstance().apply {
+    fun calculateTriggerMillis(targetDate: Long, startTime: String): Long? {
+        val startMins = ScheduleTime.parseToMinutesOrNull(startTime) ?: return null
+        return Calendar.getInstance().apply {
             timeInMillis = targetDate
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
+            set(Calendar.HOUR_OF_DAY, startMins / 60)
+            set(Calendar.MINUTE, startMins % 60)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-        }
-        return calendar.timeInMillis
+        }.timeInMillis
     }
 }

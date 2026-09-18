@@ -420,13 +420,23 @@ class HomeViewModel(
                 blockedAppPackages = blockedAppPackages.joinToString(","),
                 blockNotifications = blockNotifications
             )
-            app.focusScheduleRepository.addSchedule(schedule)
+            when (val result = app.focusScheduleRepository.addSchedule(schedule)) {
+                // A rejected write is a UI/logic bug (the dialog validates first); log it rather than
+                // pretending the schedule was created.
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected ->
+                    android.util.Log.w("HomeViewModel", "Schedule not saved: ${result.reason}")
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved -> Unit
+            }
         }
     }
 
     fun updateFocusSchedule(schedule: FocusScheduleEntity) {
         viewModelScope.launch {
-            app.focusScheduleRepository.updateSchedule(schedule)
+            when (val result = app.focusScheduleRepository.updateSchedule(schedule)) {
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected ->
+                    android.util.Log.w("HomeViewModel", "Schedule not updated: ${result.reason}")
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved -> Unit
+            }
         }
     }
 

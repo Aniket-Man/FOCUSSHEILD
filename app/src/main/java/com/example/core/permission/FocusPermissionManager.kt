@@ -23,6 +23,16 @@ data class ProtectionPermissionStatus(
     val isNotificationGranted: Boolean = false,
     val isNotificationListenerGranted: Boolean = false,
     val isBatteryOptimizationIgnored: Boolean = false,
+    /**
+     * Whether alarms can be scheduled *exactly* (Android 12+ `SCHEDULE_EXACT_ALARM`, denied by
+     * default on Android 14+ for most apps). Always true below Android 12 and on builds that also
+     * hold `USE_EXACT_ALARM`.
+     *
+     * False does not disable automated schedules: they fall back to an inexact `allowWhileIdle`
+     * alarm, which the system may deliver late. The UI surfaces this so "my session started 20
+     * minutes late" is explained instead of surprising.
+     */
+    val isExactAlarmGranted: Boolean = true,
     val areMandatoryGranted: Boolean = false
 )
 
@@ -162,6 +172,54 @@ object FocusPermissionManager {
     }
 
     /**
+     * Whether the app may schedule *exact* alarms right now.
+     *
+     * Below Android 12 (API 31) exact alarms need no permission. From Android 12 the platform gates
+     * `setExact*` behind `SCHEDULE_EXACT_ALARM`, which:
+     *  - is grantable at runtime and revocable at any time;
+     *  - is **not granted by default on Android 14+** for newly installed apps;
+     *  - is replaced by `USE_EXACT_ALARM` for apps whose core purpose is an alarm clock/calendar and
+     *    which are approved for it on Google Play. FocusShield does not ship that permission (see
+     *    AndroidManifest.xml), so the honest answer here is the user-controlled one.
+     *
+     * `canScheduleExactAlarms()` is API 31+; the deprecated try/catch path below is for older
+     * releases where the concept did not exist.
+     */
+    fun isExactAlarmGranted(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            ?: return false
+        return try {
+            alarmManager.canScheduleExactAlarms()
+        } catch (e: SecurityException) {
+            false
+        }
+    }
+
+    /**
+     * Opens the system screen where the user can grant/deny "Alarms & reminders" for FocusShield.
+     * Returns false when the platform offers no such screen (pre-Android 12), so callers can fall
+     * back to app-details settings.
+     */
+    fun openExactAlarmSettings(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        return try {
+            val intent = Intent(
+                Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                Uri.parse("package:${context.packageName}")
+            ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+            context.startActivity(intent)
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            // Some OEM builds omit the per-package screen; the app-details page is the fallback.
+            openAppDetailsSettings(context)
+            true
+        } catch (e: SecurityException) {
+            false
+        }
+    }
+
+    /**
      * Opens Android System Settings for Notification Listener Access.
      */
     fun openNotificationListenerSettings(context: Context) {
@@ -178,6 +236,7 @@ object FocusPermissionManager {
         val notifications = isNotificationPermissionGranted(context)
         val notificationListener = isNotificationListenerGranted(context)
         val batteryIgnored = isBatteryOptimizationIgnored(context)
+        val exactAlarms = isExactAlarmGranted(context)
         val mandatory = if (requiresBlocking) (overlay && accessibility) else true
 
         val status = ProtectionPermissionStatus(
@@ -187,6 +246,7 @@ object FocusPermissionManager {
             isNotificationGranted = notifications,
             isNotificationListenerGranted = notificationListener,
             isBatteryOptimizationIgnored = batteryIgnored,
+            isExactAlarmGranted = exactAlarms,
             areMandatoryGranted = mandatory
         )
         _permissionStatusFlow.value = status

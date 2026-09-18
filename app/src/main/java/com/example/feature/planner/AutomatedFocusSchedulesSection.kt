@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EventRepeat
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -34,10 +35,17 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,6 +53,9 @@ import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusType
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.example.core.permission.FocusPermissionManager
 import com.example.data.local.entity.FocusScheduleEntity
 
 private val DAYS = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
@@ -149,6 +160,7 @@ fun AutomatedFocusSchedulesSection(
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExactAlarmNotice()
                 schedules.forEach { schedule ->
                     FocusScheduleCard(
                         schedule = schedule,
@@ -343,6 +355,86 @@ fun FocusScheduleCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Tells the user when automated schedules cannot be exact.
+ *
+ * On Android 12+ the user can deny "Alarms & reminders" (`SCHEDULE_EXACT_ALARM`), and on Android 14+
+ * it is denied by default for apps the user has not granted it to. In that state a schedule is still
+ * armed — through an inexact `setAndAllowWhileIdle` alarm — but the system may deliver it up to an
+ * hour late (longer under battery saver/Doze). Saying so is the difference between "the feature is
+ * broken" and "Android is batching my alarms"; tapping the notice opens the system screen that fixes
+ * it.
+ */
+@Composable
+private fun ExactAlarmNotice(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var exactAllowed by remember {
+        mutableStateOf(FocusPermissionManager.isExactAlarmGranted(context))
+    }
+
+    // The grant is changed in a system screen, so the app learns about it when it comes back to the
+    // foreground. Without this, the notice would keep claiming schedules may be late after the user
+    // has already fixed it (and vice versa).
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                exactAllowed = FocusPermissionManager.isExactAlarmGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (exactAllowed) return
+
+    Surface(
+        shape = FocusShapes.medium,
+        color = FocusColors.AmberLight,
+        border = BorderStroke(1.dp, FocusColors.AmberOrange.copy(alpha = 0.4f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("exact_alarm_notice")
+            .clickable {
+                if (!FocusPermissionManager.openExactAlarmSettings(context)) {
+                    FocusPermissionManager.openAppDetailsSettings(context)
+                }
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = FocusColors.AmberOrange,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(
+                    text = "Schedules may start late",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = FocusColors.TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                )
+                Text(
+                    text = "Android is withholding exact alarms. Tap to allow \"Alarms & reminders\".",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = FocusColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                )
             }
         }
     }

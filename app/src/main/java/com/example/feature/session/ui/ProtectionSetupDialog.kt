@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Layers
@@ -109,7 +110,13 @@ fun ProtectionSetupDialog(
             kotlinx.coroutines.delay(400)
             val currentAcc = com.example.core.accessibility.AccessibilityHelper.isAccessibilityServiceEnabled(context)
             val currentOverlay = FocusPermissionManager.isOverlayPermissionGranted(context)
-            if (currentAcc != permissionStatus.isAccessibilityEnabled || currentOverlay != permissionStatus.isOverlayGranted) {
+            // The exact-alarm grant can be changed from this dialog's own row (and revoked by the
+            // system at any time), so it is polled with the rest.
+            val currentExactAlarm = FocusPermissionManager.isExactAlarmGranted(context)
+            if (currentAcc != permissionStatus.isAccessibilityEnabled ||
+                currentOverlay != permissionStatus.isOverlayGranted ||
+                currentExactAlarm != permissionStatus.isExactAlarmGranted
+            ) {
                 com.example.core.accessibility.AccessibilityHelper.updateState(context)
                 onRefreshPermissions()
             }
@@ -216,7 +223,29 @@ fun ProtectionSetupDialog(
                     testTag = "battery_optimization_permission_item"
                 )
 
-                // 4. Notification Permission Card (Optional / Recommended)
+                // 4. Exact alarms (optional, but the difference between "starts at 09:00" and
+                // "starts some time after 09:00" for automated schedules).
+                PermissionItemCard(
+                    title = "Exact alarms",
+                    description = if (permissionStatus.isExactAlarmGranted) {
+                        "Scheduled sessions start at their configured time."
+                    } else {
+                        "Android may delay automated schedules. Tap to allow \"Alarms & reminders\"."
+                    },
+                    icon = Icons.Rounded.Alarm,
+                    isGranted = permissionStatus.isExactAlarmGranted,
+                    isRequired = false,
+                    onClick = {
+                        if (!FocusPermissionManager.openExactAlarmSettings(context)) {
+                            // Pre-Android 12, or an OEM build without the per-app screen.
+                            FocusPermissionManager.openAppDetailsSettings(context)
+                        }
+                        onRefreshPermissions()
+                    },
+                    testTag = "exact_alarm_permission_item"
+                )
+
+                // 5. Notification Permission Card (Optional / Recommended)
                 PermissionItemCard(
                     title = "Notifications",
                     description = "Sends cycle timers and session complete alerts.",

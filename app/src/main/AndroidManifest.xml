@@ -13,11 +13,29 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+        Scheduled sessions are armed with an exact alarm so a session starts at the configured
+        minute. SCHEDULE_EXACT_ALARM is user-grantable and revocable on Android 12+, and is denied
+        by default on Android 14+ for apps the user has not granted it to, so the app:
+          * checks AlarmManager.canScheduleExactAlarms() before every exact request
+            (FocusScheduleAlarmScheduler),
+          * falls back to an inexact setAndAllowWhileIdle alarm instead of failing silently,
+          * tells the user when that fallback is in force, and re-arms on the
+            ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED broadcast.
+        USE_EXACT_ALARM is deliberately NOT requested: it is reserved for alarm-clock/calendar apps
+        whose core function is an alarm, would bypass the user's choice, and is a Play policy risk
+        for a study tool. See docs/SCHEDULED_SESSIONS.md.
+    -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        Both foreground-service types are declared because they are used on different API levels —
+        see the service declaration below and ForegroundServiceTypes.kt. Android requires the type
+        passed to startForeground() to be a subset of the types declared here, so declaring only one
+        of them makes startForeground() throw on the other half of the install base.
+    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!--
@@ -79,11 +97,33 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.TransparentOverlay" />
 
+        <!--
+            Focus-session foreground service.
+
+            foregroundServiceType declarations and the type passed to startForeground() must match
+            exactly, per Android's "the requested type must be a subset of the declared types" rule:
+
+              * Android 14+ (API 34+) → specialUse. A study timer that keeps enforcing an app/website
+                block while the screen is off has no OS-provided category; specialUse with the
+                PROPERTY_SPECIAL_USE_FGS_SUBTYPE justification string below is the documented route
+                (and the one Google Play reviews). REQUIRES the FOREGROUND_SERVICE_SPECIAL_USE
+                permission, declared above.
+              * Android 10–13 (API 29–33) → dataSync. These releases have no specialUse type at all,
+                and startForeground(type=…) rejects any bit that is not declared in the manifest — so
+                declaring only specialUse crashes startForeground with IllegalArgumentException on
+                every Android 10–13 device, which is why both are declared and both permissions are
+                held. REQUIRES the FOREGROUND_SERVICE_DATA_SYNC permission, declared above.
+              * Android 9 and below → no type parameter (the two-argument startForeground).
+
+            The runtime side of this contract lives in ForegroundServiceTypes (selection + declared-
+            mask validation) and FocusSessionForegroundService.startForegroundWithProperType().
+            Do not change one without the other. See docs/FOREGROUND_SERVICE.md.
+        -->
         <service
             android:name=".feature.session.service.FocusSessionForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
+            android:foregroundServiceType="dataSync|specialUse"
             android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -139,6 +179,13 @@
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.DATE_CHANGED" />
+                <!--
+                    Fired by the platform when the user grants or revokes "Alarms & reminders".
+                    Re-arming here is what turns a granted exact-alarm permission into exact alarms
+                    without waiting for a reboot: without it, schedules armed while the permission was
+                    missing would stay inexact until the next boot.
+                -->
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
                 <action android:name="com.example.focusshield.ACTION_DAILY_RESET" />
             </intent-filter>
         </receiver>

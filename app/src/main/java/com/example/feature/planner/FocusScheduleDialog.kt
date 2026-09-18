@@ -777,6 +777,22 @@ fun FocusScheduleDialog(
                             titleError = "Select at least one repeat day"
                             return@Button
                         }
+                        // Time validation, before anything is written. The picker emits HH:mm, but a
+                        // stored/edited value can be anything (e.g. a schedule synced from another
+                        // device), and a zero-length window is invalid rather than a 24-hour session:
+                        // both are refused here so the repository never has to silently correct data.
+                        val startMinutes = com.example.feature.session.notification.ScheduleTime
+                            .parseToMinutesOrNull(startTime)
+                        val endMinutes = com.example.feature.session.notification.ScheduleTime
+                            .parseToMinutesOrNull(endTime)
+                        if (startMinutes == null || endMinutes == null) {
+                            titleError = "Enter a start and end time as HH:mm"
+                            return@Button
+                        }
+                        if (startMinutes == endMinutes) {
+                            titleError = "End time must differ from the start time"
+                            return@Button
+                        }
                         onSave(
                             title.trim(),
                             days,
@@ -929,8 +945,13 @@ private fun TimePickerDialog(
     onDismiss: () -> Unit,
     onTimeSelected: (String) -> Unit
 ) {
-    val parsedHour = initialTime.substringBefore(':').toIntOrNull() ?: 9
-    val parsedMinute = initialTime.substringAfter(':').toIntOrNull() ?: 0
+    // One strict parse for the initial picker position, shared with the rest of the schedule
+    // pipeline. 09:00 is only the *neutral position the picker opens at* when the stored value is
+    // unreadable — it is never written back unless the user confirms it.
+    val initialMinutes = com.example.feature.session.notification.ScheduleTime
+        .parseToMinutesOrNull(initialTime)
+    val parsedHour = initialMinutes?.let { it / 60 } ?: 9
+    val parsedMinute = initialMinutes?.let { it % 60 } ?: 0
 
     var isAm by remember { mutableStateOf(parsedHour < 12) }
     var hour12 by remember {

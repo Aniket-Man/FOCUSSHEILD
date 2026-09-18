@@ -1,5 +1,6 @@
 package com.example.data.local.converter
 
+import android.util.Log
 import androidx.room.TypeConverter
 import com.example.data.local.entity.BlockedEventSource
 import com.example.data.local.entity.BlockedEventType
@@ -8,6 +9,11 @@ import com.example.data.local.entity.StudyActivityType
 import com.example.data.model.SessionMode
 
 class Converters {
+
+    private companion object {
+        const val TAG = "Converters"
+    }
+
     @TypeConverter
     fun fromSessionMode(mode: SessionMode?): String? {
         return mode?.name
@@ -18,7 +24,11 @@ class Converters {
         return value?.let {
             try {
                 SessionMode.valueOf(it)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+                // A row written by a newer/older schema, or corrupted. Room cannot fail the read
+                // (that would take the whole query down), so the documented default is used — but it
+                // is logged, because "SessionMode" is a behavioural downgrade, not a cosmetic one.
+                Log.w(TAG, "Unknown SessionMode '$it'; falling back to TIMER", e)
                 SessionMode.TIMER
             }
         }
@@ -34,7 +44,11 @@ class Converters {
         return value?.let {
             try {
                 StudyActivityType.valueOf(it)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+                // A row written by a newer/older schema, or corrupted. Room cannot fail the read
+                // (that would take the whole query down), so the documented default is used — but it
+                // is logged, because "StudyActivityType" is a behavioural downgrade, not a cosmetic one.
+                Log.w(TAG, "Unknown StudyActivityType '$it'; falling back to FOCUS_SESSION", e)
                 StudyActivityType.FOCUS_SESSION
             }
         }
@@ -50,7 +64,11 @@ class Converters {
         return value?.let {
             try {
                 StudyActivitySource.valueOf(it)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+                // A row written by a newer/older schema, or corrupted. Room cannot fail the read
+                // (that would take the whole query down), so the documented default is used — but it
+                // is logged, because "StudyActivitySource" is a behavioural downgrade, not a cosmetic one.
+                Log.w(TAG, "Unknown StudyActivitySource '$it'; falling back to TIMER", e)
                 StudyActivitySource.TIMER
             }
         }
@@ -66,7 +84,11 @@ class Converters {
         return value?.let {
             try {
                 BlockedEventType.valueOf(it)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+                // A row written by a newer/older schema, or corrupted. Room cannot fail the read
+                // (that would take the whole query down), so the documented default is used — but it
+                // is logged, because "BlockedEventType" is a behavioural downgrade, not a cosmetic one.
+                Log.w(TAG, "Unknown BlockedEventType '$it'; falling back to LEGACY", e)
                 BlockedEventType.LEGACY
             }
         }
@@ -82,7 +104,11 @@ class Converters {
         return value?.let {
             try {
                 BlockedEventSource.valueOf(it)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+                // A row written by a newer/older schema, or corrupted. Room cannot fail the read
+                // (that would take the whole query down), so the documented default is used — but it
+                // is logged, because "BlockedEventSource" is a behavioural downgrade, not a cosmetic one.
+                Log.w(TAG, "Unknown BlockedEventSource '$it'; falling back to LEGACY", e)
                 BlockedEventSource.LEGACY
             }
         }

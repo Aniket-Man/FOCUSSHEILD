@@ -20,6 +20,13 @@ fun optionalProperty(key: String): String {
 }
 val supabaseUrl = optionalProperty("SUPABASE_URL")
 val supabaseAnonKey = optionalProperty("SUPABASE_ANON_KEY")
+// Release-feed configuration for the in-app updater. Both are optional and compile-time only:
+//   UPDATE_FEED_URL   — a backend/static URL serving the release JSON (GitHub-shaped or normalised).
+//                       This is how the updater works while the GitHub repository is private, since
+//                       no GitHub token may ship inside the APK (see docs/UPDATE_SYSTEM.md §1/§15).
+//   UPDATE_REPO_SLUG  — owner/repo override for forks that publish their own releases.
+val updateFeedUrl = optionalProperty("UPDATE_FEED_URL")
+val updateRepoSlug = optionalProperty("UPDATE_REPO_SLUG")
 
 android {
   namespace = "com.example"
@@ -37,6 +44,8 @@ android {
 
     buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
     buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+    buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeedUrl\"")
+    buildConfigField("String", "UPDATE_REPO_SLUG", "\"$updateRepoSlug\"")
   }
 
   signingConfigs {
@@ -91,6 +100,8 @@ secrets {
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
   ignoreList.add("SUPABASE_URL")
   ignoreList.add("SUPABASE_ANON_KEY")
+  ignoreList.add("UPDATE_FEED_URL")
+  ignoreList.add("UPDATE_REPO_SLUG")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

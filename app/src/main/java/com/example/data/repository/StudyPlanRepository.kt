@@ -1,11 +1,13 @@
 package com.example.data.repository
 
+import android.util.Log
 import com.example.cloud.sync.CloudJson
 import com.example.cloud.sync.SyncTables
 import com.example.cloud.sync.SyncTracker
 import com.example.data.local.dao.StudyPlanDao
 import com.example.data.local.entity.StudyPlanEntity
 import com.example.feature.session.notification.StudyPlanAlarmScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -17,6 +19,10 @@ class StudyPlanRepository(
     private val studyPlanDao: StudyPlanDao
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+    private companion object {
+        const val TAG = "StudyPlanRepository"
+    }
 
     val allPlans: Flow<List<StudyPlanEntity>> = studyPlanDao.getAllPlansFlow()
 
@@ -49,8 +55,8 @@ class StudyPlanRepository(
         colorHex: String = getColorForSubject(subjectName),
         notes: String = ""
     ): StudyPlanEntity {
-        val startMins = parseTimeToMinutes(startTime)
-        val endMins = parseTimeToMinutes(endTime)
+        val startMins = requireStoredMinutes(startTime)
+        val endMins = requireStoredMinutes(endTime)
         val durationMins = calculateDurationMinutes(startMins, endMins)
         val dateStr = dateFormat.format(Date(targetDate))
 
@@ -82,8 +88,13 @@ class StudyPlanRepository(
         try {
             val context = com.example.FocusShieldApp.instance
             StudyPlanAlarmScheduler.scheduleSinglePlanReminder(context, plan)
-        } catch (e: Exception) {
-            // Safe fallback
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            // Arming a reminder is a side effect of a successful write, so a failure here must not
+            // fail the write — but it used to be swallowed with no trace at all, which made a plan
+            // that never fired completely undiagnosable.
+            Log.w(TAG, "Could not arm a study-plan reminder for plan ${plan.id}", e)
         }
 
         return plan
@@ -101,8 +112,8 @@ class StudyPlanRepository(
         notes: String = "",
         isCompleted: Boolean = false
     ) {
-        val startMins = parseTimeToMinutes(startTime)
-        val endMins = parseTimeToMinutes(endTime)
+        val startMins = requireStoredMinutes(startTime)
+        val endMins = requireStoredMinutes(endTime)
         val durationMins = calculateDurationMinutes(startMins, endMins)
         val dateStr = dateFormat.format(Date(targetDate))
 
@@ -139,8 +150,13 @@ class StudyPlanRepository(
             } else {
                 StudyPlanAlarmScheduler.scheduleSinglePlanReminder(context, plan)
             }
-        } catch (e: Exception) {
-            // Safe fallback
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            // Arming a reminder is a side effect of a successful write, so a failure here must not
+            // fail the write — but it used to be swallowed with no trace at all, which made a plan
+            // that never fired completely undiagnosable. Logged with the plan id so it can be traced.
+            Log.w(TAG, "Could not update the study-plan alarm for plan $id", e)
         }
     }
 
@@ -165,8 +181,13 @@ class StudyPlanRepository(
                     StudyPlanAlarmScheduler.scheduleSinglePlanReminder(context, plan)
                 }
             }
-        } catch (e: Exception) {
-            // Safe fallback
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            // Arming a reminder is a side effect of a successful write, so a failure here must not
+            // fail the write — but it used to be swallowed with no trace at all, which made a plan
+            // that never fired completely undiagnosable. Logged with the plan id so it can be traced.
+            Log.w(TAG, "Could not update the study-plan alarm for plan $id", e)
         }
     }
 
@@ -176,8 +197,13 @@ class StudyPlanRepository(
         try {
             val context = com.example.FocusShieldApp.instance
             StudyPlanAlarmScheduler.cancelPlanReminder(context, id)
-        } catch (e: Exception) {
-            // Safe fallback
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            // Arming a reminder is a side effect of a successful write, so a failure here must not
+            // fail the write — but it used to be swallowed with no trace at all, which made a plan
+            // that never fired completely undiagnosable. Logged with the plan id so it can be traced.
+            Log.w(TAG, "Could not update the study-plan alarm for plan $id", e)
         }
     }
 
@@ -305,23 +331,57 @@ class StudyPlanRepository(
             try {
                 val context = com.example.FocusShieldApp.instance
                 StudyPlanAlarmScheduler.schedulePlanReminders(context, defaultPlans)
-            } catch (e: Exception) {
-                // Safe fallback
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                // Seeding is best-effort (the plans are already stored); logged, not swallowed.
+                Log.w(TAG, "Could not arm reminders for the default study plans", e)
             }
         }
     }
 
     companion object {
-        fun parseTimeToMinutes(timeString: String): Int {
-            return try {
-                val parts = timeString.trim().split(":")
-                val hour = parts[0].toInt()
-                val min = if (parts.size > 1) parts[1].toInt() else 0
-                hour * 60 + min
-            } catch (e: Exception) {
-                480 // 08:00 fallback
+        /**
+         * Minutes-of-day for a stored `HH:mm` value.
+         *
+         * Strictly parsed by [com.example.feature.session.notification.ScheduleTime] — "9:5", "24:00"
+         * and "half past eight" are all *invalid*, not coerced. When a value is unparsable this returns
+         * [UNKNOWN_TIME_MINUTES] so callers that must have a number (duration display, overlap checks in
+         * the plan dialogs) keep rendering something sensible.
+         *
+         * Scheduling code must **not** use this function: [UNKNOWN_TIME_MINUTES] is a display
+         * placeholder, and using it to arm an alarm would remind the student at 08:00 for a plan whose
+         * time is unknown. Alarm scheduling goes through
+         * [com.example.feature.session.notification.ScheduleTime.parseToMinutesOrNull] and skips
+         * unusable plans instead (see `StudyPlanAlarmScheduler`).
+         */
+        fun parseTimeToMinutes(timeString: String): Int =
+            parseTimeToMinutesOrNull(timeString) ?: UNKNOWN_TIME_MINUTES
+
+        /**
+         * Minutes-of-day for a value that is about to be **stored**.
+         *
+         * A write must not fabricate a clock time, so an unparsable value is logged with its raw
+         * text and stored as [UNKNOWN_TIME_MINUTES] rather than being quietly presented as 08:00.
+         * The UI validates before it gets here (`HomeScreen`'s plan dialog refuses the save), so a
+         * warning here means the value arrived from somewhere the user cannot see — a synced row or
+         * an older build — and it is exactly the case worth being able to find in logcat.
+         */
+        private fun requireStoredMinutes(timeString: String): Int {
+            val parsed = parseTimeToMinutesOrNull(timeString)
+            if (parsed == null) {
+                Log.w(TAG, "Storing plan time '$timeString' as unknown: not a valid HH:mm value")
+                return UNKNOWN_TIME_MINUTES
             }
+            return parsed
         }
+
+        /** Minutes-of-day for a stored `HH:mm` value, or null when it is not a valid clock time. */
+        fun parseTimeToMinutesOrNull(timeString: String): Int? =
+            com.example.feature.session.notification.ScheduleTime.parseToMinutesOrNull(timeString)
+
+        /** 08:00 — deliberately only a display placeholder; never used to arm an alarm. */
+        const val UNKNOWN_TIME_MINUTES: Int = 8 * 60
 
         fun formatMinutesToTime(totalMinutes: Int): String {
             val h = (totalMinutes / 60) % 24

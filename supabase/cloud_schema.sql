@@ -5,12 +5,16 @@
 -- and run it. It is fully idempotent: safe to run again after partial success.
 --
 -- What this sets up
---   1. 15 tables the Android app syncs (Room camelCase columns mirrored 1:1;
---      every table carries `user_id` uuid + RLS, so a user can only ever see
---      their own rows). One further table, `app_limits`, is LEGACY: it is
---      created and protected here only so deployments provisioned before the
---      app-limit system became device-local keep their schema unchanged. The
---      app no longer syncs, writes, or reads it. See the note further down.
+--   1. The 15 tables the Android app actually syncs (Room camelCase columns
+--      mirrored 1:1; every table carries `user_id` uuid + RLS, so a user can
+--      only ever see their own rows). This script creates exactly those 15 and
+--      nothing else.
+--
+--      `app_limits` is LEGACY and is deliberately NOT created here any more:
+--      the App Limit system became device-local, so no app code path syncs,
+--      writes or reads it. An old deployment that already has the table keeps
+--      it (its rows are not touched — see section 6, which closes the Data-API
+--      access to it instead of dropping data for you).
 --   2. RLS enabled + 4 owner-only policies per table (SELECT/INSERT/UPDATE/
 --      DELETE all gated on `auth.uid() = user_id`).
 --   3. Data-API GRANTs to the `authenticated` role (RLS gates rows; GRANT
@@ -41,8 +45,10 @@
 --   while I study" are different features with different persistence semantics.
 --
 -- Prerequisites (app side, NOT this script): enable the "Email" auth provider
--- in Dashboard > Auth. `local.properties` must define SUPABASE_URL /
--- SUPABASE_ANON_KEY, then rebuild the app. The anon key is publishable by
+-- in Dashboard > Auth. Copy `.env.example` to `.env` at the repository root and
+-- fill in SUPABASE_URL / SUPABASE_ANON_KEY (the Gradle build reads that file and
+-- exposes the values as BuildConfig fields — `local.properties` is NOT used),
+-- then rebuild the app. `.env` is git-ignored. The anon key is publishable by
 -- design; the service_role/secret key and DB password are NEVER used by the app.
 --
 -- Column naming note
@@ -113,39 +119,20 @@ create table if not exists public.blocked_websites (
 );
 
 -- ---------------------------------------------------------------------------
--- LEGACY / NOT SYNCED — `app_limits` (the App Limit configuration: daily limit,
--- enabled flag, strict-mode preference, reminders, emergency-allowance count,
--- streak discipline).
+-- LEGACY / NOT SYNCED — `app_limits` (NOT created by this script)
 --
--- The App Limit system is device-local in its entirety, so the Android app no
--- longer registers this table for sync, no longer enqueues uploads for it, no
--- longer serializes it, and no longer restores from it. No code path writes a
--- new row here, and nothing reads the rows that already exist.
+-- The App Limit system became device-local in its entirety: the daily limit,
+-- enabled flag, strict-mode preference, reminders, emergency-allowance count
+-- and discipline streak all describe what *this handset* should enforce, so the
+-- app no longer registers the table for sync, enqueues uploads for it,
+-- serializes it, or restores from it.
 --
--- The table is nevertheless still created and still protected below (RLS +
--- owner-only policies + anon revoke). Deployments provisioned before this change
--- may still hold rows, and dropping a production table to tidy up a schema is
--- not worth the risk of destroying whatever a student configured there. Drop it
--- by hand once you are satisfied that data is expendable — this script does not
--- do it for you.
+-- Because nothing reads it, this script no longer creates it. An older
+-- deployment may still hold rows that a student configured; deleting someone's
+-- data to tidy up a schema is not this script's call, so section 6 leaves the
+-- rows alone and only closes their Data-API exposure. Run the commented-out
+-- DROP there if you have confirmed the rows are expendable.
 -- ---------------------------------------------------------------------------
-create table if not exists public.app_limits (
-    user_id uuid not null,
-    "packageName" text not null,
-    "appName" text,
-    "dailyLimitMinutes" integer,
-    "isEnabled" boolean,
-    "isStrictOverride" boolean,
-    "showRemindersBeforeLimit" boolean,
-    "emergencyUsesAllowed" integer,
-    "streakDays" integer,
-    "lastStreakDate" text,
-    "createdAt" bigint,
-    "updatedAt" bigint,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    primary key (user_id, "packageName")
-);
 
 create table if not exists public.study_channels (
     user_id uuid not null,
@@ -360,7 +347,7 @@ create table if not exists public.user_preferences (
 );
 
 -- ---------------------------------------------------------------------------
--- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (16 tables = 15 synced + legacy app_limits)
+-- 2. RLS + OWNER-ONLY POLICIES + DATA-API GRANTS (the 15 synced tables)
 -- ---------------------------------------------------------------------------
 -- Each table: enable RLS; four policies SELECT/INSERT/UPDATE/DELETE restricted
 -- to `TO authenticated` with `(select auth.uid()) = user_id` in BOTH USING and
@@ -380,10 +367,8 @@ begin
         'focus_schedules',
         'blocked_apps',
         'blocked_websites',
-        -- Legacy and no longer synced, but kept in this loop deliberately: an older deployment
-        -- may still hold rows, and omitting it here would be the one change that could leave a
-        -- populated table unprotected. See the note on its create statement.
-        'app_limits',
+        -- `app_limits` is intentionally absent: this script no longer creates it, and section 6
+        -- handles the legacy table (if the deployment has one) without touching its rows.
         'study_channels',
         'study_subjects',
         'study_topics',
@@ -417,10 +402,8 @@ end
 $$;
 
 -- (Optional) keep the anon key from even seeing these tables exist in the API.
--- `app_limits` is included even though it is legacy and unsynced — it is here so an old deployment
--- that still holds rows cannot be reached with a publishable key.
 revoke all on table public.focus_schedules, public.blocked_apps, public.blocked_websites,
-    public.app_limits, public.study_channels, public.study_subjects, public.study_topics,
+    public.study_channels, public.study_subjects, public.study_topics,
     public.study_plans, public.blocked_keywords, public.session_records,
     public.study_activities, public.break_records, public.blocked_attempts,
     public.scratch_cards, public.profiles, public.user_preferences
@@ -522,6 +505,43 @@ create policy "profile_images_delete_own" on storage.objects
         and (storage.foldername(name))[1] = (select auth.uid())::text
     );
 
+-- ---------------------------------------------------------------------------
+-- 6. LEGACY CLEANUP — `app_limits`
+-- ---------------------------------------------------------------------------
+-- Every older deployment that ran a previous version of this script has a
+-- populated `public.app_limits`. This block does not delete the rows; it only
+-- makes sure the abandoned table cannot be reached through the Data API:
+--   * RLS is enabled (an unprotected table would be readable by anyone holding
+--     the publishable anon key, which is exactly the state this avoids);
+--   * any permissive policy from an earlier run is dropped;
+--   * CRUD is revoked from `authenticated` and `anon`.
+-- `service_role` (the SQL editor / dashboard) keeps full access, so the rows
+-- can still be exported before being discarded.
+--
+-- Guarded by to_regclass(), so this is a no-op on a fresh project where the
+-- table was never created — the old unconditional `revoke ... app_limits`
+-- would in fact ERROR there.
+do $$
+declare
+    t text;
+begin
+    if to_regclass('public.app_limits') is not null then
+        execute 'alter table public.app_limits enable row level security';
+        execute 'revoke all on table public.app_limits from anon, authenticated';
+        for t in
+            select policyname from pg_policies
+            where schemaname = 'public' and tablename = 'app_limits'
+        loop
+            execute format('drop policy if exists %I on public.app_limits', t);
+        end loop;
+        raise notice 'app_limits is legacy: rows preserved, Data-API access revoked.';
+    end if;
+end
+$$;
+
+-- Once the rows are confirmed expendable, uncomment to remove the table:
+-- drop table if exists public.app_limits;
+
 commit;
 
 -- ============================================================================
@@ -529,13 +549,14 @@ commit;
 -- ============================================================================
 -- select count(*) from pg_tables where schemaname='public'
 --   and tablename in ('focus_schedules','blocked_apps','blocked_websites',
---     'app_limits','study_channels','study_subjects','study_topics','study_plans',
+--     'study_channels','study_subjects','study_topics','study_plans',
 --     'blocked_keywords','session_records','study_activities','break_records',
 --     'blocked_attempts','scratch_cards',
---     'profiles','user_preferences');   --> 16 (15 the app syncs + legacy app_limits)
+--     'profiles','user_preferences');   --> 15 (every synced table)
 --
 -- select count(*) from pg_policies
---   where schemaname in ('public','storage') and policyname like '%_own';  --> 68 total (16 tables x 4 + 4 storage)
+--   where schemaname in ('public','storage') and policyname like '%_own';  --> 64 total (15 tables x 4 + 4 storage)
+--   (a deployment that still has legacy `app_limits` reports 0 policies for it after section 6)
 --
 -- select id, public from storage.buckets where id='profile-images';        --> public = false
 --

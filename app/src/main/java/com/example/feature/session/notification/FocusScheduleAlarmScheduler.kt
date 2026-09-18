@@ -6,16 +6,38 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.example.core.permission.FocusPermissionManager
 import com.example.data.local.entity.FocusScheduleEntity
-import java.util.Calendar
+import java.util.TimeZone
 
+/**
+ * Arms the system alarm that fires one automated focus schedule.
+ *
+ * Correctness rules this class exists to enforce:
+ *
+ *  - **A schedule is only armed when it was understood.** The "when" decision lives in
+ *    [ScheduleAlarmPlanner]; when it cannot be made (bad `startTime`, bad `daysOfWeek`, a one-time
+ *    date in the past) the alarm for that schedule is *cancelled* and the reason is logged. Nothing
+ *    is scheduled at a guessed time — an earlier revision silently defaulted a malformed time to
+ *    09:00 and a malformed day list to Mon–Fri.
+ *  - **No stale alarm survives a change.** Disabling, deleting, editing into an invalid state, or
+ *    shortening a schedule always cancels first, so the old `PendingIntent` cannot fire later with
+ *    the previous configuration. The request code is derived from the schedule id, so it is stable
+ *    across edits.
+ *  - **Exactness is a permission, not an assumption.** On Android 12+ the user can deny
+ *    `SCHEDULE_EXACT_ALARM` (and on Android 14+ it is denied by default for most apps). The exact
+ *    request is attempted only when [AlarmManager.canScheduleExactAlarms] says it can succeed; the
+ *    inexact `setAndAllowWhileIdle` fallback is used otherwise and logged prominently, because that
+ *    path means the session may start **later** than the configured minute — the user is told in the
+ *    UI (see `PermissionItemCard` "Exact alarms" row) rather than the app pretending otherwise.
+ *  - **Reboot / time-change / permission-grant re-arm** is handled by [BootAndDailyResetReceiver],
+ *    which calls [rescheduleAllSchedules] for every action that can invalidate an armed alarm.
+ */
 object FocusScheduleAlarmScheduler {
 
     private const val TAG = "FocusScheduleScheduler"
 
-    /**
-     * Reschedules system alarms for all given enabled focus schedules.
-     */
+    /** Reschedules alarms for all given schedules (arming the enabled ones, cancelling the rest). */
     fun rescheduleAllSchedules(context: Context, schedules: List<FocusScheduleEntity>) {
         for (schedule in schedules) {
             if (schedule.isEnabled) {
@@ -27,159 +49,112 @@ object FocusScheduleAlarmScheduler {
     }
 
     /**
-     * Calculates the next upcoming epoch millis for a schedule based on its daysOfWeek and startTime.
+     * Plans and arms the next alarm for [schedule]. Safe to call for a disabled schedule: it cancels
+     * instead of arming.
      */
-    fun calculateNextTriggerMillis(daysOfWeekStr: String, startTimeStr: String): Long {
-        val now = Calendar.getInstance()
-        val nowMillis = now.timeInMillis
-
-        val parts = startTimeStr.trim().split(":")
-        val targetHour = parts.getOrNull(0)?.toIntOrNull() ?: 9
-        val targetMinute = parts.getOrNull(1)?.toIntOrNull() ?: 0
-
-        // Parse target days of week (1=SUN, 2=MON, ..., 7=SAT)
-        val selectedDays = parseDaysOfWeek(daysOfWeekStr)
-
-        var bestMillis: Long? = null
-
-        // Check the next 14 days to find the earliest matching day & time in the future
-        for (dayOffset in 0..14) {
-            val candidate = Calendar.getInstance().apply {
-                add(Calendar.DAY_OF_YEAR, dayOffset)
-                set(Calendar.HOUR_OF_DAY, targetHour)
-                set(Calendar.MINUTE, targetMinute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-
-            val dayOfWeek = candidate.get(Calendar.DAY_OF_WEEK)
-            if (selectedDays.contains(dayOfWeek)) {
-                if (candidate.timeInMillis > nowMillis + 2000L) { // At least 2 sec in future
-                    if (bestMillis == null || candidate.timeInMillis < bestMillis) {
-                        bestMillis = candidate.timeInMillis
-                    }
-                }
-            }
-        }
-
-        return bestMillis ?: (nowMillis + 24 * 60 * 60 * 1000L)
-    }
-
-    private fun parseDaysOfWeek(daysStr: String): Set<Int> {
-        val uppercase = daysStr.uppercase()
-        val set = mutableSetOf<Int>()
-
-        if (uppercase.contains("MON") || uppercase.contains("2")) set.add(Calendar.MONDAY)
-        if (uppercase.contains("TUE") || uppercase.contains("3")) set.add(Calendar.TUESDAY)
-        if (uppercase.contains("WED") || uppercase.contains("4")) set.add(Calendar.WEDNESDAY)
-        if (uppercase.contains("THU") || uppercase.contains("5")) set.add(Calendar.THURSDAY)
-        if (uppercase.contains("FRI") || uppercase.contains("6")) set.add(Calendar.FRIDAY)
-        if (uppercase.contains("SAT") || uppercase.contains("7")) set.add(Calendar.SATURDAY)
-        if (uppercase.contains("SUN") || uppercase.contains("1")) set.add(Calendar.SUNDAY)
-
-        if (set.isEmpty()) {
-            // Default to Mon-Fri if empty
-            return setOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY)
-        }
-        return set
-    }
-
     fun scheduleSingleFocusSchedule(context: Context, schedule: FocusScheduleEntity) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-
-        if (!schedule.isEnabled) {
-            cancelFocusSchedule(context, schedule.id)
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        if (alarmManager == null) {
+            Log.e(TAG, "AlarmManager unavailable; schedule '${schedule.title}' not armed")
             return
         }
 
-        val triggerMillis = if (!schedule.repeatEnabled && schedule.scheduledDateMillis > 0L) {
-            calculateOneTimeTriggerMillis(schedule.scheduledDateMillis, schedule.startTime)
-        } else {
-            calculateNextTriggerMillis(schedule.daysOfWeek, schedule.startTime)
-        }
+        // Always drop the previous alarm first: an edit that shortens or invalidates the schedule
+        // must not leave the old trigger behind.
+        cancelFocusSchedule(context, schedule.id)
 
-        if (triggerMillis <= System.currentTimeMillis() + 1000L) {
-            Log.d(TAG, "Skipping past one-time schedule '${schedule.title}'")
-            return
-        }
+        when (val plan = ScheduleAlarmPlanner.plan(
+            schedule = schedule,
+            nowMillis = System.currentTimeMillis(),
+            timeZone = TimeZone.getDefault()
+        )) {
+            is ScheduleAlarmPlanner.Plan.Skip -> {
+                // Not an error for a disabled schedule; anything else is a configuration problem the
+                // user needs to be able to see, so it is logged at warning level with the raw value.
+                val level = if (plan.reason == ScheduleAlarmPlanner.Reason.DISABLED) Log.DEBUG else Log.WARN
+                Log.println(level, TAG, "Not scheduling '${schedule.title}' (${schedule.id}): ${plan.detail}")
+            }
 
-        val intent = Intent(context, FocusScheduleReceiver::class.java).apply {
-            action = "com.example.focusshield.ACTION_FOCUS_SCHEDULE"
-            putExtra(FocusScheduleReceiver.EXTRA_SCHEDULE_ID, schedule.id)
-        }
-
-        val requestCode = ("schedule_" + schedule.id).hashCode()
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-
-        val pendingIntent = PendingIntent.getBroadcast(context, requestCode, intent, flags)
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
-                } else {
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerMillis,
-                        pendingIntent
-                    )
+            is ScheduleAlarmPlanner.Plan.Arm -> {
+                if (plan.degradedReason != null) {
+                    Log.w(TAG, "Scheduling '${schedule.title}' with a fallback: ${plan.degradedReason}")
                 }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerMillis,
-                    pendingIntent
+                val result = arm(
+                    alarmManager = alarmManager,
+                    context = context,
+                    scheduleId = schedule.id,
+                    label = schedule.title,
+                    triggerAtMillis = plan.triggerAtMillis
                 )
-            } else {
-                alarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerMillis,
-                    pendingIntent
+                Log.d(
+                    TAG,
+                    "Schedule '${schedule.title}' (${schedule.id}) -> $result at " +
+                        "${plan.triggerAtMillis} (${ScheduleTime.format(
+                            ScheduleTime.parseToMinutesOrNull(schedule.startTime) ?: 0
+                        )} local)"
                 )
             }
-            Log.d(TAG, "Scheduled focus schedule '${schedule.title}' for $triggerMillis")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to schedule alarm for focus schedule ${schedule.id}", e)
         }
     }
 
-    /** Calculates the exact trigger for a one-time schedule date + local clock time. */
-    private fun calculateOneTimeTriggerMillis(dateMillis: Long, startTimeStr: String): Long {
-        val source = Calendar.getInstance().apply { timeInMillis = dateMillis }
-        val parts = startTimeStr.trim().split(":")
-        val hour = parts.getOrNull(0)?.toIntOrNull() ?: 9
-        val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
-        return Calendar.getInstance().apply {
-            set(Calendar.YEAR, source.get(Calendar.YEAR))
-            set(Calendar.MONTH, source.get(Calendar.MONTH))
-            set(Calendar.DAY_OF_MONTH, source.get(Calendar.DAY_OF_MONTH))
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+    /** True when the platform will honour an exact alarm request right now. */
+    fun canScheduleExactAlarms(context: Context): Boolean =
+        FocusPermissionManager.isExactAlarmGranted(context)
+
+    // ---- internals --------------------------------------------------------------------
+
+    /**
+     * Arms the alarm through [ExactAlarmGate] and reports what actually happened, so the log line for
+     * each schedule states whether the user can rely on the exact minute.
+     */
+    private fun arm(
+        alarmManager: AlarmManager,
+        context: Context,
+        scheduleId: String,
+        label: String,
+        triggerAtMillis: Long
+    ): ExactAlarmGate.ArmResult {
+        val pendingIntent = pendingIntent(context, scheduleId, create = true)
+            ?: return ExactAlarmGate.ArmResult.Failed("PendingIntent could not be created")
+        return ExactAlarmGate.arm(
+            context = context,
+            alarmManager = alarmManager,
+            triggerAtMillis = triggerAtMillis,
+            operation = pendingIntent,
+            label = "focus schedule '$label' ($scheduleId)"
+        )
     }
 
+    /** Cancels the alarm previously armed for [scheduleId]. Idempotent. */
     fun cancelFocusSchedule(context: Context, scheduleId: String) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val intent = Intent(context, FocusScheduleReceiver::class.java).apply {
-            action = "com.example.focusshield.ACTION_FOCUS_SCHEDULE"
-        }
-        val requestCode = ("schedule_" + scheduleId).hashCode()
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = PendingIntent.getBroadcast(context, requestCode, intent, flags)
-        alarmManager.cancel(pendingIntent)
+        // FLAG_NO_CREATE: cancelling a schedule that was never armed must not create a PendingIntent
+        // (which would then be a live, if never-fired, registration for the process).
+        val existing = pendingIntent(context, scheduleId, create = false) ?: return
+        alarmManager.cancel(existing)
     }
+
+    /**
+     * The trigger intent for one schedule. `requestCode` is the schedule id's hash, so it is stable
+     * for the lifetime of the row and unique per schedule (a collision would need two ids whose
+     * `hashCode()` collide — the ids are UUID strings).
+     */
+    private fun pendingIntent(context: Context, scheduleId: String, create: Boolean): PendingIntent? {
+        val intent = Intent(context, FocusScheduleReceiver::class.java).apply {
+            action = FocusScheduleReceiver.ACTION_FOCUS_SCHEDULE
+            putExtra(FocusScheduleReceiver.EXTRA_SCHEDULE_ID, scheduleId)
+        }
+        val flags = if (create) {
+            PendingIntent.FLAG_UPDATE_CURRENT or immutabilityFlag()
+        } else {
+            PendingIntent.FLAG_NO_CREATE or immutabilityFlag()
+        }
+        return PendingIntent.getBroadcast(context, requestCodeFor(scheduleId), intent, flags)
+    }
+
+    private fun immutabilityFlag(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+
+    /** Stable per-schedule request code shared by arm/cancel. */
+    fun requestCodeFor(scheduleId: String): Int = ("schedule_" + scheduleId).hashCode()
 }
