@@ -1,37 +1,52 @@
 package com.example.feature.update.data
 
-import com.example.feature.update.domain.SemanticVersion
-import com.example.feature.update.domain.UpdateInfo
+import com.example.BuildConfig
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
+import okhttp3.Response
 
 /**
- * Reads the newest release from the GitHub Releases API.
+ * Reads the newest release from either the GitHub Releases API or a FocusShield-owned feed URL.
  *
- * Uses [OkHttpClient] — already a project dependency, so no new networking stack is introduced
- * (prompt.txt §14). The client is intentionally *unauthenticated*: the anon-key/apikey handling in
- * `SupabaseHttp` is Supabase-specific and would be wrong to reuse here, and shipping a GitHub token
- * is forbidden (prompt.txt §15).
+ * ### Why there are two modes
  *
- * Consequence, stated plainly: while `Aniket-Man/FOCUSSHEILD` is private, GitHub answers **404** to
- * this call and the checker reports "couldn't check for updates" rather than inventing a result.
- * Making the repository public, or pointing [repoSlug] at a backend that serves the same JSON shape,
- * is what makes the feature live.
+ * GitHub answers **404** to `releases/latest` for a private repository when the caller is
+ * unauthenticated, and this app ships **no** GitHub credential: a token inside an APK can be
+ * extracted, and a leaked token is worse than a disabled feature. So while
+ * `Aniket-Man/FOCUSSHEILD` is private there is exactly one honest option — report that the feed is
+ * unavailable, which the UI already does ("No published release was found"), and give the project a
+ * supported way to make the feature live:
+ *
+ *  1. **Make the repository public**, or
+ *  2. **Point the app at a feed URL** that serves the release JSON — a small backend, a Supabase
+ *     Edge Function, or any static host. Set `UPDATE_FEED_URL` in `.env` and rebuild; the payload may
+ *     be GitHub-shaped (`tag_name`, `assets[]`) or normalised (`versionName`, `apkUrl`,
+ *     `releaseNotes`, `releasePageUrl`).
+ *
+ * `UPDATE_REPO_SLUG` overrides the repository for forks. Both are read at build time (see
+ * `app/build.gradle.kts`), never at runtime — nothing about the update source is user-configurable,
+ * so a malicious app or intent cannot redirect the updater.
+ *
+ * The HTTP client stays [OkHttpClient] — already a project dependency — and the request stays
+ * unauthenticated in both modes.
  */
 class GitHubReleaseRepository(
     private val repoSlug: String = DEFAULT_REPO_SLUG,
+    /** Blank unless configured; when set, this URL replaces the GitHub API call entirely. */
+    private val feedUrl: String = "",
     private val client: OkHttpClient = defaultClient()
 ) : UpdateRepository {
 
     override suspend fun fetchLatestRelease(): UpdateInfo? = withContext(Dispatchers.IO) {
+        val url = buildUrl()
         val request = Request.Builder()
-            .url("$API_BASE/repos/$repoSlug/releases/latest")
-            .header("Accept", "application/vnd.github+json")
+            .url(url)
+            .header("Accept", "application/json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             // GitHub rejects requests without a User-Agent.
             .header("User-Agent", "FocusShield-Android")
@@ -46,81 +61,43 @@ class GitHubReleaseRepository(
             )
         }
 
-        val body = response.body?.string().orEmpty()
-        val code = response.code
-        response.close()
-
-        when {
-            code == 404 -> throw UpdateSourceUnavailableException(
-                "No published release was found for this app."
-            )
-            code == 403 -> throw UpdateSourceUnavailableException(
-                "The update server refused the request. Try again later."
-            )
-            code !in 200..299 -> throw UpdateSourceUnavailableException(
-                "Couldn't check for updates (server said $code)."
-            )
-        }
-
-        parseRelease(body)
+        response.use { it.toResult() }
     }
 
-    /** Maps GitHub's release JSON onto [UpdateInfo]; returns null if the payload is unusable. */
-    private fun parseRelease(body: String): UpdateInfo? {
-        val json = try {
-            JSONObject(body)
-        } catch (_: Exception) {
-            throw UpdateSourceUnavailableException("The update server sent an unreadable response.")
-        }
-
-        val tag = json.optString("tag_name").takeIf { it.isNotBlank() } ?: return null
-        val versionName = SemanticVersion.normalize(tag)
-        if (versionName.isBlank()) return null
-
-        val assets = json.optJSONArray("assets")
-        val apk = pickApkAsset(assets, versionName)
-
-        return UpdateInfo(
-            versionName = versionName,
-            versionCode = null, // GitHub releases carry no Android versionCode; the tag is the truth.
-            tagName = tag,
-            title = json.optString("name").ifBlank { tag },
-            releaseNotes = json.optString("body").orEmpty(),
-            apkUrl = apk?.first,
-            apkAssetName = apk?.second,
-            releasePageUrl = json.optString("html_url").orEmpty(),
-            publishedAt = json.optString("published_at").takeIf { it.isNotBlank() }
-        )
+    /** The URL actually requested: the configured feed, or the GitHub API for [repoSlug]. */
+    internal fun buildUrl(): String {
+        val configured = feedUrl.trim()
+        if (configured.isEmpty()) return "$API_BASE/repos/$repoSlug/releases/latest"
+        // A malformed override must fail loudly at the point of use rather than silently falling back
+        // to GitHub (which would report "no release" for a private repo and hide the misconfiguration).
+        return configured.toHttpUrlOrNull()?.toString()
+            ?: throw UpdateSourceUnavailableException(
+                "The update feed URL configured for this build is not a valid URL."
+            )
     }
 
-    /**
-     * Chooses the APK asset. Only a name ending in `.apk` is ever eligible; when several qualify the
-     * one naming the release version wins, then the shortest name (so `FocusShield-v1.0.1.apk` beats
-     * `FocusShield-v1.0.1-debug-unsigned.apk`). prompt.txt §3 — never assume an arbitrary asset.
-     */
-    private fun pickApkAsset(assets: org.json.JSONArray?, versionName: String): Pair<String, String>? {
-        if (assets == null) return null
-        val candidates = (0 until assets.length())
-            .mapNotNull { assets.optJSONObject(it) }
-            .mapNotNull { asset ->
-                val name = asset.optString("name")
-                val url = asset.optString("browser_download_url")
-                if (name.isBlank() || url.isBlank()) null else name to url
-            }
-            .filter { (name, _) -> name.endsWith(".apk", ignoreCase = true) }
-        if (candidates.isEmpty()) return null
-
-        val best = candidates.sortedWith(
-            compareByDescending<Pair<String, String>> { it.first.contains(versionName) }
-                .thenBy { it.first.length }
-        ).first()
-        return best.second to best.first
-    }
+    /** Delegates the status/body decisions to [ReleaseResponseMapper] (unit-tested without a socket). */
+    private fun Response.toResult(): UpdateInfo? = ReleaseResponseMapper.map(
+        code = code,
+        payload = body?.string().orEmpty(),
+        fromGitHub = request.url.host.endsWith("github.com"),
+        rateLimited = header("X-RateLimit-Remaining") == "0" || code == 429
+    )
 
     companion object {
-        /** Owner/repo of the release feed. Swap here (or pass a backend URL) to change the source. */
+        /** Owner/repo of the default release feed. Overridable per build (`UPDATE_REPO_SLUG`). */
         const val DEFAULT_REPO_SLUG = "Aniket-Man/FOCUSSHEILD"
+
         private const val API_BASE = "https://api.github.com"
+
+        /**
+         * Builds the repository the app should use for this build: the configured feed URL (if any)
+         * and repository slug, read from `BuildConfig` (populated from `.env`).
+         */
+        fun fromConfig(): GitHubReleaseRepository = GitHubReleaseRepository(
+            repoSlug = BuildConfig.UPDATE_REPO_SLUG.trim().ifBlank { DEFAULT_REPO_SLUG },
+            feedUrl = BuildConfig.UPDATE_FEED_URL.trim()
+        )
 
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

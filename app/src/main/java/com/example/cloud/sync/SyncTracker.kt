@@ -1,9 +1,13 @@
 package com.example.cloud.sync
 
+import android.util.Log
 import androidx.room.withTransaction
 import com.example.data.local.FocusShieldDatabase
 import com.example.data.local.dao.SyncOutboxDao
 import com.example.data.local.entity.SyncOutboxEntity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -25,6 +29,8 @@ import kotlinx.coroutines.sync.withLock
  */
 object SyncTracker {
 
+    private const val TAG = "SyncTracker"
+
     const val OP_UPSERT = "UPSERT"
     const val OP_DELETE = "DELETE"
 
@@ -37,6 +43,40 @@ object SyncTracker {
     /** Invoked (on the caller's coroutine) after a pending op is committed. Set by app wiring. */
     @Volatile
     var onPendingChanged: (() -> Unit)? = null
+
+    /**
+     * A cloud row that could not be converted into a local entity, with the reason.
+     *
+     * Cloud data the app cannot understand used to be coerced into a default and inserted anyway
+     * (an unknown session mode became TIMER). It is now rejected and recorded here, so the condition
+     * is visible — in the log, and to any diagnostics surface that collects [rejectedCloudRows] —
+     * instead of quietly changing behaviour. The row stays in the cloud; the next cycle retries it.
+     */
+    data class RejectedCloudRow(
+        val table: String,
+        val rowKey: String,
+        val field: String?,
+        val reason: String,
+        val atMillis: Long = System.currentTimeMillis()
+    )
+
+    private const val MAX_RECORDED_REJECTIONS = 20
+
+    private val _rejectedCloudRows = MutableStateFlow<List<RejectedCloudRow>>(emptyList())
+
+    /** The most recent [MAX_RECORDED_REJECTIONS] rejected cloud rows (newest first). */
+    val rejectedCloudRows: StateFlow<List<RejectedCloudRow>> = _rejectedCloudRows.asStateFlow()
+
+    /**
+     * Records a rejected cloud row. Called by [SyncEngine] for every row it refuses to insert; never
+     * silently dropped, and never fatal for the cycle (the other rows still sync).
+     */
+    fun recordRejectedCloudRow(table: String, rowKey: String, cause: Throwable) {
+        val field = (cause as? CloudDataException)?.field
+        val row = RejectedCloudRow(table = table, rowKey = rowKey, field = field, reason = cause.message ?: cause.toString())
+        Log.w(TAG, "Rejected cloud row ${table}[$rowKey]: ${row.reason}")
+        _rejectedCloudRows.value = (listOf(row) + _rejectedCloudRows.value).take(MAX_RECORDED_REJECTIONS)
+    }
 
     fun init(database: FocusShieldDatabase) {
         this.database = database

@@ -13,8 +13,10 @@ import com.example.data.local.dao.SyncOutboxDao
 import com.example.data.local.entity.SyncOutboxEntity
 import com.example.data.preferences.FocusPreferencesRepository
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -39,6 +41,8 @@ import org.json.JSONObject
  *  - a different, brand-new (empty) account signs in → never auto-migrate the previous owner's data
  *    into it (that would leak data across accounts); the UI must confirm a destructive reset instead.
  */
+private const val TAG = "SyncEngine"
+
 class SyncEngine(
     private val database: FocusShieldDatabase,
     private val installState: CloudInstallState,
@@ -176,8 +180,14 @@ class SyncEngine(
         // pushed stays pending for a later normal cycle.
         try {
             drain(session)
-        } catch (_: Exception) {
-            // continue with the snapshot
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Best effort *by design*: the snapshot pushed below already reflects current Room, so a
+            // wedged op here does not lose data (it stays pending for a later cycle). It is logged
+            // rather than swallowed, because a first migration that silently skipped its backlog is
+            // exactly the kind of thing that must be visible in logcat.
+            Log.w(TAG, "Migration drain did not complete; continuing with the snapshot", e)
         }
         pushSnapshotAllTables(session)
         pushDocuments(session)
@@ -330,8 +340,12 @@ class SyncEngine(
                 out.add(o)
             }
             out
-        } catch (e: Exception) {
-            emptyList()
+        } catch (e: JSONException) {
+            // Must NOT become `emptyList()`: a reconcile pull reads an empty remote table as "these
+            // rows were deleted remotely" and would delete the local copies. An unreadable response
+            // therefore aborts the cycle instead of looking like an empty account.
+            Log.e(TAG, "Unreadable response body for $cloudTable; aborting this cycle", e)
+            throw IllegalStateException("The sync server sent an unreadable $cloudTable response", e)
         }
     }
 
@@ -347,12 +361,17 @@ class SyncEngine(
                     query = "user_id=eq.${http.encodeValue(session.userId)}&select=user_id&limit=1",
                     accessToken = session.accessToken
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                // A probe that cannot reach one table does not decide ownership; note it and move on.
+                Log.w(TAG, "Presence probe failed for ${b.meta.cloudTable}", e)
                 continue
             }
             val arr = try {
                 JSONArray(res.body)
-            } catch (e: Exception) {
+            } catch (e: JSONException) {
+                Log.w(TAG, "Presence probe got an unreadable body for ${b.meta.cloudTable}", e)
                 continue
             }
             if (arr.length() > 0) return true
@@ -492,22 +511,57 @@ class SyncEngine(
     ): TableBinding = object : TableBinding {
         override val meta = meta
         override val rowKeyOfJson = keyOfJson
+
+        /**
+         * Converts one cloud row, or returns null after recording *why* it was refused.
+         *
+         * Previously this was `mapNotNull { try fromJson(it) catch (Exception) null }`: a row that
+         * failed to convert disappeared without trace or reason, and — worse — a row that converted
+         * with substituted defaults was indistinguishable from a good one. Now every refusal is
+         * attributed to a table and row key and recorded through [SyncTracker.recordRejectedCloudRow]
+         * (log + bounded diagnostic list). Only the offending row is skipped; the rest of the cycle
+         * proceeds, and the row remains in the cloud to be retried after a fix.
+         */
+        private fun decode(row: JSONObject): E? = try {
+            fromJson(row)
+        } catch (e: CloudDataException) {
+            SyncTracker.recordRejectedCloudRow(meta.tableKey, rowKeyOf(row), e)
+            null
+        } catch (e: org.json.JSONException) {
+            SyncTracker.recordRejectedCloudRow(meta.tableKey, rowKeyOf(row), e)
+            null
+        } catch (e: IllegalArgumentException) {
+            // A mapper's own validation (a required constructor argument that is absent, say).
+            SyncTracker.recordRejectedCloudRow(meta.tableKey, rowKeyOf(row), e)
+            null
+        } catch (e: RuntimeException) {
+            // Boundary for a single row: an unexpected conversion failure must not abort the whole
+            // sync, but it is recorded (with the row key) so it can never be a silent data loss.
+            SyncTracker.recordRejectedCloudRow(meta.tableKey, rowKeyOf(row), e)
+            null
+        }
+
+        private fun rowKeyOf(row: JSONObject): String = try {
+            rowKeyOfJson(row)
+        } catch (e: org.json.JSONException) {
+            "<unreadable>"
+        }
+
         override suspend fun decodeAndInsert(rows: List<JSONObject>) {
-            val decoded = rows.mapNotNull { row ->
-                try {
-                    fromJson(row)
-                } catch (e: Exception) {
-                    null
-                }
-            }
+            val decoded = rows.mapNotNull { decode(it) }
             if (decoded.isNotEmpty()) insert(decoded)
         }
+
         override suspend fun decodePayloadAndInsert(payload: String) {
-            try {
-                insert(listOf(fromJson(JSONObject(payload))))
-            } catch (e: Exception) {
-                // Malformed payload → skip; the row stays pending in the outbox and is retried later.
+            val row = try {
+                JSONObject(payload)
+            } catch (e: org.json.JSONException) {
+                // Our own outbox payload is unreadable: local corruption. The op stays pending (the
+                // caller keeps it) and the reason is recorded rather than dropped on the floor.
+                SyncTracker.recordRejectedCloudRow(meta.tableKey, "<outbox>", e)
+                return
             }
+            decode(row)?.let { insert(listOf(it)) }
         }
         override suspend fun mergeRemote(rows: List<JSONObject>) {
             val custom = merge

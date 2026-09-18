@@ -215,11 +215,13 @@ student selects in Start Study Session → Block Apps. It shares Android package
 app-limit system, but the two are separate features: one is account configuration, the other is a
 per-device enforcement instruction, and they have separate persistence.
 
-**Legacy table left in place (§9).** `public.app_limits` still exists in the live project (0 rows)
-and is still created and protected by `cloud_schema.sql`, with RLS and owner-only policies intact.
-It was not dropped: removing a production table to tidy a schema is not worth the risk of destroying
-data. It is documented there as legacy/non-synced — no new rows are written, no rows are read — and
-can be dropped by hand once the operator is satisfied it is expendable.
+**Legacy table retired from the schema (§9, updated 2026-09-18).** `cloud_schema.sql` no longer
+**creates** `public.app_limits`: nothing in the app syncs, writes or reads it, so a fresh project
+should not get the table at all. An existing deployment keeps its rows — the script's section 6
+enables RLS on the legacy table, drops any permissive policy an earlier run created, and revokes CRUD
+from `anon`/`authenticated` (guarded by `to_regclass`, so it is a no-op on a fresh project). The rows
+are preserved for the operator to export; the commented-out `drop table` there is the explicit,
+opt-in way to remove them. (`app_limit_sessions` and `daily_unlocks` were never part of this script.)
 
 **`daily_unlocks` is unbound.** It was bound to sync on 2026-09-10. Per-day phone unlock counts are
 general device usage statistics under §12, so it was removed from `SYNCED_ROOM_TABLES`;
@@ -285,5 +287,52 @@ in source; the compile is clean (`:app:compileDebugKotlin` BUILD SUCCESSFUL, 0 e
 | 31 | Existing functionality intact | ✅ | module compiles clean; only pre-existing warnings |
 
 **Outstanding, deliberately not actioned:** the live Supabase `daily_unlocks` table (4 rows) and
-`app_limit_sessions` are now unreferenced by the app but still exist server-side. Dropping them is
-destructive and outward-facing, so it awaits an explicit decision rather than being done silently.
+`app_limit_sessions` are now unreferenced by the app but still exist server-side. They are **not**
+created by `cloud_schema.sql` (never were, in the case of `app_limit_sessions`); dropping a table
+that holds data is destructive and outward-facing, so it awaits an explicit decision rather than
+being done silently.
+
+---
+
+## Update (2026-09-18) — strict cloud parsing, rejected-row diagnostics, legacy table retired
+
+Driven by the issue list: *cloud-data parsing silently substitutes defaults* (🟡 10), the *sync
+contract can drift* (🟡 12), *legacy `app_limits` is still created/protected* (🟡 11), and the
+*broad `catch (Exception)` / silent failure* class (🟡 9, plus how they hid the above).
+
+1. **No more silent substitution on the pull path.** `CloudJson`'s `opt*`-with-default readers were
+   replaced by strict readers: `bool`/`lng`/`int` accept only the matching JSON type (or a parseable
+   string), `identity()` requires a non-blank identity value (a missing `id` used to become `""` and
+   collide with every other malformed row), `enumValue`/`enumOrDefault` reject an **unknown enum
+   name** (previously `mode = "DEEP_WORK"` became `TIMER`) while still honouring an absent column as
+   its documented default, `oneOf` covers the non-enum string columns (`daysOfWeek`, plan `status`,
+   website `category`, keyword `type`), and `clockTime` validates `HH:mm` with the same strict parser
+   the alarm scheduler uses (previously an unparsable `startTime` was stored and then fired at a
+   substituted time).
+2. **A rejected row is rejected whole and reported.** New `CloudDataException(table, field, value,
+   reason)`. `SyncEngine`'s per-row conversion no longer `mapNotNull { try … catch null }`: every
+   refusal goes through `SyncTracker.recordRejectedCloudRow(table, rowKey, cause)`, which logs at
+   WARN and keeps the newest 20 in `SyncTracker.rejectedCloudRows` (a `StateFlow`) for diagnostics.
+   Only the offending row is skipped; the cycle continues and the row stays in the cloud to retry.
+   An unreadable *outbox* payload is recorded the same way instead of being dropped in silence.
+3. **One failure that could delete data was closed.** `SyncEngine.fetchRows()` used to return
+   `emptyList()` when a response body failed to parse. On a reconcile pull an empty remote table
+   means "these rows were deleted remotely", so a malformed response would have deleted local rows;
+   it now throws and aborts the cycle. The migration-drain and presence-probe `catch (Exception)`
+   sites log their reasons instead of continuing silently.
+4. **The contract is now tested against the schema (`CloudSchemaContractTest`).** It parses
+   `supabase/cloud_schema.sql` and asserts: every synced table exists there; the schema declares no
+   synced table the app does not know; per table, the columns a mapper writes equal the SQL columns
+   minus the server-managed ones (`user_id`, `created_at`, `updated_at`); the SQL primary key matches
+   the app's key (`id`, `packageName`, `domain`, `keyword_type`+`keyword_value`, `eventId`,
+   `sessionId`); a write never touches a server-managed column; schedule and history rows round-trip
+   through `CloudJson`; and the strict readers reject the wrong values with the right `field`.
+5. **`app_limits` is retired from the schema.** It is no longer created by `cloud_schema.sql` (15
+   `create table` statements now, matching the 15 synced tables), it is out of the RLS/policy loop,
+   and the previously unconditional `revoke … app_limits` — which *errored* on a fresh project
+   because the table did not exist — is replaced by a `to_regclass`-guarded section that leaves an
+   existing deployment's rows intact while revoking `anon`/`authenticated` access and dropping any
+   permissive policy from an earlier run.
+6. **The contract test also guards against regressions in `SYNCED_ROOM_TABLES`**: the synced-table
+   list and the test's per-table expectations must stay in step, so adding a synced table without
+   reconciling the four layers fails the suite rather than failing silently in a user's account.

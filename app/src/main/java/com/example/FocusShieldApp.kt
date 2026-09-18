@@ -85,14 +85,16 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val authRepository by lazy { AuthRepository(this) }
     val connectivityMonitor by lazy { ConnectivityMonitor(this) }
 
-    // GitHub-Releases update checker. The repository is deliberately constructed without a token:
-    // the app ships no GitHub credential, so this is inert (and reports so honestly) while the
-    // FocusShield repository is private. See UpdateRepository for the swap point.
+    // Release-feed update checker. Constructed from the build's `UPDATE_FEED_URL` /
+    // `UPDATE_REPO_SLUG` (see .env.example): a feed URL is the supported way to serve releases while
+    // the GitHub repository is private. No GitHub credential is ever shipped, so a private GitHub
+    // repository reached over the API answers 404 and the app reports that honestly instead of
+    // inventing a release. See UpdateRepository / docs/UPDATE_SYSTEM.md §1.
     val updatePreferences by lazy {
         com.example.feature.update.data.UpdatePreferences(this)
     }
     val updateRepository by lazy {
-        com.example.feature.update.data.GitHubReleaseRepository()
+        com.example.feature.update.data.GitHubReleaseRepository.fromConfig()
     }
     val updateDownloadManager by lazy {
         com.example.feature.update.data.UpdateDownloadManager(this)

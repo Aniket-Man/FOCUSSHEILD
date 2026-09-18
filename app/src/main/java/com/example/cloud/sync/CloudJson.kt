@@ -19,6 +19,8 @@ import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.TopicEntity
 import com.example.data.model.SessionMode
 import com.example.data.preferences.FocusPreferences
+import com.example.feature.session.notification.ScheduleTime
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -34,6 +36,12 @@ import org.json.JSONObject
  */
 object CloudJson {
 
+    /**
+     * Placeholder table name for the type-strict readers, which only know their column. Callers that
+     * know the table wrap the conversion (see [SyncEngine]) and re-report the exception with it.
+     */
+    private const val TABLE_UNKNOWN = "<unknown>"
+
     // ---- org.json helpers -------------------------------------------------------------
 
     private fun JSONObject.putString(key: String, value: String?): JSONObject {
@@ -47,14 +55,132 @@ object CloudJson {
             if (isNull(key)) null else optString(key)
         }
 
-    private fun JSONObject.bool(key: String, default: Boolean): Boolean =
-        if (isNull(key)) default else optBoolean(key, default)
+    // ---- strict field readers ---------------------------------------------------------
+    //
+    // `optBoolean`/`optLong`/`optInt` coerce anything they cannot read into the default (a string
+    // "yes" becomes `false`, a nested object becomes 0), which hides corrupt payloads. These readers
+    // accept only what the column is actually supposed to hold and raise [CloudDataException]
+    // otherwise; the engine rejects that single row and records why. See [CloudDataException].
+    //
+    // A *missing* key is different from a *wrong* value: these tables are declared with nullable
+    // columns and partial payloads are legitimate, so absence still falls back to the documented
+    // default (`preserveNullDiscovery`-style strictness would reject every older row).
 
-    private fun JSONObject.lng(key: String, default: Long): Long =
-        if (isNull(key)) default else optLong(key, default)
+    private fun JSONObject.bool(key: String, default: Boolean): Boolean {
+        if (!has(key) || isNull(key)) return default
+        return when (val value = opt(key)) {
+            is Boolean -> value
+            is String -> when (value.lowercase(Locale.ROOT)) {
+                "true" -> true
+                "false" -> false
+                else -> throw CloudDataException(TABLE_UNKNOWN, key, value, "expected a boolean")
+            }
+            else -> throw CloudDataException(TABLE_UNKNOWN, key, value, "expected a boolean")
+        }
+    }
 
-    private fun JSONObject.int(key: String, default: Int): Int =
-        if (isNull(key)) default else optInt(key, default)
+    private fun JSONObject.lng(key: String, default: Long): Long {
+        if (!has(key) || isNull(key)) return default
+        val value = opt(key)
+        return when (value) {
+            is Number -> value.toLong()
+            is String -> value.toLongOrNull()
+                ?: throw CloudDataException(TABLE_UNKNOWN, key, value, "expected an integer")
+            else -> throw CloudDataException(TABLE_UNKNOWN, key, value, "expected an integer")
+        }
+    }
+
+    private fun JSONObject.int(key: String, default: Int): Int {
+        if (!has(key) || isNull(key)) return default
+        val value = opt(key)
+        return when (value) {
+            is Number -> value.toInt()
+            is String -> value.toIntOrNull()
+                ?: throw CloudDataException(TABLE_UNKNOWN, key, value, "expected an integer")
+            else -> throw CloudDataException(TABLE_UNKNOWN, key, value, "expected an integer")
+        }
+    }
+
+    /**
+     * Required text used as (part of) a row's identity. A missing/blank/non-text value is fatal for
+     * the row: an empty primary key would collide with every other malformed row in the same table.
+     */
+    private fun JSONObject.identity(table: String, key: String): String {
+        val value = if (isNull(key)) null else opt(key)
+        if (value !is String || value.isBlank()) {
+            throw CloudDataException(table, key, value, "required identity value is missing or blank")
+        }
+        return value
+    }
+
+    /** Text with a documented default for a genuinely cosmetic/optional column. Never for keys. */
+    private fun JSONObject.text(table: String, key: String, default: String): String {
+        if (!has(key) || isNull(key)) return default
+        val value = opt(key)
+        return value as? String
+            ?: throw CloudDataException(table, key, value, "expected text")
+    }
+
+    /** Enum-by-name parsing with no fallback: an unknown name is a rejected row, not a default. */
+    private inline fun <reified E : Enum<E>> JSONObject.enumValue(
+        table: String,
+        key: String,
+        label: String
+    ): E {
+        val raw = if (isNull(key)) null else opt(key)
+        val text = (raw as? String)?.trim()?.uppercase(Locale.ROOT)
+            ?: throw CloudDataException(table, key, raw, "expected one of the $label names")
+        return enumValues<E>().firstOrNull { it.name == text }
+            ?: throw CloudDataException(table, key, raw, "unknown $label value")
+    }
+
+    /**
+     * Enum-by-name parsing for a column that is allowed to be absent.
+     *
+     * @param default value used when the column is missing or NULL — never when it is present but
+     *   unrecognised, which rejects the row instead.
+     */
+    private inline fun <reified E : Enum<E>> JSONObject.enumOrDefault(
+        table: String,
+        key: String,
+        label: String,
+        default: E
+    ): E {
+        if (!has(key) || isNull(key)) return default
+        return enumValue<E>(table, key, label)
+    }
+
+    /** One of a fixed set of uppercase string values (columns that are not Kotlin enums). */
+    private fun JSONObject.oneOf(
+        table: String,
+        key: String,
+        allowed: Set<String>,
+        default: String?
+    ): String {
+        if (!has(key) || isNull(key)) {
+            return default
+                ?: throw CloudDataException(table, key, null, "expected one of $allowed")
+        }
+        val raw = opt(key)
+        val text = (raw as? String)?.trim()
+            ?: throw CloudDataException(table, key, raw, "expected one of $allowed")
+        return allowed.firstOrNull { it.equals(text, ignoreCase = true) }
+            ?: throw CloudDataException(table, key, raw, "expected one of $allowed")
+    }
+
+    /** A stored `HH:mm` clock time, validated by the same strict parser the alarm scheduler uses. */
+    private fun JSONObject.clockTime(table: String, key: String, default: String?): String {
+        if (!has(key) || isNull(key)) {
+            return default ?: throw CloudDataException(table, key, null, "expected a HH:mm time")
+        }
+        val raw = opt(key)
+        val text = raw as? String
+            ?: throw CloudDataException(table, key, raw, "expected a HH:mm time")
+        if (ScheduleTime.parseToMinutesOrNull(text) == null) {
+            throw CloudDataException(table, key, raw, "not a valid HH:mm time")
+        }
+        return text
+    }
 
     // ---- focus_schedules --------------------------------------------------------------
 
@@ -77,25 +203,46 @@ object CloudJson {
         .put("blockNotifications", e.blockNotifications)
         .put("createdAt", e.createdAt)
 
-    fun scheduleFromCloud(j: JSONObject): FocusScheduleEntity = FocusScheduleEntity(
-        id = j.optString("id"),
-        title = j.optString("title"),
-        daysOfWeek = j.optString("daysOfWeek", "MON,TUE,WED,THU,FRI"),
-        startTime = j.optString("startTime", "09:00"),
-        endTime = j.optString("endTime", "12:00"),
-        isEnabled = j.bool("isEnabled", true),
-        isAutoStartSession = j.bool("isAutoStartSession", true),
-        mode = j.optString("mode", "TIMER"),
-        subjectName = j.optString("subjectName", "General Study"),
-        colorHex = j.optString("colorHex", "#4F46E5"),
-        repeatEnabled = j.bool("repeatEnabled", true),
-        scheduledDateMillis = j.lng("scheduledDateMillis", 0L),
-        breakMinutes = j.int("breakMinutes", 5),
-        description = j.optString("description", ""),
-        blockedAppPackages = j.optString("blockedAppPackages", ""),
-        blockNotifications = j.bool("blockNotifications", false),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
-    )
+    fun scheduleFromCloud(j: JSONObject): FocusScheduleEntity {
+        val table = SyncTables.FOCUS_SCHEDULES
+        // A schedule's whole purpose is to fire at a specific time on specific days, so these two
+        // fields are validated with the same strict parser the alarm scheduler uses. A row whose
+        // times/days cannot be understood is rejected here — it would otherwise be stored and then
+        // either silently skipped by the scheduler or (previously) fired at a substituted time.
+        val startTime = j.clockTime(table, "startTime", "09:00")
+        val endTime = j.clockTime(table, "endTime", "12:00")
+        val days = if (j.has("daysOfWeek") && !j.isNull("daysOfWeek")) {
+            val raw = j.opt("daysOfWeek")
+            val text = raw as? String
+                ?: throw CloudDataException(table, "daysOfWeek", raw, "expected text")
+            if (ScheduleTime.parseDaysOfWeekOrNull(text) == null) {
+                throw CloudDataException(table, "daysOfWeek", raw, "no recognisable weekday")
+            }
+            text
+        } else {
+            "MON,TUE,WED,THU,FRI"
+        }
+
+        return FocusScheduleEntity(
+            id = j.identity(table, "id"),
+            title = j.text(table, "title", "Study Schedule"),
+            daysOfWeek = days,
+            startTime = startTime,
+            endTime = endTime,
+            isEnabled = j.bool("isEnabled", true),
+            isAutoStartSession = j.bool("isAutoStartSession", true),
+            mode = j.oneOf(table, "mode", setOf("TIMER", "POMODORO", "STOPWATCH"), "TIMER"),
+            subjectName = j.text(table, "subjectName", "General Study"),
+            colorHex = j.text(table, "colorHex", "#4F46E5"),
+            repeatEnabled = j.bool("repeatEnabled", true),
+            scheduledDateMillis = j.lng("scheduledDateMillis", 0L),
+            breakMinutes = j.int("breakMinutes", 5),
+            description = j.text(table, "description", ""),
+            blockedAppPackages = j.text(table, "blockedAppPackages", ""),
+            blockNotifications = j.bool("blockNotifications", false),
+            createdAt = j.lng("createdAt", System.currentTimeMillis())
+        )
+    }
 
     // ---- blocked_apps ----------------------------------------------------------------
 
@@ -106,7 +253,7 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun blockedAppFromCloud(j: JSONObject): BlockedAppEntity = BlockedAppEntity(
-        packageName = j.optString("packageName"),
+        packageName = j.identity(SyncTables.BLOCKED_APPS, "packageName"),
         appName = j.optString("appName"),
         isEnabled = j.bool("isEnabled", true),
         createdAt = j.lng("createdAt", System.currentTimeMillis())
@@ -121,9 +268,16 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun blockedWebsiteFromCloud(j: JSONObject): BlockedWebsiteEntity = BlockedWebsiteEntity(
-        domain = j.optString("domain"),
+        domain = j.identity(SyncTables.BLOCKED_WEBSITES, "domain"),
         isEnabled = j.bool("isEnabled", true),
-        category = j.optString("category", "MANUAL"),
+        // The block decision is made from this string, so an unrecognised category is a rejected row
+        // rather than a silent downgrade to MANUAL.
+        category = j.oneOf(
+            SyncTables.BLOCKED_WEBSITES,
+            "category",
+            setOf("MANUAL", "ADULT"),
+            "MANUAL"
+        ),
         createdAt = j.lng("createdAt", System.currentTimeMillis())
     )
 
@@ -146,8 +300,9 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun studyChannelFromCloud(j: JSONObject): StudyChannelEntity = StudyChannelEntity(
-        id = j.optString("id"),
-        channelId = j.optString("channelId"),
+        id = j.identity(SyncTables.STUDY_CHANNELS, "id"),
+        // Not part of the identity and nullable in the schema: a partial row still restores.
+        channelId = j.text(SyncTables.STUDY_CHANNELS, "channelId", ""),
         channelName = j.optString("channelName"),
         channelUrl = j.optString("channelUrl"),
         thumbnailUrl = j.optString("thumbnailUrl", ""),
@@ -166,7 +321,7 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun subjectFromCloud(j: JSONObject): SubjectEntity = SubjectEntity(
-        id = j.optString("id"),
+        id = j.identity(SyncTables.STUDY_SUBJECTS, "id"),
         name = j.optString("name"),
         colorHex = j.optString("colorHex", "#7C3AED"),
         iconIdentifier = j.optString("iconIdentifier", "default"),
@@ -183,8 +338,9 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun topicFromCloud(j: JSONObject): TopicEntity = TopicEntity(
-        id = j.optString("id"),
-        subjectId = j.optString("subjectId"),
+        id = j.identity(SyncTables.STUDY_TOPICS, "id"),
+        // Nullable in the schema (a topic can arrive before its subject); not an identity field.
+        subjectId = j.text(SyncTables.STUDY_TOPICS, "subjectId", ""),
         name = j.optString("name"),
         createdAt = j.lng("createdAt", System.currentTimeMillis())
     )
@@ -210,7 +366,7 @@ object CloudJson {
         .put("notes", e.notes)
 
     fun studyPlanFromCloud(j: JSONObject): StudyPlanEntity = StudyPlanEntity(
-        id = j.optString("id"),
+        id = j.identity(SyncTables.STUDY_PLANS, "id"),
         subjectId = j.optString("subjectId"),
         subjectName = j.optString("subjectName"),
         topicName = j.optString("topicName"),
@@ -220,11 +376,19 @@ object CloudJson {
         colorHex = j.optString("colorHex", "#7C3AED"),
         createdAt = j.lng("createdAt", System.currentTimeMillis()),
         dateString = j.optString("dateString", ""),
-        startTime = j.optString("startTime", "08:00"),
-        endTime = j.optString("endTime", "09:00"),
+        // Times are validated exactly like a focus schedule's: a plan reminder must fire at the
+        // time the plan says, or not at all.
+        startTime = j.clockTime(SyncTables.STUDY_PLANS, "startTime", "08:00"),
+        endTime = j.clockTime(SyncTables.STUDY_PLANS, "endTime", "09:00"),
         startMinutes = j.int("startMinutes", 480),
         endMinutes = j.int("endMinutes", 540),
-        status = j.optString("status", "PLANNED"),
+        // study_plans.status is written only by StudyPlanDao (PLANNED / COMPLETED).
+        status = j.oneOf(
+            SyncTables.STUDY_PLANS,
+            "status",
+            setOf("PLANNED", "COMPLETED"),
+            "PLANNED"
+        ),
         notes = j.optString("notes", "")
     )
 
@@ -239,8 +403,9 @@ object CloudJson {
     /** Build the local Room row for a cloud keyword row. Room id is 0; caller resolves the real row. */
     fun keywordFromCloud(j: JSONObject): KeywordEntity = KeywordEntity(
         id = 0L,
-        keyword = j.optString("keyword_value"),
-        type = j.optString("keyword_type", "block"),
+        keyword = j.identity(SyncTables.BLOCKED_KEYWORDS, "keyword_value"),
+        // "allow" and "block" are opposite behaviours; guessing one would silently invert the rule.
+        type = j.oneOf(SyncTables.BLOCKED_KEYWORDS, "keyword_type", setOf("allow", "block"), "block"),
         isActive = j.bool("is_active", true),
         createdAt = j.lng("created_at", System.currentTimeMillis())
     )
@@ -265,13 +430,14 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun sessionRecordFromCloud(j: JSONObject): SessionRecordEntity {
-        val mode = try {
-            SessionMode.valueOf(j.optString("mode", "TIMER"))
-        } catch (ex: Exception) {
+        val mode = j.enumOrDefault(
+            SyncTables.SESSION_RECORDS,
+            "mode",
+            "SessionMode",
             SessionMode.TIMER
-        }
+        )
         return SessionRecordEntity(
-            id = j.optString("id"),
+            id = j.identity(SyncTables.SESSION_RECORDS, "id"),
             mode = mode,
             title = j.optString("title"),
             subject = j.optString("subject"),
@@ -307,18 +473,22 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun studyActivityFromCloud(j: JSONObject): StudyActivityEntity {
-        val type = try {
-            StudyActivityType.valueOf(j.optString("activityType", "FOCUS_SESSION"))
-        } catch (ex: Exception) {
+        // Analytics aggregate these two columns, so an unknown value must not be counted as a focus
+        // session (previously the fallback) without anyone being able to see that it happened.
+        val type = j.enumOrDefault(
+            SyncTables.STUDY_ACTIVITIES,
+            "activityType",
+            "StudyActivityType",
             StudyActivityType.FOCUS_SESSION
-        }
-        val source = try {
-            StudyActivitySource.valueOf(j.optString("source", "TIMER"))
-        } catch (ex: Exception) {
+        )
+        val source = j.enumOrDefault(
+            SyncTables.STUDY_ACTIVITIES,
+            "source",
+            "StudyActivitySource",
             StudyActivitySource.TIMER
-        }
+        )
         return StudyActivityEntity(
-            id = j.optString("id"),
+            id = j.identity(SyncTables.STUDY_ACTIVITIES, "id"),
             sessionId = j.optString("sessionId"),
             activityType = type,
             source = source,
@@ -384,18 +554,20 @@ object CloudJson {
         .put("createdAt", e.timestamp)
 
     fun blockedAttemptFromCloud(j: JSONObject): BlockedAttemptEntity {
-        val type = try {
-            BlockedEventType.valueOf(j.optString("eventType", "LEGACY"))
-        } catch (ex: Exception) {
+        val type = j.enumOrDefault(
+            SyncTables.BLOCKED_ATTEMPTS,
+            "eventType",
+            "BlockedEventType",
             BlockedEventType.LEGACY
-        }
-        val source = try {
-            BlockedEventSource.valueOf(j.optString("source", "LEGACY"))
-        } catch (ex: Exception) {
+        )
+        val source = j.enumOrDefault(
+            SyncTables.BLOCKED_ATTEMPTS,
+            "source",
+            "BlockedEventSource",
             BlockedEventSource.LEGACY
-        }
+        )
         return BlockedAttemptEntity(
-            eventId = j.optString("eventId"),
+            eventId = j.identity(SyncTables.BLOCKED_ATTEMPTS, "eventId"),
             timestamp = j.lng("timestamp", 0L),
             eventType = type,
             source = source,
@@ -442,7 +614,7 @@ object CloudJson {
         .put("isRevealed", e.isRevealed)
 
     fun scratchCardFromCloud(j: JSONObject): ScratchCardEntity = ScratchCardEntity(
-        sessionId = j.optString("sessionId"),
+        sessionId = j.identity(SyncTables.SCRATCH_CARDS, "sessionId"),
         createdAt = j.lng("createdAt", 0L),
         rewardType = j.optString("rewardType"),
         rewardEmoji = j.optString("rewardEmoji"),

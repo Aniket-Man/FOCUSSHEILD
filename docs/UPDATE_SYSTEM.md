@@ -21,6 +21,48 @@ constant in `GitHubReleaseRepository`; nothing about the source is user-configur
 > every check resolves to "couldn't check for updates". This is the intended consequence of the
 > security rule, not a bug — and it is why the fetch sits behind an interface (§15).
 
+### 1.1 Making it work while the repository is private
+
+`GitHubReleaseRepository` now resolves its source at build time from two optional `.env` keys
+(`app/build.gradle.kts` → `BuildConfig`), so no code change is needed to go live:
+
+| Key | Effect |
+| --- | --- |
+| `UPDATE_FEED_URL` | When set, this URL **replaces** the GitHub API call. Any host works — a small backend, a Supabase Edge Function, a static file. |
+| `UPDATE_REPO_SLUG` | `owner/repo` override for forks that publish their own releases. Defaults to `Aniket-Man/FOCUSSHEILD`. |
+
+Both values are compile-time only: nothing about the update source is user-configurable, so a
+malicious app or intent cannot redirect the updater. A malformed feed URL fails loudly at the point
+of use rather than silently falling back to GitHub (which would look like "no release").
+
+Accepted payload shapes (`ReleaseJsonParser`), so a backend can serve the simplest thing that works:
+
+```jsonc
+// GitHub-shaped
+{ "tag_name": "v1.3.1", "body": "notes", "html_url": "...",
+  "assets": [ { "name": "FocusShield-v1.3.1.apk", "browser_download_url": "https://..." } ] }
+
+// normalised
+{ "versionName": "1.3.1", "versionCode": 5, "apkUrl": "https://.../app.apk",
+  "releaseNotes": "notes", "releasePageUrl": "https://...", "publishedAt": "..." }
+```
+
+Asset selection only ever accepts a name ending in `.apk`: when several qualify, the one naming the
+release version wins, then the shortest name. A release with no `.apk` leaves `apkUrl` null and the
+UI offers no install button instead of linking something that is not an installer.
+
+Failure reporting is explicit (`ReleaseResponseMapper`), because "the updater is inert" and "you are
+already up to date" must never be confused:
+
+| Response | Result |
+| --- | --- |
+| `404` from a `github.com` host | "This build's release feed (GitHub) is not reachable without signing in…" |
+| `404` from a configured feed | "No published release was found at this build's update feed." |
+| `401`/`403` (or `X-RateLimit-Remaining: 0`, `429`) | rate-limited / refused message |
+| any other non-2xx | "Couldn't check for updates (server said N)." |
+| 2xx with unreadable JSON | "The update server sent an unreadable response." |
+| 2xx with no version field | `null` → "up to date" (a healthy feed with nothing published) |
+
 ## 2. Layering (§14)
 
 ```
@@ -46,7 +88,9 @@ flight, and the popup all agree by construction.
 | `feature/update/domain/SemanticVersion.kt` | Component-wise version comparison (§2) |
 | `feature/update/domain/UpdateState.kt` | The seven-state model (§13) |
 | `feature/update/data/UpdateRepository.kt` | The source interface + `UpdateSourceUnavailableException` |
-| `feature/update/data/GitHubReleaseRepository.kt` | The only GitHub-aware class |
+| `feature/update/data/GitHubReleaseRepository.kt` | The only GitHub-aware class (feed URL or GitHub API) |
+| `feature/update/data/ReleaseJsonParser.kt` | Payload → `UpdateInfo`, + `.apk` asset selection |
+| `feature/update/data/ReleaseResponseMapper.kt` | HTTP status → release / user-presentable failure |
 | `feature/update/data/UpdatePreferences.kt` | Local persistence (cooldowns, dot, cached release) |
 | `feature/update/data/UpdateChecker.kt` | Feed → `UpToDate` / `Available` / `Failed` / `Skipped` |
 | `feature/update/data/UpdateDownloadManager.kt` | Download, validate, clean up, install intent |
