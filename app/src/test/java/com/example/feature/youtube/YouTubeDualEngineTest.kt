@@ -32,7 +32,7 @@ import org.robolectric.annotation.Config
  * and all 16 Mandatory FocusShield Test Cases.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class YouTubeDualEngineTest {
 
     private val approvedIds = setOf("physicswallah", "khanacademy", "mitocw", "@physicswallah", "@khanacademy")

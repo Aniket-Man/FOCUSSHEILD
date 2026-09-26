@@ -55,6 +55,7 @@ import com.example.feature.update.ui.UpdateViewModel
  * Central FocusShield Navigation Graph.
  * Connects the primary tabs (Focus, Planner, Stats, Blocks), Profile hub, study modes, room persistence, and anti-distraction shield.
  */
+import com.example.feature.splash.SplashScreen
 import com.example.feature.websiteblocker.ui.WebsiteBlockerScreen
 import com.example.feature.websiteblocker.ui.WebsiteBlockerViewModel
 
@@ -159,11 +160,11 @@ fun FocusNavGraph(
     val isCompletedOnboardingSync = androidx.compose.runtime.remember { FocusShieldApp.instance.preferencesRepository.isCompletedOnboardingSync() }
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 
-    val startDestination = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
+    val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
 
     NavHost(
         navController = navController,
-        startDestination = startDestination,
+        startDestination = Screen.Splash.route,
         enterTransition = {
             fadeIn(animationSpec = tween(200)) + slideIntoContainer(
                 AnimatedContentTransitionScope.SlideDirection.Start,
@@ -404,6 +405,18 @@ fun FocusNavGraph(
             RewardsScreen(
                 settingsViewModel = settingsViewModel,
                 onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // SPLASH SCREEN
+        composable(Screen.Splash.route) {
+            SplashScreen(
+                onSplashFinished = {
+                    navController.navigate(nextDestinationAfterSplash) {
+                        popUpTo(Screen.Splash.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             )
         }
 

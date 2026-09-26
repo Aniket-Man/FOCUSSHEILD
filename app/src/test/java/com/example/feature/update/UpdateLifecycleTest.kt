@@ -14,7 +14,6 @@ import com.example.feature.update.engine.UpdateManager
 import java.io.File
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.backgroundScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,8 +44,7 @@ class UpdateLifecycleTest {
         val repository = MutableRepository(release)
 
         val oldManager = newManager(preferences, repository, installedVersion = "1.3.0")
-        oldManager.checkManually()
-        advanceUntilIdle()
+        oldManager.checkManually().join()
         assertTrue(oldManager.showDot.value)
 
         preferences.markDismissed(release.versionName)
@@ -56,8 +54,7 @@ class UpdateLifecycleTest {
         preferences.recordDownload(release.versionName, apk.absolutePath)
 
         val restartedManager = newManager(preferences, repository, installedVersion = "1.3.1")
-        restartedManager.restore()
-        advanceUntilIdle()
+        restartedManager.restore().join()
 
         assertEquals(UpdateState.UpToDate, restartedManager.state.value)
         assertFalse(restartedManager.showDot.value)
@@ -80,13 +77,11 @@ class UpdateLifecycleTest {
         val repository = MutableRepository(release)
 
         newManager(preferences, repository, installedVersion = "1.3.0").also {
-            it.checkManually()
-            advanceUntilIdle()
+            it.checkManually().join()
         }
 
         val currentBuildManager = newManager(preferences, repository, installedVersion = "1.3.1")
-        currentBuildManager.refreshFromCache()
-        advanceUntilIdle()
+        currentBuildManager.refreshFromCache().join()
 
         assertEquals(UpdateState.UpToDate, currentBuildManager.state.value)
         assertFalse(currentBuildManager.showDot.value)
@@ -126,15 +121,13 @@ class UpdateLifecycleTest {
         val release = release("1.3.1")
         val repository = MutableRepository(release)
         val seedingManager = newManager(preferences, repository, installedVersion = "1.3.0")
-        seedingManager.checkManually()
-        advanceUntilIdle()
+        seedingManager.checkManually().join()
 
         val apk = fakeDownloadedApk("install-state.apk")
         preferences.recordDownload(release.versionName, apk.absolutePath)
 
         val manager = newManager(preferences, repository, installedVersion = "1.3.0")
-        manager.restore()
-        advanceUntilIdle()
+        manager.restore().join()
         assertTrue(manager.state.value is UpdateState.Downloaded)
 
         manager.beginInstall()
@@ -149,8 +142,7 @@ class UpdateLifecycleTest {
         val preferences = newPreferences("obsolete-download")
         val repository = MutableRepository(release("1.3.1"))
         val seedingManager = newManager(preferences, repository, installedVersion = "1.3.0")
-        seedingManager.checkManually()
-        advanceUntilIdle()
+        seedingManager.checkManually().join()
 
         val apk = fakeDownloadedApk("obsolete-download.apk")
         preferences.recordDownload("1.3.1", apk.absolutePath)
@@ -159,8 +151,7 @@ class UpdateLifecycleTest {
         repository.latest = release("1.3.2")
 
         val manager = newManager(preferences, repository, installedVersion = "1.3.0")
-        manager.restore()
-        advanceUntilIdle()
+        manager.restore().join()
 
         val state = manager.state.value as UpdateState.UpdateAvailable
         assertEquals("1.3.2", state.info.versionName)

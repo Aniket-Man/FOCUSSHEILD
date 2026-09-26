@@ -20,10 +20,6 @@ class StudyPlanRepository(
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    private companion object {
-        const val TAG = "StudyPlanRepository"
-    }
-
     val allPlans: Flow<List<StudyPlanEntity>> = studyPlanDao.getAllPlansFlow()
 
     fun getTodayPlansFlow(): Flow<List<StudyPlanEntity>> {
@@ -341,6 +337,8 @@ class StudyPlanRepository(
     }
 
     companion object {
+        private const val TAG = "StudyPlanRepository"
+
         /**
          * Minutes-of-day for a stored `HH:mm` value.
          *

@@ -1,5 +1,6 @@
 package com.example.cloud.sync
 
+import android.util.Log
 import androidx.room.withTransaction
 import com.example.cloud.SupabaseConfig
 import com.example.cloud.auth.AuthRepository

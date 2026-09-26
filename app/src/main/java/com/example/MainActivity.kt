@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
     val openUpdatesRequest = _openUpdatesRequest.asStateFlow()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_MyApplication)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIncomingIntent(intent)

@@ -71,9 +71,8 @@ class UpdateManager(
     private var installCandidate: UpdateState.Downloaded? = null
 
     /** Restores any persisted update state. Safe to call once, from `Application.onCreate`. */
-    fun restore() {
-        scope.launch {
-            val needsFreshCheck = stateMutex.withLock {
+    fun restore(): Job = scope.launch {
+        val needsFreshCheck = stateMutex.withLock {
                 val prefs = preferences.current()
                 val rawInfo = prefs.latestInfoJson
                 val restored = rawInfo?.let(::decodeInfo)
@@ -135,7 +134,6 @@ class UpdateManager(
             // the duplicate launch harmless.
             if (needsFreshCheck) runBackgroundCheck()
         }
-    }
 
     /**
      * Automatic check — app launch, return to foreground, or connectivity regained.
@@ -163,13 +161,11 @@ class UpdateManager(
     }
 
     /** User-initiated check from Profile → New Updates. Bypasses the cooldown and may report failure. */
-    fun checkManually() {
-        scope.launch {
-            checkMutex.withLock {
-                stateMutex.withLock { _state.value = UpdateState.Checking }
-                val result = checker.check(manual = true)
-                stateMutex.withLock { applyResult(result, manual = true) }
-            }
+    fun checkManually(): Job = scope.launch {
+        checkMutex.withLock {
+            stateMutex.withLock { _state.value = UpdateState.Checking }
+            val result = checker.check(manual = true)
+            stateMutex.withLock { applyResult(result, manual = true) }
         }
     }
 
@@ -338,9 +334,8 @@ class UpdateManager(
     }
 
     /** Called by the ViewModel when the screen opens, so a cached offer is shown without a re-check. */
-    fun refreshFromCache() {
-        scope.launch {
-            val needsFreshCheck = stateMutex.withLock {
+    fun refreshFromCache(): Job = scope.launch {
+        val needsFreshCheck = stateMutex.withLock {
                 if (
                     _state.value is UpdateState.Downloaded ||
                     _state.value is UpdateState.Downloading ||
@@ -392,7 +387,6 @@ class UpdateManager(
 
             if (needsFreshCheck) runBackgroundCheck()
         }
-    }
 
     private suspend fun refreshDot() {
         val info = current

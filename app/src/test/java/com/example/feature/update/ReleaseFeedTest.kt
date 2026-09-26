@@ -11,6 +11,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Issue 2 regression suite: the update feed.
@@ -19,9 +22,9 @@ import org.junit.Test
  * "the repository is private" was indistinguishable from "no release is published", and the asset
  * selection rules were only exercised by installing a release. These tests pin the two supported
  * payload shapes, the `.apk`-only asset rule, the status → message mapping, and the URL resolution.
- *
- * Plain JUnit: nothing here touches Android (OkHttp and org.json are JVM libraries).
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ReleaseFeedTest {
 
     private fun githubPayload(

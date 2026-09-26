@@ -94,7 +94,7 @@ class CloudSchemaContractTest {
                 .filter { it.isNotEmpty() && it != "user_id" }
             result[table] = SqlTable(columns, pk)
         }
-        assertTrue("schema file produced no tables", result.size >= 16)
+        assertTrue("schema file produced no tables", result.size >= 15)
         result
     }
 
@@ -302,14 +302,14 @@ class CloudSchemaContractTest {
 
     @Test
     fun `the schema declares no synced table the app does not know about`() {
-        // 13 Room-backed + profiles + user_preferences + the deliberate legacy app_limits.
+        // 13 Room-backed + profiles + user_preferences (app_limits was retired per CLOUD_SYNC_AUDIT.md).
         val expectedKnown = SYNCED_ROOM_TABLES.map { it.cloudTable }.toSet() +
-            setOf(SyncTables.PROFILES, SyncTables.USER_PREFERENCES, "app_limits")
+            setOf(SyncTables.PROFILES, SyncTables.USER_PREFERENCES)
         val unexpected = sqlTables.keys - expectedKnown
         assertTrue("schema has tables the app does not sync: $unexpected", unexpected.isEmpty())
 
-        // app_limits is legacy: still created and protected, but never written by the app.
-        assertTrue("app_limits must remain protected in the schema", sqlTables.containsKey("app_limits"))
+        // app_limits is legacy: retired and no longer created by the schema.
+        assertFalse("app_limits must not be created by the schema", sqlTables.containsKey("app_limits"))
         assertTrue(
             "no app-side table may map to the legacy app_limits table",
             SYNCED_ROOM_TABLES.none { it.cloudTable == "app_limits" }

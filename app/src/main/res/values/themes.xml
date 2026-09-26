@@ -3,6 +3,12 @@
 
     <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
 
+    <style name="Theme.App.Starting" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">#0D0B14</item>
+        <item name="android:navigationBarColor">#0D0B14</item>
+    </style>
+
     <style name="Theme.TransparentOverlay" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
