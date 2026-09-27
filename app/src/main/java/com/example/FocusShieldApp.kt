@@ -88,8 +88,8 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     // Release-feed update checker. Constructed from the build's `UPDATE_FEED_URL` /
     // `UPDATE_REPO_SLUG` (see .env.example): a feed URL is the supported way to serve releases while
     // the GitHub repository is private. No GitHub credential is ever shipped, so a private GitHub
-    // repository reached over the API answers 404 and the app reports that honestly instead of
-    // inventing a release. See UpdateRepository / docs/UPDATE_SYSTEM.md §1.
+    // repository reached over the API answers 404 — which the updater maps to "nothing published"
+    // (UpToDate), never to a failure. See UpdateRepository / docs/UPDATE_SYSTEM.md §1.
     val updatePreferences by lazy {
         com.example.feature.update.data.UpdatePreferences(this)
     }
@@ -97,7 +97,10 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.feature.update.data.GitHubReleaseRepository.fromConfig()
     }
     val updateDownloadManager by lazy {
-        com.example.feature.update.data.UpdateDownloadManager(this)
+        com.example.feature.update.data.UpdateDownloadManager(
+            this,
+            allowedHosts = updateRepository.apkHostAllowList()
+        )
     }
     val updateManager by lazy {
         com.example.feature.update.engine.UpdateManager(
@@ -106,12 +109,14 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                 repository = updateRepository,
                 preferences = updatePreferences,
                 installedVersionName = BuildConfig.VERSION_NAME,
+                installedVersionCode = BuildConfig.VERSION_CODE,
                 isOnline = { connectivityMonitor.isOnline.value }
             ),
             preferences = updatePreferences,
             downloadManager = updateDownloadManager,
             scope = applicationScope,
-            installedVersionName = BuildConfig.VERSION_NAME
+            installedVersionName = BuildConfig.VERSION_NAME,
+            installedVersionCode = BuildConfig.VERSION_CODE
         )
     }
 

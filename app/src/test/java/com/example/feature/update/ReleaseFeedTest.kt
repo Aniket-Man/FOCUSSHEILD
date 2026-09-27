@@ -67,7 +67,14 @@ class ReleaseFeedTest {
 
     @Test
     fun `a malformed feed url fails loudly instead of silently falling back to GitHub`() {
-        for (bad in listOf("not a url", "ftp://example.com/release.json", "example.com/release.json")) {
+        // http:// is rejected too: on minSdk 24–27 cleartext is still permitted by the platform
+        // default, and a feed read over http could point the updater at anything.
+        for (bad in listOf(
+            "not a url",
+            "ftp://example.com/release.json",
+            "example.com/release.json",
+            "http://feed.example.com/release.json"
+        )) {
             val repo = GitHubReleaseRepository(feedUrl = bad)
             val failure = runCatching { repo.buildUrl() }.exceptionOrNull()
             assertTrue(
@@ -108,7 +115,9 @@ class ReleaseFeedTest {
               "releaseNotes": "Cloud sync improvements",
               "releasePageUrl": "https://example.com/releases/2.0.0"
             }
-            """.trimIndent()
+            """.trimIndent(),
+            // The feed's own host is what makes its APK links trusted (UpdateUrlPolicy).
+            feedHost = "dl.example.com"
         )
         assertNotNull(info)
         assertEquals("2.0.0", info!!.versionName)
@@ -146,6 +155,35 @@ class ReleaseFeedTest {
     }
 
     @Test
+    fun `apk links that are cleartext or off-host are not offered`() {
+        // https is required even on a known host: cleartext on minSdk 24–27 is a MITM opening.
+        val cleartext = ReleaseJsonParser.parse(
+            githubPayload(
+                assets = listOf(
+                    "FocusShield-v1.3.1.apk" to
+                        "http://github.com/Aniket-Man/FOCUSSHEILD/releases/download/v1.3.1/FocusShield-v1.3.1.apk"
+                )
+            )
+        )
+        assertNotNull(cleartext)
+        assertNull(cleartext!!.apkUrl)
+        assertFalse(cleartext.isInstallable)
+
+        // Exact hosts only: "evilgithub.com" must not pass a suffix check (it never did here —
+        // but the download path used `endsWith("github.com")`, so pin it in the parser too).
+        val spoofed = ReleaseJsonParser.parse(
+            githubPayload(
+                assets = listOf(
+                    "FocusShield-v1.3.1.apk" to "https://evilgithub.com/FocusShield-v1.3.1.apk"
+                )
+            )
+        )
+        assertNotNull(spoofed)
+        assertNull(spoofed!!.apkUrl)
+        assertFalse(spoofed.isInstallable)
+    }
+
+    @Test
     fun `a payload with no version is 'nothing published', not a failure`() {
         assertNull(ReleaseJsonParser.parse("{}"))
         assertNull(ReleaseJsonParser.parse("""{"draft": true, "assets": []}"""))
@@ -164,33 +202,37 @@ class ReleaseFeedTest {
     // ---- status mapping ------------------------------------------------------------------
 
     @Test
-    fun `a 404 from GitHub names the real cause`() {
-        val failure = runCatching {
-            ReleaseResponseMapper.map(code = 404, payload = "", fromGitHub = true, rateLimited = false)
-        }.exceptionOrNull()
-        assertTrue(failure is UpdateSourceUnavailableException)
-        val reason = (failure as UpdateSourceUnavailableException).reason
-        assertTrue(reason, reason.contains("not reachable without signing in"))
-        assertTrue(reason, reason.contains("private"))
+    fun `a 404 from GitHub is 'nothing published', not a failure`() {
+        // GitHub answers 404 for an empty release list, and also for a private repository this
+        // credential-less build cannot read. Either way there is nothing to install: mapping it to
+        // a failure marked every check failed and drove a 15-minute retry loop whose only visible
+        // symptom was a failed manual check.
+        assertNull(
+            ReleaseResponseMapper.map(code = 404, payload = "", rateLimited = false)
+        )
     }
 
     @Test
-    fun `a 404 from a configured feed is 'no published release'`() {
-        val failure = runCatching {
-            ReleaseResponseMapper.map(code = 404, payload = "", fromGitHub = false, rateLimited = false)
-        }.exceptionOrNull() as UpdateSourceUnavailableException
-        assertEquals("No published release was found at this build's update feed.", failure.reason)
+    fun `a 404 from a configured feed is 'nothing published'`() {
+        assertNull(
+            ReleaseResponseMapper.map(
+                code = 404,
+                payload = "",
+                rateLimited = false,
+                feedHost = "feed.example.com"
+            )
+        )
     }
 
     @Test
     fun `rate limiting and refusals are reported differently`() {
         val limited = runCatching {
-            ReleaseResponseMapper.map(code = 403, payload = "", fromGitHub = true, rateLimited = true)
+            ReleaseResponseMapper.map(code = 403, payload = "", rateLimited = true)
         }.exceptionOrNull() as UpdateSourceUnavailableException
         assertTrue(limited.reason, limited.reason.contains("rate-limiting"))
 
         val refused = runCatching {
-            ReleaseResponseMapper.map(code = 401, payload = "", fromGitHub = true, rateLimited = false)
+            ReleaseResponseMapper.map(code = 401, payload = "", rateLimited = false)
         }.exceptionOrNull() as UpdateSourceUnavailableException
         assertTrue(refused.reason, refused.reason.contains("refused"))
     }
@@ -198,7 +240,7 @@ class ReleaseFeedTest {
     @Test
     fun `other server errors name the status`() {
         val failure = runCatching {
-            ReleaseResponseMapper.map(code = 500, payload = "", fromGitHub = false, rateLimited = false)
+            ReleaseResponseMapper.map(code = 500, payload = "", rateLimited = false)
         }.exceptionOrNull() as UpdateSourceUnavailableException
         assertEquals("Couldn't check for updates (server said 500).", failure.reason)
     }
@@ -208,7 +250,6 @@ class ReleaseFeedTest {
         val info = ReleaseResponseMapper.map(
             code = 200,
             payload = githubPayload(),
-            fromGitHub = true,
             rateLimited = false
         )
         assertEquals("1.3.1", info!!.versionName)
@@ -217,7 +258,7 @@ class ReleaseFeedTest {
     @Test
     fun `a 2xx with garbage is reported as unreadable rather than as up to date`() {
         val failure = runCatching {
-            ReleaseResponseMapper.map(code = 200, payload = "nope", fromGitHub = false, rateLimited = false)
+            ReleaseResponseMapper.map(code = 200, payload = "nope", rateLimited = false)
         }.exceptionOrNull() as UpdateSourceUnavailableException
         assertEquals("The update server sent an unreadable response.", failure.reason)
     }
@@ -236,5 +277,42 @@ class ReleaseFeedTest {
         assertTrue(SemanticVersion.isNewer("2.0.0", "2.0.0-rc1"))
         // Free-form tags that contain no number are not "newer".
         assertFalse(SemanticVersion.isNewer("release", "1.3.0"))
+    }
+
+    @Test
+    fun `tags with non-numeric segments are never newer than an installed release`() {
+        // The parser used to *drop* the offending segment: "1.rc.5" became [1, 5] (beating an
+        // installed 1.0.9) and "release/1.4.0" became [4, 0] (beating an installed 1.9.0) — i.e.
+        // an older APK could be offered as an update. Unparseable now means "not newer", always.
+        assertFalse(SemanticVersion.isNewer("1.rc.5", "1.0.9"))
+        assertFalse(SemanticVersion.isNewer("release/1.4.0", "1.9.0"))
+        assertFalse(SemanticVersion.isNewer("release-2024", "0.1.0"))
+        assertFalse(SemanticVersion.isNewer("v", "1.0.0"))
+    }
+
+    @Test
+    fun `pre-releases compare identifier by identifier with numeric segments numeric`() {
+        // Whole-string compareTo ranked "beta.10" *below* "beta.2".
+        assertTrue(SemanticVersion.isNewer("2.0.0-beta.10", "2.0.0-beta.2"))
+        assertFalse(SemanticVersion.isNewer("2.0.0-beta.2", "2.0.0-beta.10"))
+        assertTrue(SemanticVersion.isNewer("2.0.0-beta.11", "2.0.0-beta.10"))
+        // Numeric identifiers rank below alphanumeric ones (semver §11.4).
+        assertTrue(SemanticVersion.isNewer("2.0.0-alpha", "2.0.0-2"))
+        assertFalse(SemanticVersion.isNewer("2.0.0-2", "2.0.0-alpha"))
+        // Build metadata never participates in precedence.
+        assertFalse(SemanticVersion.isNewer("1.0.0+build.5", "1.0.0"))
+        assertTrue(SemanticVersion.isNewer("1.0.1+build.1", "1.0.0+build.9"))
+    }
+
+    @Test
+    fun `versionCode decides when both sides state one, names otherwise`() {
+        // Both codes present: the code is what Android enforces on install.
+        assertTrue(SemanticVersion.isNewerRelease("1.0.0", 8, "2.0.0", 7))
+        assertFalse(SemanticVersion.isNewerRelease("2.0.0", 7, "1.0.0", 8))
+        assertFalse(SemanticVersion.isNewerRelease("2.0.0", 7, "1.0.0", 7))
+        // Either side missing a code (GitHub tags, dev builds): fall back to the name.
+        assertTrue(SemanticVersion.isNewerRelease("1.0.1", null, "1.0.0", 9))
+        assertTrue(SemanticVersion.isNewerRelease("1.0.1", 9, "1.0.0", null))
+        assertFalse(SemanticVersion.isNewerRelease("1.0.0", null, "1.0.1", null))
     }
 }

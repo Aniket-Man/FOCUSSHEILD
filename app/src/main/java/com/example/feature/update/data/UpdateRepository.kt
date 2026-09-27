@@ -17,10 +17,11 @@ import com.example.feature.update.domain.UpdateInfo
 interface UpdateRepository {
 
     /**
-     * The newest published release, or null when the source reports no releases at all.
+     * The newest published release, or null when the source reports no releases at all — including
+     * GitHub's 404 for an empty release list or a private repository this build cannot read.
      *
      * @throws UpdateSourceUnavailableException when the source could not be read — offline, rate
-     *   limited, or (for a private repository reached without credentials) not found.
+     *   limited, or otherwise unreadable (but never a plain "not found": that is `null`).
      */
     suspend fun fetchLatestRelease(): UpdateInfo?
 }

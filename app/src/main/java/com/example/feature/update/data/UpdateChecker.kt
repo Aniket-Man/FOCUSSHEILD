@@ -27,7 +27,8 @@ sealed interface UpdateCheckResult {
  *
  * Owns three separate concerns that are easy to conflate:
  *  - **the comparison** — a release only counts when it is *strictly* newer than the installed
- *    `versionName`, compared component-wise (prompt.txt §2);
+ *    build: by `versionCode` when both sides state one, otherwise component-wise by
+ *    `versionName` (prompt.txt §2);
  *  - **the throttle** — automatic checks back off for [AUTO_CHECK_INTERVAL] and never run offline,
  *    while an explicit user-initiated check always goes out (prompt.txt §4/§17);
  *  - **the announcement rules** — "Later" and "already notified" are per *version*, so they survive
@@ -40,6 +41,8 @@ class UpdateChecker(
     private val repository: UpdateRepository,
     private val preferences: UpdatePreferences,
     private val installedVersionName: String,
+    /** The running build's `versionCode`; decisive when the release states its own (see `isNewerRelease`). */
+    private val installedVersionCode: Int? = null,
     private val isOnline: () -> Boolean = { true },
     private val now: () -> Long = System::currentTimeMillis
 ) {
@@ -56,30 +59,43 @@ class UpdateChecker(
         val prefs = preferences.current()
         if (!manual && !isDueForCheck(prefs)) return UpdateCheckResult.Skipped
 
+        // The cooldown is stamped from the moment the request starts, never from its completion:
+        // a stamp written after a slow response landed later and later, and the periodic worker
+        // fires on a fixed grid — so each stamp could push the "due" moment past the next worker
+        // run, skipping every other run and halving the real background cadence.
+        val startedAt = now()
+
         val info = try {
             repository.fetchLatestRelease()
         } catch (e: UpdateSourceUnavailableException) {
-            preferences.recordCheck(latestVersion = null, failed = true)
+            preferences.recordCheck(latestVersion = null, failed = true, at = startedAt)
             return UpdateCheckResult.Failed(e.reason)
         } catch (e: Exception) {
-            preferences.recordCheck(latestVersion = null, failed = true)
+            preferences.recordCheck(latestVersion = null, failed = true, at = startedAt)
             return UpdateCheckResult.Failed("Couldn't check for updates.")
         }
 
         // A release feed with nothing published is not an error — there is simply nothing newer.
+        // GitHub's 404 for an empty release list (and for a private repo) lands here too.
         if (info == null) {
-            preferences.recordCheck(latestVersion = null, failed = false)
+            preferences.recordCheck(latestVersion = null, failed = false, at = startedAt)
             return UpdateCheckResult.UpToDate
         }
 
-        return if (SemanticVersion.isNewer(info.versionName, installedVersionName)) {
-            preferences.recordCheck(info.versionName, failed = false)
+        return if (SemanticVersion.isNewerRelease(
+                candidate = info.versionName,
+                candidateVersionCode = info.versionCode,
+                installed = installedVersionName,
+                installedVersionCode = installedVersionCode
+            )
+        ) {
+            preferences.recordCheck(info.versionName, failed = false, at = startedAt)
             UpdateCheckResult.Available(info)
         } else {
             // Up to date — including the case where the installed build is *ahead* of the newest
             // release, which happens on a local build. Any dismissal still pending for this version
             // is stale now, so it is cleared rather than left to resurface (prompt.txt §23 TEST 10).
-            preferences.recordCheck(info.versionName, failed = false)
+            preferences.recordCheck(info.versionName, failed = false, at = startedAt)
             // Clear against the running build, not the remote tag. They differ when a local/dev build
             // is ahead of the latest published release.
             preferences.clearForInstalled(installedVersionName)
