@@ -94,7 +94,9 @@ class CloudSchemaContractTest {
                 .filter { it.isNotEmpty() && it != "user_id" }
             result[table] = SqlTable(columns, pk)
         }
-        assertTrue("schema file produced no tables", result.size >= 16)
+        // 15 synced tables: the 13 SYNCED_ROOM_TABLES plus profiles and user_preferences.
+        // (`app_limits` is legacy and deliberately not created by the schema any more.)
+        assertTrue("schema file produced no tables", result.size >= 15)
         result
     }
 
@@ -302,14 +304,26 @@ class CloudSchemaContractTest {
 
     @Test
     fun `the schema declares no synced table the app does not know about`() {
-        // 13 Room-backed + profiles + user_preferences + the deliberate legacy app_limits.
+        // 13 Room-backed + profiles + user_preferences. app_limits is not created by the schema
+        // at all (asserted below), so it must not appear here either.
         val expectedKnown = SYNCED_ROOM_TABLES.map { it.cloudTable }.toSet() +
-            setOf(SyncTables.PROFILES, SyncTables.USER_PREFERENCES, "app_limits")
+            setOf(SyncTables.PROFILES, SyncTables.USER_PREFERENCES)
         val unexpected = sqlTables.keys - expectedKnown
         assertTrue("schema has tables the app does not sync: $unexpected", unexpected.isEmpty())
 
-        // app_limits is legacy: still created and protected, but never written by the app.
-        assertTrue("app_limits must remain protected in the schema", sqlTables.containsKey("app_limits"))
+        // app_limits is legacy: the schema no longer creates it, but section 6 still hardens a
+        // pre-existing copy (RLS enabled + CRUD revoked) so a stale deployment can never be read
+        // through the Data API. Assert both halves of that contract.
+        assertFalse(
+            "cloud_schema.sql must not create the legacy app_limits table",
+            sqlTables.containsKey("app_limits")
+        )
+        val schemaText = schemaFile.readText()
+        assertTrue(
+            "the schema must still harden a pre-existing app_limits table (RLS + revoke)",
+            schemaText.contains("public.app_limits enable row level security") &&
+                schemaText.contains("revoke all on table public.app_limits from anon, authenticated")
+        )
         assertTrue(
             "no app-side table may map to the legacy app_limits table",
             SYNCED_ROOM_TABLES.none { it.cloudTable == "app_limits" }

@@ -11,6 +11,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Issue 2 regression suite: the update feed.
@@ -20,8 +23,12 @@ import org.junit.Test
  * selection rules were only exercised by installing a release. These tests pin the two supported
  * payload shapes, the `.apk`-only asset rule, the status → message mapping, and the URL resolution.
  *
- * Plain JUnit: nothing here touches Android (OkHttp and org.json are JVM libraries).
+ * Runs under Robolectric: plain JUnit would hit the mockable android.jar's stubbed
+ * `org.json.JSONObject` ("Method optString not mocked"). Robolectric supplies the real
+ * framework classes while the parser itself stays pure JVM code.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ReleaseFeedTest {
 
     private fun githubPayload(

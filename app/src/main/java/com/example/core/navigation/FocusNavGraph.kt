@@ -14,6 +14,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.FocusShieldApp
 import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
@@ -74,22 +75,9 @@ fun FocusNavGraph(
     blockedAppsViewModel: BlockedAppsViewModel = viewModel(),
     appLimitsViewModel: AppLimitsViewModel = viewModel(),
     websiteBlockerViewModel: WebsiteBlockerViewModel = viewModel(),
-    studyChannelsViewModel: StudyChannelsViewModel = viewModel {
-        StudyChannelsViewModel(FocusShieldApp.instance.studyChannelRepository)
-    },
-    accountViewModel: AccountViewModel = viewModel {
-        AccountViewModel(
-            FocusShieldApp.instance.authRepository,
-            FocusShieldApp.instance.cloudInstallState,
-            FocusShieldApp.instance.syncGateway
-        )
-    },
-    updateViewModel: UpdateViewModel = viewModel {
-        UpdateViewModel(
-            manager = FocusShieldApp.instance.updateManager,
-            installedVersionName = BuildConfig.VERSION_NAME
-        )
-    }
+    studyChannelsViewModel: StudyChannelsViewModel = hiltViewModel(),
+    accountViewModel: AccountViewModel = hiltViewModel(),
+    updateViewModel: UpdateViewModel = hiltViewModel()
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 

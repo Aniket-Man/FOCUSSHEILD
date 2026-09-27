@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.StudyChannelEntity
 import com.example.data.repository.StudyChannelRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +25,8 @@ data class StudyChannelsUiState(
     val isAdding: Boolean = false
 )
 
-class StudyChannelsViewModel(
+@HiltViewModel
+class StudyChannelsViewModel @Inject constructor(
     private val studyChannelRepository: StudyChannelRepository
 ) : ViewModel() {
 

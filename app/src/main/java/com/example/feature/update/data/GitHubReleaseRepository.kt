@@ -1,6 +1,7 @@
 package com.example.feature.update.data
 
 import com.example.BuildConfig
+import com.example.feature.update.domain.UpdateInfo
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
