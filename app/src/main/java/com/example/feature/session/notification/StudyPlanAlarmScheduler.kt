@@ -32,6 +32,26 @@ object StudyPlanAlarmScheduler {
     const val EXTRA_AUTO_START = "extra_auto_start"
     const val EXTRA_START_PLAN_SESSION = "extra_start_plan_session"
 
+    /** Secret token stamped into plan-session intents and verified on receipt (issue #15). */
+    const val EXTRA_SESSION_TRUST_TOKEN = "extra_session_trust_token"
+
+    private const val TRUST_PREFS = "focus_shield_trust_prefs"
+    private const val KEY_SESSION_TOKEN = "session_launch_token"
+
+    /**
+     * App-private random token proving a plan-session intent came from FocusShield's own
+     * notification. The MainActivity is exported, so without this any app could forge
+     * [EXTRA_START_PLAN_SESSION] and auto-start a session. Persisted so taps on notifications
+     * posted before a process death still match.
+     */
+    fun sessionLaunchToken(context: Context): String {
+        val prefs = context.getSharedPreferences(TRUST_PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_SESSION_TOKEN, null)
+            ?: java.util.UUID.randomUUID().toString().also { token ->
+                prefs.edit().putString(KEY_SESSION_TOKEN, token).apply()
+            }
+    }
+
     private const val REQUEST_CODE_DAILY_RESET = 99999
 
     /**

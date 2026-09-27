@@ -24,7 +24,8 @@ import kotlinx.coroutines.launch
  *    reminders". Without handling this, schedules armed while the permission was missing would stay
  *    inexact until the next reboot, and schedules armed exactly would silently keep firing after a
  *    revocation (the platform cancels exact alarms on revocation, but the app would not know);
- *  - `ACTION_DAILY_RESET` — FocusShield's own midnight alarm.
+ *  - `ACTION_DAILY_RESET` — FocusShield's own midnight alarm (explicit intent only; sender is
+ *    verified because the receiver itself is exported for the system broadcasts above).
  *
  * Work done: today's study-plan rows are ensured, study-plan reminders and the midnight reset are
  * re-armed, and every enabled automated focus schedule is re-planned through
@@ -36,6 +37,18 @@ class BootAndDailyResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         Log.d(TAG, "Received action: $action")
+
+        // The custom midnight action is sent via FocusShield's own explicit PendingIntent; it is
+        // no longer declared in the manifest filter, but an exported receiver can still be targeted
+        // directly — so ignore any sender that is not us or the system relaying our PendingIntent
+        // (issue #15).
+        if (action == StudyPlanAlarmScheduler.ACTION_DAILY_RESET) {
+            val sender = sendingPackage
+            if (sender != null && sender != context.packageName && sender != "android") {
+                Log.w(TAG, "Ignoring ACTION_DAILY_RESET from untrusted sender: $sender")
+                return
+            }
+        }
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
