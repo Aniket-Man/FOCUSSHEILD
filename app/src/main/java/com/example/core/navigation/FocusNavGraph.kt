@@ -13,6 +13,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.FocusShieldApp
 import com.example.core.permission.FocusPermissionManager
@@ -113,9 +114,21 @@ fun FocusNavGraph(
         )
     }
 
-    // Automatically navigate to the session page when launched from a Study Plan notification
-    LaunchedEffect(incomingPlanPayload) {
+    // Root-redirect gate (issue #18): every launch intent below must wait until the
+    // splash→Home/Onboarding redirect has run. Two independent LaunchedEffects racing the
+    // splash redirect used to interleave navigate() calls and corrupt the back stack
+    // (deep-linked session buried under Home, or onboarding pushed over an active session).
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStackEntry?.destination?.route
+    val isSplashRoute = currentRoute == null || currentRoute == Screen.Splash.route
+
+    // Automatically navigate to the session page when launched from a Study Plan notification.
+    // Queued while Splash is visible; consumed on the first recomposition after the root
+    // redirect (isSplashRoute flips), so it always lands ON TOP of Home/Onboarding — never
+    // underneath the redirect and never with Splash still in the back stack.
+    LaunchedEffect(incomingPlanPayload, isSplashRoute) {
         val payload = incomingPlanPayload ?: return@LaunchedEffect
+        if (isSplashRoute) return@LaunchedEffect
         sessionViewModel.configureForStudyPlan(
             subjectName = payload.subject,
             topicName = payload.topic,
@@ -143,9 +156,10 @@ fun FocusNavGraph(
     }
 
     // Opened by tapping the "update available" notification (prompt.txt §5). Consumed once so a
-    // configuration change or a later navigation cannot re-trigger it.
-    LaunchedEffect(openUpdatesRequest) {
+    // configuration change or a later navigation cannot re-trigger it. Same splash gate as above.
+    LaunchedEffect(openUpdatesRequest, isSplashRoute) {
         if (!openUpdatesRequest) return@LaunchedEffect
+        if (isSplashRoute) return@LaunchedEffect
         navController.navigate(Screen.Update.route) { launchSingleTop = true }
         onOpenUpdatesHandled()
     }
@@ -157,7 +171,12 @@ fun FocusNavGraph(
             permissionStatus.isOverlayGranted &&
             permissionStatus.isBatteryOptimizationIgnored
 
-    val isCompletedOnboardingSync = androidx.compose.runtime.remember { FocusShieldApp.instance.preferencesRepository.isCompletedOnboardingSync() }
+    // Bootstrap snapshot covering the frames before preferencesFlow emits. Keyed to the
+    // authoritative flag so it re-reads instead of pinning a stale one-shot value captured
+    // at first composition (e.g. after process recreation, issue #18).
+    val isCompletedOnboardingSync = androidx.compose.runtime.remember(settingsState.preferences.hasCompletedOnboarding) {
+        FocusShieldApp.instance.preferencesRepository.isCompletedOnboardingSync()
+    }
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 
     val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
