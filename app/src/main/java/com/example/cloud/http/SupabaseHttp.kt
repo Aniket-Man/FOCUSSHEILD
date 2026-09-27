@@ -69,12 +69,22 @@ class SupabaseHttp(private val config: SupabaseConfig) {
             .url(url)
             .header("apikey", config.anonKey)
             .header("Accept", "application/json")
-        if (jsonBody != null) {
-            builder.header("Content-Type", "application/json")
-            builder.method(method, jsonBody.toRequestBody(jsonMediaType))
-        } else {
-            builder.method(method, null)
+        // OkHttp rejects a bodyless POST/PUT/PATCH ("method X must have a request body")
+        // and rejects any body on GET/HEAD — e.g. GoTrue's /logout is a POST with no payload,
+        // which used to throw IllegalArgumentException and abort the call (issue #20).
+        val forbidsBody = method.equals("GET", ignoreCase = true) || method.equals("HEAD", ignoreCase = true)
+        val body = when {
+            forbidsBody -> null
+            jsonBody != null -> jsonBody.toRequestBody(jsonMediaType)
+            method.equals("POST", ignoreCase = true) ||
+                method.equals("PUT", ignoreCase = true) ||
+                method.equals("PATCH", ignoreCase = true) -> "{}".toRequestBody(jsonMediaType)
+            else -> null
         }
+        if (body != null) {
+            builder.header("Content-Type", "application/json")
+        }
+        builder.method(method, body)
         if (!accessToken.isNullOrBlank()) {
             builder.header("Authorization", "Bearer $accessToken")
         }

@@ -56,7 +56,12 @@ class GoTrueClient(private val http: SupabaseHttp) {
         return user.optString("id") to user.optString("email")
     }
 
-    /** Revoke the session on the server (best-effort; 204 expected). */
+    /**
+     * Revoke the session on the server (204 expected). Failures propagate: 4xx means the
+     * token is already dead remotely and callers may clear local state; transport errors
+     * and 5xx must be surfaced so the user is never shown signed-out while the server
+     * session is still live (issue #20).
+     */
     suspend fun signOut(accessToken: String) {
         http.call("POST", "/auth/v1/logout", accessToken = accessToken)
     }
