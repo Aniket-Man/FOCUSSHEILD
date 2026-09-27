@@ -9,6 +9,8 @@ import android.util.Log
 import com.example.feature.notificationblocker.engine.NotificationBlockerEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -19,7 +21,13 @@ import kotlinx.coroutines.launch
 class FocusNotificationListenerService : NotificationListenerService() {
 
     private val tag = "FocusNotifListener"
-    private val serviceScope = CoroutineScope(Dispatchers.IO)
+
+    // One supervisor-owned scope for the whole service lifetime: children failures don't cancel
+    // siblings, the scope is bounded to a handful of concurrent handlers so a notification storm
+    // cannot fan out into hundreds of simultaneous coroutines, and onDestroy() cancels it so no
+    // work (or service-context reference) outlives the service (issue #19).
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(serviceJob + Dispatchers.IO.limitedParallelism(4))
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -31,6 +39,11 @@ class FocusNotificationListenerService : NotificationListenerService() {
         super.onListenerDisconnected()
         isConnected = false
         Log.i(tag, "FocusNotificationListenerService disconnected.")
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
