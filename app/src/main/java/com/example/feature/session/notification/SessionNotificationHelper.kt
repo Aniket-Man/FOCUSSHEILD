@@ -279,6 +279,10 @@ object SessionNotificationHelper {
             action = StudyPlanAlarmScheduler.ACTION_OPEN_PLAN_SESSION
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(StudyPlanAlarmScheduler.EXTRA_START_PLAN_SESSION, true)
+            putExtra(
+                StudyPlanAlarmScheduler.EXTRA_SESSION_TRUST_TOKEN,
+                StudyPlanAlarmScheduler.sessionLaunchToken(context)
+            )
             putExtra(StudyPlanAlarmScheduler.EXTRA_PLAN_ID, planId)
             putExtra(StudyPlanAlarmScheduler.EXTRA_SUBJECT, subject)
             putExtra(StudyPlanAlarmScheduler.EXTRA_TOPIC, topic)
