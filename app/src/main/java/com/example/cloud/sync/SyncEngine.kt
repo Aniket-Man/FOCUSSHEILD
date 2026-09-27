@@ -44,6 +44,15 @@ import org.json.JSONObject
  */
 private const val TAG = "SyncEngine"
 
+/**
+ * Thrown by the account probe when a transient failure makes cloud ownership unknowable
+ * (issue #21). The probe must fail CLOSED: a network/server error is never evidence that an
+ * account is empty, because acting on "empty" bypasses the RestoreRequired gate and lets one
+ * account's data merge over another's. Callers surface this as a retryable verification
+ * failure instead of proceeding with a destructive/merge path.
+ */
+private class AccountVerificationException(message: String) : IOException(message)
+
 class SyncEngine(
     private val database: FocusShieldDatabase,
     private val installState: CloudInstallState,
@@ -66,6 +75,10 @@ class SyncEngine(
         return SyncTracker.lock.withLock {
             try {
                 runCycleLocked()
+            } catch (e: AccountVerificationException) {
+                // Fail closed (issue #21): surfaced distinctly from Offline so the user sees
+                // WHY nothing synced; the next cycle retries the probe.
+                SyncCycleOutcome.Failed(e.message ?: "Could not verify the account's cloud data")
             } catch (e: SupabaseApiException) {
                 SyncCycleOutcome.Failed(e.message ?: "Sync failed (${e.status})")
             } catch (e: CloudNotConfiguredException) {
@@ -318,14 +331,34 @@ class SyncEngine(
         for (b in bindings) {
             if (b.meta.pullMode != PullMode.HISTORY) continue
             val watermark = installState.historyWatermark(b.meta.tableKey)
+            // Always order ascending: the prefix watermark below depends on fetch order (issue #21).
             val extra = if (watermark == null) "order=created_at.asc"
-            else "created_at=gt.${http.encodeValue(watermark)}"
+            else "created_at=gt.${http.encodeValue(watermark)}&order=created_at.asc"
             val remote = fetchRows(session, b.meta.cloudTable, extra)
             val pending = outbox.pendingForTable(b.meta.tableKey).associateBy { it.rowId }
             val keep = remote.filterNot { pending.containsKey(b.rowKeyOfJson(it)) }
-            if (keep.isNotEmpty()) database.withTransaction { b.decodeAndInsert(keep) }
-            val maxCreated = remote.maxOfOrNull { it.optString("created_at") }
-            if (maxCreated != null) installState.setHistoryWatermark(b.meta.tableKey, maxCreated)
+            if (keep.isEmpty()) {
+                // No rows to decode this round (empty fetch, or everything filtered as locally
+                // pending): only then may the watermark advance to the fetched max, otherwise an
+                // already-sent batch would be re-fetched forever.
+                val maxCreated = remote.maxOfOrNull { it.optString("created_at") }
+                if (maxCreated != null) installState.setHistoryWatermark(b.meta.tableKey, maxCreated)
+                continue
+            }
+            // Issue #21: insert every row that decodes (upserts are idempotent), but only advance
+            // the watermark across the contiguous leading run of successful decodes. A rejected row
+            // stops the watermark before itself, so the next cycle retries it — matching the
+            // CloudDataException contract ("leaves the next cycle to retry… nothing is lost
+            // silently") — instead of skipping it forever.
+            val prefixCount = database.withTransaction { b.decodeAndInsertReturningPrefixCount(keep) }
+            if (prefixCount > 0) {
+                val prefixMax = keep.take(prefixCount)
+                    .map { it.optString("created_at") }
+                    .filter { it.isNotBlank() }
+                    .maxOrNull()
+                if (prefixMax != null) installState.setHistoryWatermark(b.meta.tableKey, prefixMax)
+            }
+            // prefixCount == 0 (first row refused) → watermark unchanged → full retry next cycle.
         }
     }
 
@@ -350,11 +383,20 @@ class SyncEngine(
         }
     }
 
-    /** Cheap presence probe used only at the account boundary (fresh-install decisions). */
+    /**
+     * Cheap presence probe used only at the account boundary (fresh-install decisions).
+     *
+     * Fails CLOSED (issue #21): `true` means some table definitively has rows, `false` means
+     * *every* table was successfully queried and came back empty. If any table could not be
+     * queried and no table proved non-empty, [AccountVerificationException] is thrown — a
+     * transient network/server failure must never be read as "empty account", which would
+     * bypass the RestoreRequired gate and merge one account's data over another's.
+     */
     private suspend fun probeCloudHasRows(session: AuthSession): Boolean {
         // profiles is auto-created for every account by the signup trigger, so it is deliberately
         // excluded — only real synced data counts as "has rows". `user_id` exists on every table
         // (blocked_apps/websites/limits/keywords have no `id` column).
+        var anyQueryFailed = false
         for (b in bindings) {
             val res = try {
                 http.call(
@@ -365,17 +407,25 @@ class SyncEngine(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // A probe that cannot reach one table does not decide ownership; note it and move on.
+                // A failure decides nothing — remember it so an all-failed loop cannot answer
+                // "no rows" (the old fail-open behaviour, issue #21).
                 Log.w(TAG, "Presence probe failed for ${b.meta.cloudTable}", e)
+                anyQueryFailed = true
                 continue
             }
             val arr = try {
                 JSONArray(res.body)
             } catch (e: JSONException) {
                 Log.w(TAG, "Presence probe got an unreadable body for ${b.meta.cloudTable}", e)
+                anyQueryFailed = true
                 continue
             }
             if (arr.length() > 0) return true
+        }
+        if (anyQueryFailed) {
+            throw AccountVerificationException(
+                "Could not verify whether this account already has cloud data — nothing was changed. Please try again."
+            )
         }
         return false
     }
@@ -489,6 +539,13 @@ class SyncEngine(
         val meta: TableMeta
         val rowKeyOfJson: (JSONObject) -> String
         suspend fun decodeAndInsert(rows: List<JSONObject>)
+        /**
+         * Decode every row (refusals recorded via SyncTracker), insert ALL rows that decoded —
+         * upserts are idempotent, so rows behind a rejection are safe to re-apply next cycle —
+         * and return the size of the *leading* run of successful decodes in fetch order.
+         * The history pull advances its watermark only across that prefix (issue #21).
+         */
+        suspend fun decodeAndInsertReturningPrefixCount(rows: List<JSONObject>): Int
         suspend fun decodePayloadAndInsert(payload: String)
         /**
          * Write remote rows onto the existing local rows without clearing first, so columns the
@@ -551,6 +608,23 @@ class SyncEngine(
         override suspend fun decodeAndInsert(rows: List<JSONObject>) {
             val decoded = rows.mapNotNull { decode(it) }
             if (decoded.isNotEmpty()) insert(decoded)
+        }
+
+        override suspend fun decodeAndInsertReturningPrefixCount(rows: List<JSONObject>): Int {
+            val decoded = mutableListOf<E>()
+            var prefixCount = 0
+            var inPrefix = true
+            for (row in rows) {
+                val entity = decode(row)
+                if (entity != null) {
+                    decoded.add(entity)
+                    if (inPrefix) prefixCount++
+                } else {
+                    inPrefix = false
+                }
+            }
+            if (decoded.isNotEmpty()) insert(decoded)
+            return prefixCount
         }
 
         override suspend fun decodePayloadAndInsert(payload: String) {
