@@ -217,3 +217,10 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// Room schema export (FocusShieldDatabase.exportSchema = true): KSP writes the versioned JSON
+// schemas here so future migrations can be validated against them instead of relying on
+// destructive fallbacks. The first build on this config generates app/schemas/ — commit it.
+ksp {
+  arg("room.schemaLocation", "$projectDir/schemas")
+}
