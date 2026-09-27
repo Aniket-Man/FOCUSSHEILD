@@ -59,9 +59,12 @@ class CloudInstallState(context: Context) {
     }
 
     suspend fun setDataOwnerAccountId(uid: String?) = mutex.withLock {
+        // commit(), not apply(): the migration flow records ownership *before* uploading the
+        // snapshot, and an async write can still be lost to process death — a re-login would then
+        // treat a never-migrated install as fresh and re-push into an existing cloud account.
         prefs.edit().apply {
             if (uid == null) remove(KEY_OWNER) else putString(KEY_OWNER, uid)
-        }.apply()
+        }.commit()
     }
 
     /** Accounts whose snapshot was already pushed from this install (never push twice). */
@@ -72,7 +75,10 @@ class CloudInstallState(context: Context) {
     suspend fun markMigrated(uid: String) = mutex.withLock {
         val current = prefs.getStringSet(KEY_MIGRATED, emptySet())?.toMutableSet() ?: mutableSetOf()
         current.add(uid)
-        prefs.edit().putStringSet(KEY_MIGRATED, current).apply()
+        // commit(), not apply(): the mark must be on disk before the snapshot upload begins, or a
+        // crash mid-upload leaves no record that this account was migrated and the next attempt
+        // would push again (see setDataOwnerAccountId).
+        prefs.edit().putStringSet(KEY_MIGRATED, current).commit()
     }
 
     /**
