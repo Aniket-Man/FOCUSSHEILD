@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.cloud.sync.CloudJson
 import com.example.cloud.sync.SyncTables
 import com.example.cloud.sync.SyncTracker
+import com.example.core.util.DayBounds
 import com.example.data.local.dao.SessionDao
 import com.example.data.local.dao.StudyActivityDao
 import com.example.data.local.entity.SessionRecordEntity
@@ -11,11 +12,13 @@ import com.example.data.local.entity.StudyActivitySource
 import com.example.data.local.entity.StudyActivityType
 import com.example.data.model.SessionMode
 import com.example.feature.session.domain.FocusSession
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
-import java.util.Calendar
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SessionRepository(
     private val sessionDao: SessionDao,
     private val studyActivityDao: StudyActivityDao? = null
@@ -26,24 +29,31 @@ class SessionRepository(
         return sessionDao.getRecentSessionsFlow(limit)
     }
 
+    // These three flows rebuild their SQL bounds whenever [DayBounds.todayFlow] re-emits (each
+    // local midnight). Computing the bounds once per call — as before — froze "today" at
+    // construction time, so after 00:00 the collectors kept querying yesterday's window until the
+    // process restarted.
     fun getTodaySessionsFlow(): Flow<List<SessionRecordEntity>> {
-        val (startOfDay, endOfDay) = getTodayBounds()
-        return sessionDao.getSessionsBetweenFlow(startOfDay, endOfDay)
+        return DayBounds.todayFlow().flatMapLatest { (startOfDay, endOfDay) ->
+            sessionDao.getSessionsBetweenFlow(startOfDay, endOfDay)
+        }
     }
 
     suspend fun getTodaySessions(): List<SessionRecordEntity> {
-        val (startOfDay, endOfDay) = getTodayBounds()
+        val (startOfDay, endOfDay) = DayBounds.today()
         return sessionDao.getSessionsBetween(startOfDay, endOfDay)
     }
 
     fun getTodayTotalStudyTimeMillisFlow(): Flow<Long> {
-        val (startOfDay, _) = getTodayBounds()
-        return sessionDao.getTotalStudyTimeMillisSinceFlow(startOfDay).map { it ?: 0L }
+        return DayBounds.todayFlow().flatMapLatest { (startOfDay, _) ->
+            sessionDao.getTotalStudyTimeMillisSinceFlow(startOfDay).map { it ?: 0L }
+        }
     }
 
     fun getTodayCompletedSessionsCountFlow(): Flow<Int> {
-        val (startOfDay, _) = getTodayBounds()
-        return sessionDao.getCompletedSessionsCountSinceFlow(startOfDay)
+        return DayBounds.todayFlow().flatMapLatest { (startOfDay, _) ->
+            sessionDao.getCompletedSessionsCountSinceFlow(startOfDay)
+        }
     }
 
     fun getSessionsBetweenFlow(startTime: Long, endTime: Long): Flow<List<SessionRecordEntity>> {
@@ -160,18 +170,5 @@ class SessionRepository(
         activities.forEach { activity ->
             SyncTracker.enqueueDelete(SyncTables.STUDY_ACTIVITIES, activity.id)
         }
-    }
-
-    private fun getTodayBounds(): Pair<Long, Long> {
-        val calendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val startOfDay = calendar.timeInMillis
-        calendar.add(Calendar.DAY_OF_YEAR, 1)
-        val endOfDay = calendar.timeInMillis - 1
-        return Pair(startOfDay, endOfDay)
     }
 }

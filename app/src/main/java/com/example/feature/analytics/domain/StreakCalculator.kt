@@ -1,10 +1,9 @@
 package com.example.feature.analytics.domain
 
 import com.example.data.local.entity.SessionRecordEntity
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 data class StreakResult(
     val currentStreak: Int,
@@ -16,7 +15,7 @@ data class StreakResult(
 
 object StreakCalculator {
 
-    private val localDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private fun zone(): ZoneId = ZoneId.systemDefault()
 
     fun calculate(
         sessions: List<SessionRecordEntity>,
@@ -34,49 +33,36 @@ object StreakCalculator {
 
         val minThresholdMillis = minDailyThresholdMinutes * 60 * 1000L
 
-        // Group actual study time by calendar day
+        // Group actual study time by the day the session ENDED. Bucketing by start time credited a
+        // 23:30 -> 00:40 session entirely to yesterday, so a student who studied across midnight
+        // got no streak credit for today's minutes — exactly when streaks broke for late-night
+        // study. endTime falls back to start + actual duration for rows that predate endTime.
         val dailyStudyMap = mutableMapOf<String, Long>()
         for (session in sessions) {
-            val dateKey = formatDateKey(session.startTime)
+            val endMillis = if (session.endTime > 0) {
+                session.endTime
+            } else {
+                session.startTime + session.actualDurationMillis
+            }
+            val dateKey = formatDateKey(endMillis)
             val current = dailyStudyMap.getOrDefault(dateKey, 0L)
             dailyStudyMap[dateKey] = current + session.actualDurationMillis
         }
 
         val qualifyingDays = dailyStudyMap.filter { it.value >= minThresholdMillis }.keys.toSet()
 
-        val todayKey = formatDateKey(System.currentTimeMillis())
-        val isTodayQualifying = qualifyingDays.contains(todayKey)
+        val today = LocalDate.now(zone())
+        val yesterday = today.minusDays(1)
+        val isTodayQualifying = qualifyingDays.contains(today.toString())
 
-        val cal = Calendar.getInstance()
-        val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-        val yesterdayKey = formatDateKey(yesterdayCal.timeInMillis)
-
-        // Calculate current streak
+        // Calculate current streak: walk backwards from today if it already qualifies, otherwise
+        // from yesterday (the streak is still alive until today's threshold is missed entirely).
         var currentStreak = 0
-        val startCal = Calendar.getInstance()
-
-        if (isTodayQualifying) {
-            // Count backwards starting today
-            while (true) {
-                val key = formatDateKey(startCal.timeInMillis)
-                if (qualifyingDays.contains(key)) {
-                    currentStreak++
-                    startCal.add(Calendar.DAY_OF_YEAR, -1)
-                } else {
-                    break
-                }
-            }
-        } else if (qualifyingDays.contains(yesterdayKey)) {
-            // Today not yet reached threshold, but yesterday was active
-            startCal.timeInMillis = yesterdayCal.timeInMillis
-            while (true) {
-                val key = formatDateKey(startCal.timeInMillis)
-                if (qualifyingDays.contains(key)) {
-                    currentStreak++
-                    startCal.add(Calendar.DAY_OF_YEAR, -1)
-                } else {
-                    break
-                }
+        if (isTodayQualifying || qualifyingDays.contains(yesterday.toString())) {
+            var day = if (isTodayQualifying) today else yesterday
+            while (qualifyingDays.contains(day.toString())) {
+                currentStreak++
+                day = day.minusDays(1)
             }
         }
 
@@ -100,20 +86,11 @@ object StreakCalculator {
         var maxStreak = 1
         var currentSequence = 1
 
-        val calendar = Calendar.getInstance()
-
         for (i in 0 until sortedDays.size - 1) {
-            val d1Str = sortedDays[i]
-            val d2Str = sortedDays[i + 1]
+            val d1Date = parseDateKey(sortedDays[i]) ?: continue
+            val d2Date = parseDateKey(sortedDays[i + 1]) ?: continue
 
-            val d1Date = parseDateKey(d1Str) ?: continue
-            val d2Date = parseDateKey(d2Str) ?: continue
-
-            calendar.time = d1Date
-            calendar.add(Calendar.DAY_OF_YEAR, 1)
-            val expectedNext = formatDateKey(calendar.timeInMillis)
-
-            if (expectedNext == d2Str) {
+            if (d1Date.plusDays(1) == d2Date) {
                 currentSequence++
                 if (currentSequence > maxStreak) {
                     maxStreak = currentSequence
@@ -126,13 +103,18 @@ object StreakCalculator {
         return maxStreak
     }
 
-    fun formatDateKey(timeMillis: Long): String {
-        return localDateFormat.format(Date(timeMillis))
-    }
+    /**
+     * ISO-8601 `yyyy-MM-dd` key for an instant. `LocalDate.toString()` is deterministic and
+     * locale-independent (the previous shared `SimpleDateFormat` was neither thread-safe nor
+     * guaranteed to produce stable keys, and its output did not sort chronologically under some
+     * locales — which the longest-streak scan relies on).
+     */
+    fun formatDateKey(timeMillis: Long): String =
+        Instant.ofEpochMilli(timeMillis).atZone(zone()).toLocalDate().toString()
 
-    private fun parseDateKey(dateKey: String): Date? {
+    private fun parseDateKey(dateKey: String): LocalDate? {
         return try {
-            localDateFormat.parse(dateKey)
+            LocalDate.parse(dateKey)
         } catch (e: Exception) {
             null
         }

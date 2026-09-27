@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.cloud.sync.CloudJson
 import com.example.cloud.sync.SyncTables
 import com.example.cloud.sync.SyncTracker
+import com.example.core.util.DayBounds
 import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.TimeFormatter
 import com.example.data.local.dao.BlockedAttemptDao
@@ -32,16 +33,17 @@ import com.example.feature.analytics.domain.YouTubeStudyStats
 import com.example.feature.rewards.domain.RewardBadge
 import com.example.feature.rewards.domain.StudyStamp
 import android.content.Context
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import java.text.SimpleDateFormat
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AnalyticsRepository(
     private val sessionDao: SessionDao,
     private val breakRecordDao: BreakRecordDao,
@@ -51,16 +53,23 @@ class AnalyticsRepository(
     private val context: Context? = null
 ) {
 
-    private val dayOfWeekFormat = SimpleDateFormat("EEE", Locale.getDefault())
-    private val monthDayFormat = SimpleDateFormat("MMM d", Locale.getDefault())
+    // Immutable formatters: java.time's DateTimeFormatter is thread-safe, unlike the shared
+    // SimpleDateFormat instances these replace (concurrent formatting from parallel flows could
+    // corrupt the output or throw).
+    private val dayOfWeekFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+    private val monthDayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
     val preferencesFlow: Flow<FocusPreferences> = preferencesRepository.preferencesFlow
 
     /**
      * Real-time reactive stream of Today's Study Metrics.
+     *
+     * The day bounds come from [DayBounds.todayFlow], which re-emits at every local midnight and
+     * rebuilds the inner query flows via flatMapLatest. Capturing the bounds once when this flow
+     * was constructed (as before) froze "today" at app start — after 00:00 the summary kept
+     * showing yesterday's numbers until the process restarted.
      */
-    val todaySummaryFlow: Flow<TodayStudySummary> = run {
-        val (todayStart, todayEnd) = getTodayBounds()
+    val todaySummaryFlow: Flow<TodayStudySummary> = DayBounds.todayFlow().flatMapLatest { (todayStart, todayEnd) ->
         combine(
             sessionDao.getSessionsBetweenFlow(todayStart, todayEnd),
             breakRecordDao.getBreaksBetweenFlow(todayStart, todayEnd),
@@ -284,8 +293,9 @@ class AnalyticsRepository(
             val sessionCount = stats.second
             val isToday = dateKey == todayKey
 
-            val dayLabel = dayOfWeekFormat.format(Date(currentDayMillis))
-            val dateFormatted = monthDayFormat.format(Date(currentDayMillis))
+            val dayDate = DayBounds.localDate(currentDayMillis)
+            val dayLabel = dayDate.format(dayOfWeekFormat)
+            val dateFormatted = dayDate.format(monthDayFormat)
 
             result.add(
                 StudyDay(
@@ -501,7 +511,7 @@ class AnalyticsRepository(
 
         return when (period) {
             AnalyticsPeriod.TODAY -> {
-                val (start, end) = getTodayBounds()
+                val (start, end) = DayBounds.today()
                 DateRange(start, end, "Today")
             }
             AnalyticsPeriod.LAST_7_DAYS -> {
@@ -555,33 +565,18 @@ class AnalyticsRepository(
                     set(Calendar.MILLISECOND, 999)
                 }
                 val end = endCal.timeInMillis
-                val monthName = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(now))
+                val monthName = DayBounds.localDate(now)
+                    .format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
                 DateRange(start, end, monthName)
             }
             AnalyticsPeriod.CUSTOM -> {
                 val start = customStart ?: (now - 7 * 24 * 3600 * 1000L)
                 val end = customEnd ?: now
-                val startStr = monthDayFormat.format(Date(start))
-                val endStr = monthDayFormat.format(Date(end))
+                val startStr = DayBounds.localDate(start).format(monthDayFormat)
+                val endStr = DayBounds.localDate(end).format(monthDayFormat)
                 DateRange(start, end, "$startStr - $endStr")
             }
         }
-    }
-
-    private fun getTodayBounds(): Pair<Long, Long> {
-        val calendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val startOfDay = calendar.timeInMillis
-        calendar.set(Calendar.HOUR_OF_DAY, 23)
-        calendar.set(Calendar.MINUTE, 59)
-        calendar.set(Calendar.SECOND, 59)
-        calendar.set(Calendar.MILLISECOND, 999)
-        val endOfDay = calendar.timeInMillis
-        return Pair(startOfDay, endOfDay)
     }
 
     private fun formatDurationToHoursMins(millis: Long): String {
