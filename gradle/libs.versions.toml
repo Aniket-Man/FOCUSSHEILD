@@ -45,6 +45,7 @@ vico = "1.15.0"
 lottieCompose = "6.4.1"
 glanceAppwidget = "1.1.1"
 androidxWork = "2.7.1"
+securityCrypto = "1.1.0-alpha06"
 
 
 [libraries]
@@ -108,6 +109,7 @@ lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", versio
 androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glanceAppwidget" }
 androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glanceAppwidget" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 
 [plugins]
