@@ -5,9 +5,17 @@
    app's DataStore must not come back from a backup, or a fresh install lands
    on Home instead of the onboarding flow.
 
+   The Room database is excluded as well: session/limit/blocker state must
+   never be restored over a fresh install (cloud sync has its own guarded
+   restore path). Main DB plus its WAL/SHM sidecars are all excluded so a
+   partial restore cannot resurrect torn state (issue #14).
+
    See https://developer.android.com/guide/topics/data/autobackup
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
     <exclude domain="file" path="datastore" />
+    <exclude domain="database" path="focus_shield_database" />
+    <exclude domain="database" path="focus_shield_database-wal" />
+    <exclude domain="database" path="focus_shield_database-shm" />
 </full-backup-content>

@@ -7,15 +7,26 @@
    `onboarding_completed = true` — and FocusNavGraph then resolved its start
    destination to Home, skipping onboarding entirely.
 
+   The Room database is excluded as well: session/limit/blocker state must
+   never be restored over a fresh install (cloud sync has its own guarded
+   restore path). Main DB plus its WAL/SHM sidecars are all excluded so a
+   partial restore cannot resurrect torn state (issue #14).
+
    See https://developer.android.com/about/versions/12/backup-restore#xml-changes
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
         <exclude domain="file" path="datastore" />
+        <exclude domain="database" path="focus_shield_database" />
+        <exclude domain="database" path="focus_shield_database-wal" />
+        <exclude domain="database" path="focus_shield_database-shm" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
         <exclude domain="file" path="datastore" />
+        <exclude domain="database" path="focus_shield_database" />
+        <exclude domain="database" path="focus_shield_database-wal" />
+        <exclude domain="database" path="focus_shield_database-shm" />
     </device-transfer>
 </data-extraction-rules>
