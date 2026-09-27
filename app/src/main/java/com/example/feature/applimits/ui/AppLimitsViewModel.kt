@@ -7,10 +7,12 @@ import android.graphics.drawable.Drawable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.util.DeviceUsageStatsHelper
 import com.example.data.local.entity.AppLimitEntity
 import com.example.data.local.entity.DailyAppUsageEntity
 import com.example.data.repository.AppLimitRepository
+import com.example.feature.applimits.engine.AppLimitManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -135,8 +137,35 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
         initialValue = AppLimitsUiState(isLoading = true)
     )
 
+    /**
+     * Accessibility service status. App-limit enforcement is performed by that service, so the
+     * dashboard must be able to warn continuously while it is off — checking only at
+     * create-limit time let users believe they were protected while limits never fired.
+     */
+    private val _isAccessibilityEnabled = MutableStateFlow(true)
+    val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
+
+    /**
+     * Set when the blocker pipeline exhausted its retries without the block screen ever landing
+     * (see [AppLimitManager.overlayLaunchWarning]); null while blocks are landing normally.
+     */
+    private val _overlayLaunchWarning = MutableStateFlow<String?>(null)
+    val overlayLaunchWarning: StateFlow<String?> = _overlayLaunchWarning.asStateFlow()
+
     init {
         loadInstalledApps()
+        checkAccessibilityStatus()
+        viewModelScope.launch {
+            AccessibilityHelper.isServiceEnabledFlow.collect { enabled ->
+                _isAccessibilityEnabled.value = enabled
+            }
+        }
+        viewModelScope.launch {
+            val manager = try { AppLimitManager.instance } catch (e: Exception) { null }
+            manager?.overlayLaunchWarning?.collect { warning ->
+                _overlayLaunchWarning.value = warning
+            }
+        }
     }
 
     fun loadInstalledApps() {
@@ -176,6 +205,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun clearStrictLockMessage() {
         _strictLockMessage.value = null
+    }
+
+    /** Re-reads the service state directly; called when the dashboard is entered. */
+    fun checkAccessibilityStatus() {
+        _isAccessibilityEnabled.value = AccessibilityHelper.isAccessibilityServiceEnabled(app)
     }
 
     fun saveLimit(
@@ -265,12 +299,33 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun unlockForToday(packageName: String) {
         viewModelScope.launch {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
+            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
+
+            // Strict mode's whole promise is that today's limit cannot be waived from this menu.
+            // Without this guard a single tap set isBypassedForToday and the manager honours the
+            // bypass unconditionally, silently defeating strict mode.
+            if (isStrict) {
+                _strictLockMessage.value = "Strict Mode Active: ${limit?.appName ?: "App"} cannot be unlocked for today."
+                return@launch
+            }
             appLimitRepository.setBypassedForToday(packageName, appLimitRepository.getTodayDateString(), true)
         }
     }
 
     fun resetTodayUsage(packageName: String) {
         viewModelScope.launch {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
+            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
+
+            // Resetting restores the day's allowance (and the emergency passes), which is the
+            // same bypass as unlocking under a different name — strict mode blocks it too.
+            if (isStrict) {
+                _strictLockMessage.value = "Strict Mode Active: You cannot reset ${limit?.appName ?: "this"} app's usage while Strict Mode is active."
+                return@launch
+            }
             val dateStr = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, dateStr, false)
             appLimitRepository.setEmergencyUsesCount(packageName, dateStr, 0)

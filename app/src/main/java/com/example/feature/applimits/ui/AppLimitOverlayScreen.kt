@@ -100,7 +100,7 @@ fun AppLimitOverlayScreen(
     streakDays: Int,
     onSelectDuration: (Int) -> Unit,
     onUseEmergency: () -> Unit,
-    onEnableStrictMode: () -> Unit,
+    onEnableStrictMode: (onResult: (Boolean) -> Unit) -> Unit,
     onTurnOffAndResetStreak: () -> Unit,
     onGoToHome: () -> Unit,
     modifier: Modifier = Modifier
@@ -718,8 +718,11 @@ fun AppLimitOverlayScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        strictModeEnabledState = true
-                        onEnableStrictMode()
+                        // Only flip the local strict state once the write actually succeeded;
+                        // a failed write now surfaces a toast instead of silently lying.
+                        onEnableStrictMode { success ->
+                            if (success) strictModeEnabledState = true
+                        }
                         showStrictModeInfoDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(

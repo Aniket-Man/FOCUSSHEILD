@@ -228,6 +228,12 @@ class FocusAccessibilityService : AccessibilityService() {
                     dwellTracker()?.flush("left YouTube")
                 }
                 lastForegroundPackage = rawPackageName
+
+                // Focus-blocker's verified retry loop stops when the user has left the blocked
+                // app. This signal is deliberately unfiltered (unlike the app-limit call below):
+                // leaving via BlockOverlayActivity's "Return to session" lands in FocusShield
+                // itself, and that must count as having left the blocked app too.
+                blockerManager?.onForegroundPackageChanged(rawPackageName)
                 
                 if (!rawPackageName.startsWith("com.example") &&
                     !rawPackageName.startsWith("com.aistudio.focusshield") &&
@@ -606,7 +612,8 @@ class FocusAccessibilityService : AccessibilityService() {
                                         clickPauseButtonInNodeTree(currentRoot)
                                         try { currentRoot?.recycle() } catch (_: Exception) {}
                                     }
-                                    val usedMins = kotlin.math.round(appLimitDecision.usedDailyMillis / 60000.0).toInt().coerceAtLeast(0)
+                                    // Floor, matching AppLimitManager and the dashboard's minutes.
+                                    val usedMins = (appLimitDecision.usedDailyMillis / 60000L).toInt().coerceAtLeast(0)
                                     val remMins = (appLimitDecision.dailyLimitMinutes - usedMins).coerceAtLeast(0)
                                     appLimitManager.launchOverlay(
                                         packageName = appLimitDecision.packageName,
