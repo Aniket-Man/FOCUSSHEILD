@@ -6,7 +6,6 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -16,18 +15,18 @@ import okhttp3.Response
  *
  * ### Why there are two modes
  *
- * GitHub answers **404** to `releases/latest` for a private repository when the caller is
- * unauthenticated, and this app ships **no** GitHub credential: a token inside an APK can be
- * extracted, and a leaked token is worse than a disabled feature. So while
- * `Aniket-Man/FOCUSSHEILD` is private there is exactly one honest option — report that the feed is
- * unavailable, which the UI already does ("No published release was found"), and give the project a
- * supported way to make the feature live:
+ * GitHub answers **404** to `releases/latest` both for an empty release list and for a private
+ * repository when the caller is unauthenticated, and this app ships **no** GitHub credential: a
+ * token inside an APK can be extracted, and a leaked token is worse than a disabled feature. A 404
+ * is therefore mapped to "nothing published" (→ UpToDate), never to a failure — so a typo'd slug or
+ * private repo is silent rather than a retry loop, and the honest way to ship releases while the
+ * repository stays private is the feed URL (2 below):
  *
  *  1. **Make the repository public**, or
  *  2. **Point the app at a feed URL** that serves the release JSON — a small backend, a Supabase
  *     Edge Function, or any static host. Set `UPDATE_FEED_URL` in `.env` and rebuild; the payload may
  *     be GitHub-shaped (`tag_name`, `assets[]`) or normalised (`versionName`, `apkUrl`,
- *     `releaseNotes`, `releasePageUrl`).
+ *     `releaseNotes`, `releasePageUrl`). The URL must be **https** — see [UpdateUrlPolicy].
  *
  * `UPDATE_REPO_SLUG` overrides the repository for forks. Both are read at build time (see
  * `app/build.gradle.kts`), never at runtime — nothing about the update source is user-configurable,
@@ -69,20 +68,31 @@ class GitHubReleaseRepository(
     internal fun buildUrl(): String {
         val configured = feedUrl.trim()
         if (configured.isEmpty()) return "$API_BASE/repos/$repoSlug/releases/latest"
-        // A malformed override must fail loudly at the point of use rather than silently falling back
-        // to GitHub (which would report "no release" for a private repo and hide the misconfiguration).
-        return configured.toHttpUrlOrNull()?.toString()
+        // A malformed or cleartext override must fail loudly at the point of use rather than
+        // silently falling back to GitHub (which would report "no release" for a private repo and
+        // hide the misconfiguration) — and http:// would hand the update check to a
+        // man-in-the-middle on the minSdk 24–27 devices still allowed to send cleartext.
+        return UpdateUrlPolicy.httpsUrl(configured)?.toString()
             ?: throw UpdateSourceUnavailableException(
-                "The update feed URL configured for this build is not a valid URL."
+                "The update feed URL configured for this build is not a valid https URL."
             )
     }
+
+    /**
+     * Hosts, beyond GitHub's built-in set, this build may download an APK from: the configured
+     * feed's own host, so a normalised feed served from its own domain stays installable. Empty for
+     * the default GitHub source — its assets live on github.com, which [UpdateUrlPolicy] already
+     * trusts.
+     */
+    fun apkHostAllowList(): Set<String> =
+        UpdateUrlPolicy.httpsUrl(feedUrl.trim())?.host?.let { setOf(it) } ?: emptySet()
 
     /** Delegates the status/body decisions to [ReleaseResponseMapper] (unit-tested without a socket). */
     private fun Response.toResult(): UpdateInfo? = ReleaseResponseMapper.map(
         code = code,
         payload = body?.string().orEmpty(),
-        fromGitHub = request.url.host.endsWith("github.com"),
-        rateLimited = header("X-RateLimit-Remaining") == "0" || code == 429
+        rateLimited = header("X-RateLimit-Remaining") == "0" || code == 429,
+        feedHost = request.url.host
     )
 
     companion object {

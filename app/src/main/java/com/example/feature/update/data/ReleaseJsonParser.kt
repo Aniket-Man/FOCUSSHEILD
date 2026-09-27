@@ -23,10 +23,12 @@ import org.json.JSONObject
 internal object ReleaseJsonParser {
 
     /**
+     * @param feedHost host the payload came from; assets on it are trusted alongside GitHub's own
+     *   hosts (see [UpdateUrlPolicy]). Blank for direct calls, which trust GitHub hosts only.
      * @return the release, or null when the payload is valid JSON but carries no usable version.
      * @throws ReleasePayloadException when the payload is not JSON at all.
      */
-    fun parse(body: String): UpdateInfo? {
+    fun parse(body: String, feedHost: String = ""): UpdateInfo? {
         val json = try {
             JSONObject(body)
         } catch (e: JSONException) {
@@ -41,7 +43,8 @@ internal object ReleaseJsonParser {
         val versionName = SemanticVersion.normalize(rawVersion)
         if (versionName.isBlank()) return null
 
-        val apk = pickApkAsset(json.optJSONArray("assets"), json.optString("apkUrl"), versionName)
+        val allowedHosts = if (feedHost.isBlank()) emptySet() else setOf(feedHost)
+        val apk = pickApkAsset(json.optJSONArray("assets"), json.optString("apkUrl"), versionName, allowedHosts)
 
         return UpdateInfo(
             versionName = versionName,
@@ -63,18 +66,25 @@ internal object ReleaseJsonParser {
     /**
      * Chooses the APK: an explicit `apkUrl` when the feed provides one, otherwise a `.apk` asset.
      *
-     * Only a name ending in `.apk` is ever eligible; when several qualify the one naming the release
+     * Only a name ending in `.apk` **on an https URL from a trusted host** is ever eligible — a
+     * payload is unauthenticated input, and a `http://` or off-host link would defeat everything
+     * else this function checks (prompt.txt §20). When several qualify the one naming the release
      * version wins, then the shortest name (so `FocusShield-v1.0.1.apk` beats
      * `FocusShield-v1.0.1-debug-unsigned.apk`). Nothing is ever assumed about an arbitrary asset.
      */
     private fun pickApkAsset(
         assets: JSONArray?,
         explicitApkUrl: String,
-        versionName: String
+        versionName: String,
+        allowedHosts: Set<String>
     ): Pair<String, String>? {
         if (explicitApkUrl.isNotBlank()) {
             val name = explicitApkUrl.substringAfterLast('/').substringBefore('?')
-            if (name.endsWith(".apk", ignoreCase = true)) return explicitApkUrl to name
+            if (name.endsWith(".apk", ignoreCase = true) &&
+                UpdateUrlPolicy.isAllowedApkUrl(explicitApkUrl, allowedHosts)
+            ) {
+                return explicitApkUrl to name
+            }
         }
         if (assets == null) return null
 
@@ -85,7 +95,10 @@ internal object ReleaseJsonParser {
                 val url = asset.optString("browser_download_url").ifBlank { asset.optString("url") }
                 if (name.isBlank() || url.isBlank()) null else name to url
             }
-            .filter { (name, _) -> name.endsWith(".apk", ignoreCase = true) }
+            .filter { (name, url) ->
+                name.endsWith(".apk", ignoreCase = true) &&
+                    UpdateUrlPolicy.isAllowedApkUrl(url, allowedHosts)
+            }
         if (candidates.isEmpty()) return null
 
         val best = candidates.sortedWith(

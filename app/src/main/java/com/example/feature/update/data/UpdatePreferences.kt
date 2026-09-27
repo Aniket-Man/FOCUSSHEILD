@@ -28,7 +28,7 @@ private val Context.updateDataStore: DataStore<Preferences> by
 
 /** Snapshot of everything remembered between update checks. */
 data class UpdatePrefs(
-    /** Epoch millis of the last *completed* check of any outcome. Drives the cooldown. */
+    /** Epoch millis of when the last check's request went out (any outcome). Drives the cooldown. */
     val lastCheckTime: Long = 0L,
     /** Version string most recently seen published, so the UI can show something before a re-check. */
     val latestKnownVersion: String? = null,
@@ -93,10 +93,18 @@ class UpdatePreferences internal constructor(
 
     suspend fun current(): UpdatePrefs = flow.first()
 
-    /** Records the outcome of a check. [latestVersion] is null when the check failed. */
-    suspend fun recordCheck(latestVersion: String?, failed: Boolean) {
+    /**
+     * Records the outcome of a check.
+     *
+     * @param latestVersion the version the feed reported; null when the check failed.
+     * @param at when the check *started*. The cooldown measures from here rather than from
+     *   completion (the old behavior): a slow response used to push `lastCheckTime` past the next
+     *   periodic-worker run, which then found itself still cooling down and skipped — every other
+     *   run, halving the documented cadence.
+     */
+    suspend fun recordCheck(latestVersion: String?, failed: Boolean, at: Long = now()) {
         dataStore.edit { prefs ->
-            prefs[Keys.LAST_CHECK_TIME] = now()
+            prefs[Keys.LAST_CHECK_TIME] = at
             prefs[Keys.LAST_CHECK_FAILED] = failed
             if (latestVersion != null) prefs[Keys.LATEST_KNOWN_VERSION] = latestVersion
         }
