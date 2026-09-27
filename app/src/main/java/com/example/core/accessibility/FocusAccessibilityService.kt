@@ -21,6 +21,7 @@ import com.example.feature.youtube.engine.YouTubeNodeExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -43,7 +44,10 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     private val tag = "FocusAccessibility"
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // var + per-bind recycle: the system can rebind this same service instance after onUnbind,
+    // so every bind starts a fresh scope and unbind/destroy cancels the current one — no
+    // preference/session collectors or delayed work outlive their bind (issue #16).
+    private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val shortFormDetectionManager = ShortFormDetectionManager.instance
 
     private val tamperPackages = setOf(
@@ -103,6 +107,10 @@ class FocusAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         isServiceRunning = true
         instance = this
+        // Start every bind with a fresh scope (defensively dropping anything left from a
+        // previous bind of this same instance) before launching the long-lived collectors.
+        serviceScope.cancel()
+        serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         AccessibilityHelper.notifyServiceConnected(this)
         com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, true)
 
@@ -161,6 +169,8 @@ class FocusAccessibilityService : AccessibilityService() {
     private var lastBrowserInspectTimestamp: Long = 0L
     private var lastBrowserBlockTimestamp: Long = 0L
     private var lastYouTubeBlockTimestamp: Long = 0L
+    private var lastYouTubeInspectTimestamp: Long = 0L
+    private var lastTamperCheckTimestamp: Long = 0L
     private var lastSplitScreenCheckTimestamp: Long = 0L
     private var lastFloatingWindowCheckTimestamp: Long = 0L
     private var homeFeedPopupDismissed = false
@@ -235,21 +245,28 @@ class FocusAccessibilityService : AccessibilityService() {
                 com.example.feature.blocker.protection.BlockProtectionManager.isSessionProtectionActive) &&
                 tamperPackages.contains(rawPackageName)
             ) {
-                val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
-                if (rootNode != null) {
-                    val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
-                    try { rootNode.recycle() } catch (_: Exception) {}
-                    if (isTamper) {
-                        Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
-                        performGlobalAction(GLOBAL_ACTION_HOME)
-                        val toastMsg = "FocusShield Uninstall Protection is active"
-                        android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
-                        blockerManager?.handleBlockedPackage(
-                            packageName = rawPackageName,
-                            fallbackAppName = "Uninstall Protection",
-                            decision = ProtectionDecision.BLOCK_UNINSTALL
-                        )
-                        return
+                // Issue #16: settings/uninstaller screens emit content-change bursts; scan the
+                // tree at most every 500ms unless the window itself changed.
+                val isTamperWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                        eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                if (isTamperWindowChange || (now - lastTamperCheckTimestamp) >= 500L) {
+                    lastTamperCheckTimestamp = now
+                    val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
+                    if (rootNode != null) {
+                        val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
+                        try { rootNode.recycle() } catch (_: Exception) {}
+                        if (isTamper) {
+                            Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
+                            performGlobalAction(GLOBAL_ACTION_HOME)
+                            val toastMsg = "FocusShield Uninstall Protection is active"
+                            android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
+                            blockerManager?.handleBlockedPackage(
+                                packageName = rawPackageName,
+                                fallbackAppName = "Uninstall Protection",
+                                decision = ProtectionDecision.BLOCK_UNINSTALL
+                            )
+                            return
+                        }
                     }
                 }
             }
@@ -415,6 +432,15 @@ class FocusAccessibilityService : AccessibilityService() {
 
                 val protectionState = blockerManager.getCurrentProtectionState(now)
                 if (protectionState.sessionState.name == "RUNNING" || protectionState.sessionState.name == "PAUSED") {
+                    // Issue #16: scroll/content-change bursts arrive many times a second while a
+                    // session is active; walk the full tree at most every 300ms unless the window
+                    // itself changed — app switches and navigation must evaluate immediately.
+                    val isYouTubeWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                            eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                    if (!isYouTubeWindowChange && (now - lastYouTubeInspectTimestamp) < 300L) {
+                        return
+                    }
+                    lastYouTubeInspectTimestamp = now
                     val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
                     val decision = YouTubeContentBlockEngine.evaluate(
                         rootNode = rootNode,
@@ -1038,6 +1064,11 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         isServiceRunning = false
         instance = null
+        // Tear down bind-scoped work: collectors in serviceScope and any pending delayed
+        // runnables (post-back navigation, search click) must not run against an unbound
+        // service. onServiceConnected rebuilds the scope on the next bind (issue #16).
+        serviceScope.cancel()
+        mainThreadHandler.removeCallbacksAndMessages(null)
         AccessibilityHelper.notifyServiceDisconnected()
         com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
@@ -1053,6 +1084,8 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         isServiceRunning = false
         instance = null
+        serviceScope.cancel()
+        mainThreadHandler.removeCallbacksAndMessages(null)
         AccessibilityHelper.notifyServiceDisconnected()
         com.example.core.permission.FocusPermissionManager.notifyAccessibilityChanged(this, false)
         com.example.core.tracking.PhoneUnlockTracker.unregister(this)
