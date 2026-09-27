@@ -186,7 +186,12 @@
                     missing would stay inexact until the next boot.
                 -->
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
-                <action android:name="com.example.focusshield.ACTION_DAILY_RESET" />
+                <!--
+                    ACTION_DAILY_RESET is intentionally NOT declared here: the receiver is exported
+                    (system broadcasts), so a declared custom action would let any app trigger the
+                    daily-reset path. FocusShield's own midnight alarm uses an explicit intent and
+                    additionally verifies the sender (issue #15).
+                -->
             </intent-filter>
         </receiver>
 
