@@ -49,33 +49,61 @@ android {
   }
 
   signingConfigs {
+    // Release signing is only wired in when the keystore file and both credentials exist.
+    // A fresh clone without my-upload-key.jks / STORE_PASSWORD / KEY_PASSWORD still builds;
+    // signed releases require providing them (issue #24).
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-      enableV1Signing = true
-      enableV2Signing = true
+      val keystorePassword = System.getenv("STORE_PASSWORD")
+      val signingKeyPassword = System.getenv("KEY_PASSWORD")
+      if (keystorePath.isNotEmpty() &&
+        file(keystorePath).exists() &&
+        !keystorePassword.isNullOrEmpty() &&
+        !signingKeyPassword.isNullOrEmpty()
+      ) {
+        storeFile = file(keystorePath)
+        storePassword = keystorePassword
+        keyAlias = "upload"
+        keyPassword = signingKeyPassword
+        enableV1Signing = true
+        enableV2Signing = true
+      }
     }
+    // Shared debug keystore — only used when the file is actually present in the repo root.
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-      enableV1Signing = true
-      enableV2Signing = true
+      val sharedDebugKeystore = rootProject.file("debug.keystore")
+      if (sharedDebugKeystore.exists()) {
+        storeFile = sharedDebugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+        enableV1Signing = true
+        enableV2Signing = true
+      }
     }
   }
 
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Attach signing only when the config was fully populated (keystore + passwords present);
+      // otherwise the release build proceeds unsigned instead of failing on a fresh clone.
+      val releaseSigning = signingConfigs.getByName("release")
+      if (releaseSigning.storeFile?.exists() == true && releaseSigning.storePassword != null) {
+        signingConfig = releaseSigning
+      }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Fall back to AGP's default debug keystore when the repo's shared one is absent,
+      // so `assembleDebug` works out of the box on any fresh clone (issue #24).
+      val sharedDebug = signingConfigs.getByName("debugConfig")
+      if (sharedDebug.storeFile?.exists() == true) {
+        signingConfig = sharedDebug
+      }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
