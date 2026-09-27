@@ -14,8 +14,7 @@ import com.example.core.util.MediaPauseHelper
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
 import com.example.feature.applimits.engine.AppLimitStrictModeEngine
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -187,12 +186,23 @@ class AppLimitOverlayActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        onEnableStrictMode = {
-                            CoroutineScope(Dispatchers.IO).launch {
+                        onEnableStrictMode = { onResult ->
+                            // lifecycleScope (Main) instead of a detached IO scope: the write's
+                            // outcome must reach the screen, which used to flip its strict state
+                            // optimistically while a swallowed exception left the DB unchanged
+                            // and the user believing strict mode was on (issue #27, item 7).
+                            lifecycleScope.launch {
                                 try {
                                     FocusShieldApp.instance.appLimitRepository.updateStrictMode(data.packageName, true)
+                                    onResult(true)
                                 } catch (e: Exception) {
-                                    e.printStackTrace()
+                                    android.util.Log.e("AppLimitOverlay", "Failed to enable strict mode for ${data.packageName}", e)
+                                    Toast.makeText(
+                                        applicationContext,
+                                        "Couldn't enable Strict Mode for ${data.appName}. Please try again.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    onResult(false)
                                 }
                             }
                         },

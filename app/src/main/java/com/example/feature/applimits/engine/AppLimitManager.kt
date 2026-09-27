@@ -107,6 +107,16 @@ class AppLimitManager private constructor(
     private val _activeSession = MutableStateFlow<ActiveAppUsageSession?>(null)
     val activeSession: StateFlow<ActiveAppUsageSession?> = _activeSession.asStateFlow()
 
+    /**
+     * Non-null while the blocker pipeline is failing: set when a retry episode exhausts its
+     * horizon without [AppLimitOverlayActivity] ever confirming on screen, cleared when a launch
+     * is confirmed or a fresh request comes in. Failed starts were previously log-only even
+     * though the code documents that Android drops them silently — the user had no way to know
+     * protection was gone.
+     */
+    private val _overlayLaunchWarning = MutableStateFlow<String?>(null)
+    val overlayLaunchWarning: StateFlow<String?> = _overlayLaunchWarning.asStateFlow()
+
     private var currentForegroundPackage: String? = null
     private var tickerJob: Job? = null
     private var lastForegroundTimestamp: Long = 0L
@@ -321,7 +331,9 @@ class AppLimitManager private constructor(
             }
         }
 
-        val usedMinutes = kotlin.math.round(accumulatedUsed / 60000.0).toInt().coerceAtLeast(0)
+        // Floor, matching the dashboard's minutes exactly: round() blocked at 59.5 s while the
+        // dashboard still said "1m remaining" (issue #27, item 6).
+        val usedMinutes = (accumulatedUsed / 60000L).toInt().coerceAtLeast(0)
         val remainingDailyMinutes = (dailyLimitMinutes - usedMinutes).coerceAtLeast(0)
         val remainingDailyMillis = (dailyLimitMillis - accumulatedUsed).coerceAtLeast(0L)
 
@@ -598,15 +610,41 @@ class AppLimitManager private constructor(
     private fun startTicker() {
         stopTicker()
         tickerJob = scope.launch {
+            var tickCount = 0
+            // UsageStats-derived session elapsed, refreshed every 10th tick (~5 s). Null while
+            // the query fails or the permission is denied, which falls back to wall-clock.
+            var usageElapsed: Long? = null
             while (true) {
                 delay(500L)
                 val session = _activeSession.value ?: break
                 val now = System.currentTimeMillis()
+                tickCount++
 
                 val currentElapsed = if (session.isPaused) {
                     session.elapsedMillis
                 } else {
-                    (now - session.startedAt - session.totalPausedMillis).coerceAtLeast(0L)
+                    val wallElapsed = (now - session.startedAt - session.totalPausedMillis).coerceAtLeast(0L)
+                    if (tickCount % 10 == 1) {
+                        val usage = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
+                        usageElapsed = if (usage.status == UsageResult.UsageStatus.VALID) {
+                            (usage.usageMillis - session.initialDailyUsedMillis).coerceAtLeast(0L)
+                        } else {
+                            null
+                        }
+                    }
+                    // UsageStats is the authoritative clock: it only accumulates while the app
+                    // actually holds the foreground, so screen-off / service-off periods no longer
+                    // drain the allowance (wall clock did, contradicting saveSessionRecord's
+                    // "usage comes from UsageStatsManager" rule). min() with wall time caps the
+                    // derived value against daily-window resets at midnight and stats lag; max()
+                    // with the live value keeps elapsed monotonic — a reset daily window must
+                    // never rewind a running session. Falls back to wall clock when unavailable.
+                    val derived = usageElapsed
+                    if (derived == null) {
+                        wallElapsed
+                    } else {
+                        maxOf(minOf(derived, wallElapsed), session.elapsedMillis)
+                    }
                 }
 
                 // update{} re-reads whatever is live right now. Assigning a copy of the snapshot
@@ -716,7 +754,8 @@ class AppLimitManager private constructor(
         val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
 
-        val totalDailyUsedMinutes = kotlin.math.round(totalDailyUsedMillis / 60000.0).toInt().coerceAtLeast(0)
+        // Floor, same as checkAppLimitDecision and the dashboard (issue #27, item 6).
+        val totalDailyUsedMinutes = (totalDailyUsedMillis / 60000L).toInt().coerceAtLeast(0)
         val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
         val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
 
@@ -731,7 +770,10 @@ class AppLimitManager private constructor(
             dailyLimitMinutes = dailyLimitMinutes,
             emergencyUsesCount = usage?.emergencyUsesCount ?: 0,
             emergencyUsesAllowed = limit?.emergencyUsesAllowed ?: 1,
-            isStrict = session.isStrict,
+            // Fresh value from the limit row fetched above, not the flag captured when the
+            // session started: strict mode toggled mid-session must take effect at expiry, or a
+            // blocker built from the stale session flag silently downgrades to non-strict.
+            isStrict = limit?.isStrictOverride ?: session.isStrict,
             streakDays = limit?.streakDays ?: 0,
             forceLaunch = true
         )
@@ -851,6 +893,10 @@ class AppLimitManager private constructor(
 
         MediaPauseHelper.pauseMedia(appContext)
 
+        // A fresh request supersedes any previous failure notice; the loop below clears it again
+        // once a launch is actually confirmed on screen.
+        _overlayLaunchWarning.value = null
+
         val intent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
             // NEW_TASK only. CLEAR_TOP/SINGLE_TOP used to hand the intent back to the previous
             // overlay's (singleInstance, noHistory) activity record while it was finishing, and
@@ -906,6 +952,7 @@ class AppLimitManager private constructor(
                 if (AppLimitOverlayActivity.isVisibleFor(packageName)) {
                     Log.i(tag, "Blocker confirmed on screen for $packageName (after $attempt attempt(s))")
                     pendingOverlayIntents.remove(packageName)
+                    _overlayLaunchWarning.value = null
                     return@launch
                 }
 
@@ -933,6 +980,12 @@ class AppLimitManager private constructor(
                 if (System.currentTimeMillis() - startedAt >= overlayRetryHorizonMs) {
                     Log.e(tag, "Could not display AppLimitOverlayActivity for $packageName after $attempt attempts in ${overlayRetryHorizonMs / 1000}s")
                     pendingOverlayIntents.remove(packageName)
+                    // Log-only used to hide a real, repeated failure. Surface it so the dashboard
+                    // can tell the user their limits are not actually blocking anything right now.
+                    val appName = intent.getStringExtra(AppLimitOverlayActivity.EXTRA_APP_NAME) ?: packageName
+                    _overlayLaunchWarning.value =
+                        "FocusShield could not show the block screen for $appName. " +
+                            "Check that the accessibility service is enabled, then reopen $appName."
                     return@launch
                 }
 

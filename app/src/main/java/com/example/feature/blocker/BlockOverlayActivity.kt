@@ -17,6 +17,49 @@ class BlockOverlayActivity : ComponentActivity() {
         const val EXTRA_BLOCK_DECISION = "extra_block_decision"
         const val EXTRA_CHANNEL_NAME = "extra_channel_name"
         const val EXTRA_VIDEO_TITLE = "extra_video_title"
+
+        /**
+         * The block-screen instance that is currently resumed, or null.
+         *
+         * [FocusBlockerManager] verifies its launches against this: `startActivity()` does NOT
+         * throw when Android's background-activity-start rules silently drop a launch, so the
+         * absence of an exception proves nothing — the same signal AppLimitOverlayActivity
+         * provides to the app-limit retry pipeline.
+         */
+        @Volatile
+        private var visibleInstance: BlockOverlayActivity? = null
+
+        /** Package of the app whose block [visibleInstance] is showing. */
+        @Volatile
+        private var visiblePackageName: String? = null
+
+        /** True while the block screen *for [packageName]* is the one on screen. */
+        fun isVisibleFor(packageName: String): Boolean =
+            visibleInstance != null && visiblePackageName == packageName
+    }
+
+    override fun onResume() {
+        super.onResume()
+        visiblePackageName = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE)
+        visibleInstance = this
+    }
+
+    override fun onPause() {
+        // Only clear the marker if we are still the instance it points at — a newer overlay may
+        // already have resumed while this one was pausing.
+        if (visibleInstance === this) {
+            visibleInstance = null
+            visiblePackageName = null
+        }
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        if (visibleInstance === this) {
+            visibleInstance = null
+            visiblePackageName = null
+        }
+        super.onDestroy()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
