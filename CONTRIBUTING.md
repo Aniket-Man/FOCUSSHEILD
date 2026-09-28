@@ -51,9 +51,14 @@ Run locally before pushing — CI runs the same thing:
 If you touch Compose UI covered by a screenshot test, re-record and commit the golden:
 
 ```bash
-./gradlew recordRoborazziDebug
-./gradlew verifyRoborazziDebug
+./gradlew testDebugUnitTest -Proborazzi.test.record=true   # rewrite app/src/test/screenshots/*.png
+./gradlew testDebugUnitTest -Proborazzi.test.verify=true   # compare against the committed goldens
 ```
+
+Use the flag form, not the `recordRoborazziDebug` / `verifyRoborazziDebug` tasks: the goldens are
+captured with an explicit `filePath` into the source tree (so a drift is visible in review), and
+the plugin's own tasks do not manage images captured that way — `verifyRoborazziDebug` throws a
+`NullPointerException` inside `captureRoboImage`.
 
 New behaviour needs a test. Pure logic goes in `app/src/test`; anything that genuinely needs a
 device goes in `app/src/androidTest`. A test with no assertion does not count as a test.

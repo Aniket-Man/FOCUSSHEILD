@@ -54,7 +54,7 @@ Everything optional degrades to a documented no-op instead of failing the build.
 ```bash
 ./gradlew test                   # JVM + Robolectric unit tests
 ./gradlew testDebugUnitTest      # debug variant only
-./gradlew verifyRoborazziDebug   # screenshot goldens (see "Screenshot tests" below)
+./gradlew testDebugUnitTest -Proborazzi.test.verify=true   # screenshot goldens (see below)
 ./gradlew assembleDebug test     # what CI runs
 ```
 
@@ -162,12 +162,19 @@ update system.
 * **Screenshot tests:** Roborazzi. Record new goldens, then verify them:
 
   ```bash
-  ./gradlew recordRoborazziDebug     # write app/src/test/screenshots/*.png
-  ./gradlew verifyRoborazziDebug     # fail the build when a golden drifts
+  ./gradlew testDebugUnitTest -Proborazzi.test.record=true   # write app/src/test/screenshots/*.png
+  ./gradlew testDebugUnitTest -Proborazzi.test.verify=true   # fail when a golden drifts
   ```
 
-  `verifyRoborazziDebug` is wired into `check`, so a drifted golden fails CI instead of passing
-  quietly (issue #31).
+  Use the flags, not the `recordRoborazziDebug` / `verifyRoborazziDebug` tasks. The goldens are
+  captured with an explicit `filePath` so they land in the source tree and a drift shows up in a
+  code-review diff; the plugin's own tasks do not manage images captured that way and
+  `verifyRoborazziDebug` throws a `NullPointerException` inside `captureRoboImage`. Verification is
+  therefore not wired into `check`.
+
+  The screenshot test itself now asserts that the screen actually rendered a non-empty semantics
+  tree and that an image was really written, so it can no longer pass vacuously the way it used to
+  (issue #31).
 
 ---
 
