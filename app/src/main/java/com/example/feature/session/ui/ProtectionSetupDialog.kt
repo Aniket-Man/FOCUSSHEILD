@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,7 +105,16 @@ fun ProtectionSetupDialog(
         }
     }
 
-    // 3. Active ticker to catch immediate grant without delay
+    // 3. Active ticker to catch an immediate grant without waiting for ON_RESUME.
+    //
+    // `rememberUpdatedState` is what makes this correct. The loop used to close over the
+    // `permissionStatus` of the *first* composition: once the user granted something, the freshly
+    // read values never matched that frozen snapshot again, so the comparison stayed true and the
+    // dialog called `onRefreshPermissions()` every 400 ms for as long as it was open (issue #28).
+    // Reading through an updated state means each tick compares against the status the dialog is
+    // currently showing, so the poll goes quiet again as soon as the UI has caught up.
+    val currentStatus by rememberUpdatedState(permissionStatus)
+    val currentRefresh by rememberUpdatedState(onRefreshPermissions)
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(400)
@@ -113,12 +123,12 @@ fun ProtectionSetupDialog(
             // The exact-alarm grant can be changed from this dialog's own row (and revoked by the
             // system at any time), so it is polled with the rest.
             val currentExactAlarm = FocusPermissionManager.isExactAlarmGranted(context)
-            if (currentAcc != permissionStatus.isAccessibilityEnabled ||
-                currentOverlay != permissionStatus.isOverlayGranted ||
-                currentExactAlarm != permissionStatus.isExactAlarmGranted
+            if (currentAcc != currentStatus.isAccessibilityEnabled ||
+                currentOverlay != currentStatus.isOverlayGranted ||
+                currentExactAlarm != currentStatus.isExactAlarmGranted
             ) {
                 com.example.core.accessibility.AccessibilityHelper.updateState(context)
-                onRefreshPermissions()
+                currentRefresh()
             }
         }
     }

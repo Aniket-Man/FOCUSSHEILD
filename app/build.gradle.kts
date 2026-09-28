@@ -224,3 +224,17 @@ dependencies {
 ksp {
   arg("room.schemaLocation", "$projectDir/schemas")
 }
+
+// Roborazzi goldens live in the source tree (`app/src/test/screenshots`) so a drift shows up in a
+// code review diff. Verification is attached to `check` as soon as at least one golden exists:
+// before the first `./gradlew recordRoborazziDebug` there is nothing to compare against, and
+// attaching it unconditionally would fail every fresh clone. Previously nothing was wired at all,
+// so the screenshot suite could pass while every golden drifted (issue #31).
+val roborazziGoldenDir = file("src/test/screenshots")
+tasks.named("check") {
+  val hasRecordedGoldens =
+    roborazziGoldenDir.listFiles()?.any { it.isFile && it.name.endsWith(".png") } == true
+  if (hasRecordedGoldens) {
+    dependsOn("verifyRoborazziDebug")
+  }
+}

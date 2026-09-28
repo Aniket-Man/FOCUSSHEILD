@@ -66,8 +66,7 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val focusScheduleRepository by lazy {
         com.example.data.repository.FocusScheduleRepository(
             dao = database.focusScheduleDao(),
-            context = this,
-            coroutineScope = applicationScope
+            context = this
         )
     }
     val keywordRepository by lazy {

@@ -124,6 +124,9 @@ fun StrictModeScreen(
 
     LaunchedEffect(pendingDeviceAdminRequest) {
         if (pendingDeviceAdminRequest && deviceAdminLauncher != null && settingsViewModel != null) {
+            // Consume before launching, so a rotation cannot relaunch the device-admin screen
+            // (issue #28).
+            settingsViewModel.onDeviceAdminRequestLaunched()
             deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
         }
     }

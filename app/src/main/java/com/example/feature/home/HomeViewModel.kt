@@ -26,8 +26,10 @@ import com.example.feature.session.domain.FocusSession
 import com.example.feature.session.domain.SessionState
 import com.example.feature.session.engine.FocusSessionManager
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -388,6 +390,22 @@ class HomeViewModel(
         }
     }
 
+    private val _scheduleSaveError = MutableStateFlow<String?>(null)
+
+    /**
+     * Why the last schedule write was refused, or null.
+     *
+     * The repository can reject a save for a reason the editor dialog cannot check on its own —
+     * most importantly an overlap with an existing schedule (issue #28). The planner observes this
+     * and tells the user, instead of the dialog closing as if the schedule had been created.
+     */
+    val scheduleSaveError: StateFlow<String?> = _scheduleSaveError.asStateFlow()
+
+    /** Clears [scheduleSaveError] once it has been shown. */
+    fun consumeScheduleSaveError() {
+        _scheduleSaveError.value = null
+    }
+
     fun addFocusSchedule(
         title: String,
         daysOfWeek: String,
@@ -421,11 +439,15 @@ class HomeViewModel(
                 blockNotifications = blockNotifications
             )
             when (val result = app.focusScheduleRepository.addSchedule(schedule)) {
-                // A rejected write is a UI/logic bug (the dialog validates first); log it rather than
-                // pretending the schedule was created.
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected ->
+                // A rejection the dialog cannot pre-check (an overlap with another schedule) has to
+                // reach the user: a Save button that quietly does nothing is worse than the bug it
+                // is preventing (issue #28).
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected -> {
                     android.util.Log.w("HomeViewModel", "Schedule not saved: ${result.reason}")
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved -> Unit
+                    _scheduleSaveError.value = result.reason
+                }
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved ->
+                    _scheduleSaveError.value = null
             }
         }
     }
@@ -433,9 +455,12 @@ class HomeViewModel(
     fun updateFocusSchedule(schedule: FocusScheduleEntity) {
         viewModelScope.launch {
             when (val result = app.focusScheduleRepository.updateSchedule(schedule)) {
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected ->
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected -> {
                     android.util.Log.w("HomeViewModel", "Schedule not updated: ${result.reason}")
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved -> Unit
+                    _scheduleSaveError.value = result.reason
+                }
+                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved ->
+                    _scheduleSaveError.value = null
             }
         }
     }

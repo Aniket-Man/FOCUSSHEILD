@@ -91,15 +91,17 @@ class SupabaseHttp(private val config: SupabaseConfig) {
         extraHeaders.forEach { (k, v) -> builder.header(k, v) }
 
         val response = client.newCall(builder.build()).execute()
-        val body = response.body?.string().orEmpty()
+        // `responseBody`, not `body`: the request body a few lines above is already `body` in this
+        // scope, so re-declaring it here is a hard compile error ("Conflicting declarations").
+        val responseBody = response.body?.string().orEmpty()
         val code = response.code
         response.close()
 
         if (code !in 200..299) {
-            val (errorCode, message) = parseErrorBody(body)
+            val (errorCode, message) = parseErrorBody(responseBody)
             throw SupabaseApiException(status = code, code = errorCode, message = message)
         }
-        HttpResult(code, body)
+        HttpResult(code, responseBody)
     }
 
     /**

@@ -514,6 +514,18 @@ class SessionViewModel(
         return engine.createEnableAdminIntent()
     }
 
+    /**
+     * Marks the pending device-admin request as consumed at the moment the system screen is
+     * launched.
+     *
+     * Without this the flag stayed true for the whole round trip, so any recomposition that
+     * re-ran the launching effect — a rotation being the obvious one — launched the device-admin
+     * screen a second time (issue #28).
+     */
+    fun onDeviceAdminRequestLaunched() {
+        _pendingDeviceAdminRequest.value = false
+    }
+
     fun onDeviceAdminRequestResult() {
         _pendingDeviceAdminRequest.value = false
     }

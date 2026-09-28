@@ -50,6 +50,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -107,6 +108,21 @@ fun PlannerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val focusSchedules by viewModel.focusSchedules.collectAsStateWithLifecycle()
     val blockedApps by viewModel.blockedApps.collectAsStateWithLifecycle()
+
+    // A schedule the repository refused (e.g. it overlaps an existing one) must not disappear
+    // silently — the dialog has already closed by then (issue #28).
+    val scheduleSaveError by viewModel.scheduleSaveError.collectAsStateWithLifecycle()
+    val plannerContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(scheduleSaveError) {
+        scheduleSaveError?.let { reason ->
+            android.widget.Toast.makeText(
+                plannerContext,
+                reason,
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            viewModel.consumeScheduleSaveError()
+        }
+    }
 
     val isDark = LocalFocusColors.current.isDark
 

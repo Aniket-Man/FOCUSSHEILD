@@ -21,10 +21,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +73,11 @@ fun ScratchCardDialog(
     onRevealed: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var revealed by remember { mutableStateOf(false) }
-    var revealedNotified by remember { mutableStateOf(false) }
+    // Keyed on the card id, exactly like the scratch gesture below. With a plain `remember`, a host
+    // that swapped `card` for the next one without disposing this dialog kept `revealed = true`:
+    // the new card appeared already scratched, `onRevealed()` never fired for it, and its reward was
+    // never persisted — so it was either re-offered forever or silently lost (issue #29).
+    var revealed by remember(card.sessionId) { mutableStateOf(false) }
 
     val foilAlpha by animateFloatAsState(
         targetValue = if (revealed) 0f else 1f,
@@ -80,9 +85,11 @@ fun ScratchCardDialog(
         label = "foilAlpha"
     )
 
-    if (revealed && !revealedNotified) {
-        revealedNotified = true
-        onRevealed()
+    // Side effect, not composition. Calling onRevealed() straight from the composable body made the
+    // one callback that persists the reward depend on how often Compose chose to recompose.
+    val currentOnRevealed by rememberUpdatedState(onRevealed)
+    LaunchedEffect(card.sessionId, revealed) {
+        if (revealed) currentOnRevealed()
     }
 
     Dialog(
@@ -172,10 +179,13 @@ private fun ScratchCardSurface(
     foilAlpha: Float,
     onScratchProgress: (Float) -> Unit
 ) {
-    val scratchPath = remember { Path() }
+    // All three are keyed on the card id, like the gesture handler below: swapping in the next card
+    // must present a fresh, unscratched foil rather than inheriting the previous card's progress
+    // (issue #29).
+    val scratchPath = remember(card.sessionId) { Path() }
     // Redraw revision: bumped on every drag so the Canvas invalidates its draw lambda
-    val scratchRevision = remember { mutableIntStateOf(0) }
-    val scratchedCells = remember { HashSet<Int>() }
+    val scratchRevision = remember(card.sessionId) { mutableIntStateOf(0) }
+    val scratchedCells = remember(card.sessionId) { HashSet<Int>() }
 
     // The hint is drawn into the foil canvas rather than as a sibling, so scratching
     // erases it along with the foil instead of leaving it floating over the reward.

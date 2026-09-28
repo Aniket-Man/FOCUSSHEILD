@@ -15,16 +15,16 @@ import com.example.feature.notificationblocker.domain.NotificationBlockMode
 import com.example.feature.notificationblocker.domain.SilencedNotificationRecord
 import com.example.feature.session.domain.SessionState
 import com.example.feature.session.engine.FocusSessionManager
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -74,6 +74,17 @@ class NotificationBlockerEngine private constructor(
     private val _isSessionActive = MutableStateFlow(false)
     val isSessionActive: StateFlow<Boolean> = _isSessionActive.asStateFlow()
 
+    /**
+     * Completes once the caches below hold real preference values.
+     *
+     * Until the first DataStore emission arrives, `_isMasterEnabled` is `false` and both package
+     * sets are empty, so every notification arriving in that window was judged against defaults and
+     * let through — a silent leak on every cold start, exactly when a burst of queued notifications
+     * is most likely (issue #30). Notifications are now held until this deferred completes instead
+     * of being decided on empty caches.
+     */
+    private val cachesPrimed = CompletableDeferred<Unit>()
+
     init {
         // Observe preferences and sync fast cache
         engineScope.launch {
@@ -92,6 +103,8 @@ class NotificationBlockerEngine private constructor(
                 alwaysBlockedPackages.clear()
                 alwaysBlockedPackages.addAll(prefs.alwaysBlockedNotificationPackages)
                 _alwaysBlockedPackagesFlow.value = prefs.alwaysBlockedNotificationPackages
+
+                cachesPrimed.complete(Unit)
             }
         }
 
@@ -112,63 +125,54 @@ class NotificationBlockerEngine private constructor(
     }
 
     /**
+     * Suspends until the preference caches hold real values, so a notification arriving during the
+     * cold-start window is judged against the user's actual configuration rather than against the
+     * empty defaults.
+     *
+     * Bounded: if DataStore is unreadable the wait gives up after [CACHE_PRIME_TIMEOUT_MILLIS] and
+     * the decision falls back to the (permissive) current cache state — a delayed notification is
+     * acceptable, a permanently stalled listener is not.
+     */
+    private suspend fun awaitCachesPrimed() {
+        if (cachesPrimed.isCompleted) return
+        val primed = withTimeoutOrNull(CACHE_PRIME_TIMEOUT_MILLIS) { cachesPrimed.await() } != null
+        if (!primed) {
+            Log.w(tag, "Preference caches were not primed within ${CACHE_PRIME_TIMEOUT_MILLIS}ms")
+        }
+    }
+
+    /**
      * Determines whether an incoming notification should be intercepted and cancelled.
+     *
+     * The rule set itself lives in [NotificationBlockDecision]; this function only resolves the
+     * inputs. Note in particular that the 24/7 list is evaluated *before* the master toggle, so
+     * turning "Block notifications" off no longer silently un-silences permanently muted apps.
      */
     fun shouldBlockNotification(packageName: String): Boolean {
-        // 1. Safety Check: never block system, emergency, dialer, or FocusShield itself
-        if (isProtectedPackage(packageName)) {
-            return false
-        }
-
-        // 2. Either the global notification blocker or the active schedule can enable session blocking.
         val currentSession = sessionManager.activeSession.value
-        val scheduleEnabled = currentSession?.blockNotifications == true
-        if (!_isMasterEnabled.value && !scheduleEnabled) {
-            return false
-        }
-
-        // 3. Always-Silent Check (silenced 24/7 regardless of focus session)
-        if (alwaysBlockedPackages.contains(packageName)) {
-            return true
-        }
-
-        val sessionActive = _isSessionActive.value
-
-        // 4. Mode-based Evaluation
-        return when (_blockMode.value) {
-            NotificationBlockMode.SESSION_ONLY -> {
-                if (sessionActive) {
-                    // In session: block if in user-selected list OR blocked in active session
-                    val isExplicitlySelected = selectedPackages.contains(packageName)
-                    val isSessionAppBlocked = isPackageBlockedInActiveSession(packageName)
-                    isExplicitlySelected || isSessionAppBlocked
-                } else {
-                    // No active session: allow normal notifications!
-                    false
-                }
-            }
-            NotificationBlockMode.ALWAYS_SILENT -> {
-                // In always-silent mode, any package in selectedPackages is silenced 24/7
-                selectedPackages.contains(packageName)
-            }
-            NotificationBlockMode.SMART_HYBRID -> {
-                if (sessionActive) {
-                    selectedPackages.contains(packageName) || isPackageBlockedInActiveSession(packageName)
-                } else {
-                    false
-                }
-            }
-        }
+        return NotificationBlockDecision.shouldBlock(
+            NotificationBlockDecision.Inputs(
+                isProtected = isProtectedPackage(packageName),
+                isAlwaysSilenced = alwaysBlockedPackages.contains(packageName),
+                masterEnabled = _isMasterEnabled.value,
+                sessionRequestsBlocking = currentSession?.blockNotifications == true,
+                sessionActive = _isSessionActive.value,
+                mode = _blockMode.value,
+                isExplicitlySelected = selectedPackages.contains(packageName),
+                isBlockedInActiveSession = isPackageBlockedInActiveSession(packageName)
+            )
+        )
     }
 
     /**
      * Intercepts, cancels, and safely vaults an incoming notification.
      */
-    fun processIncomingNotification(
+    suspend fun processIncomingNotification(
         sbn: StatusBarNotification,
         cancelAction: () -> Unit
     ): Boolean {
         val rawPkg = sbn.packageName ?: return false
+        awaitCachesPrimed()
         if (!shouldBlockNotification(rawPkg)) {
             return false
         }
@@ -381,6 +385,10 @@ class NotificationBlockerEngine private constructor(
     }
 
     companion object {
+
+        /** Upper bound on how long an incoming notification waits for the caches to be primed. */
+        private const val CACHE_PRIME_TIMEOUT_MILLIS = 2_000L
+
         @Volatile
         private var INSTANCE: NotificationBlockerEngine? = null
 
