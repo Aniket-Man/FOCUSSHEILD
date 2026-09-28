@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import com.example.data.local.entity.StudyPlanEntity
 import java.util.Calendar
+import java.util.UUID
 
 /**
  * Robust Scheduler for Today's Study Plan Reminders and Midnight Daily Session Reset.
@@ -29,6 +30,39 @@ object StudyPlanAlarmScheduler {
     const val EXTRA_END_TIME = "extra_end_time"
     const val EXTRA_DURATION_MINUTES = "extra_duration_minutes"
     const val EXTRA_NOTES = "extra_notes"
+
+    /**
+     * Per-install secret carried by the midnight-reset PendingIntent.
+     *
+     * The receiver is exported (it has to be, for BOOT_COMPLETED and friends), so any app on the
+     * device can target it with an explicit intent carrying [ACTION_DAILY_RESET] and make it run a
+     * full reset whenever it likes. There is no portable way to identify a broadcast's sender —
+     * `BroadcastReceiver.getSentFromPackage()` exists only on API 34+, and even there it returns
+     * null unless the sender opted into sharing its identity, so it is useless here (minSdk is 24).
+     *
+     * A token that only this app can read is portable and actually verifies what matters: that the
+     * broadcast came from our own PendingIntent (issue #15).
+     */
+    const val EXTRA_RESET_TOKEN = "extra_reset_token"
+
+    private const val TOKEN_PREFS = "focus_shield_alarm_tokens"
+    private const val KEY_DAILY_RESET_TOKEN = "daily_reset_token"
+
+    /**
+     * The stable per-install daily-reset token, generated on first use.
+     *
+     * Stored in app-private [android.content.SharedPreferences], so it is unreadable by other apps
+     * on a non-rooted device. Stability matters: a token that changed per re-arm would invalidate
+     * the alarm already sitting in AlarmManager.
+     */
+    fun dailyResetToken(context: Context): String {
+        val prefs = context.applicationContext
+            .getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        prefs.getString(KEY_DAILY_RESET_TOKEN, null)?.let { return it }
+        val token = UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_DAILY_RESET_TOKEN, token).apply()
+        return token
+    }
     const val EXTRA_AUTO_START = "extra_auto_start"
     const val EXTRA_START_PLAN_SESSION = "extra_start_plan_session"
 
@@ -196,6 +230,8 @@ object StudyPlanAlarmScheduler {
 
         val intent = Intent(context, BootAndDailyResetReceiver::class.java).apply {
             action = ACTION_DAILY_RESET
+            // Proves to the receiver that this broadcast is ours; see [EXTRA_RESET_TOKEN].
+            putExtra(EXTRA_RESET_TOKEN, dailyResetToken(context))
         }
 
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

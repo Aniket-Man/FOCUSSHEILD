@@ -40,12 +40,17 @@ class BootAndDailyResetReceiver : BroadcastReceiver() {
 
         // The custom midnight action is sent via FocusShield's own explicit PendingIntent; it is
         // no longer declared in the manifest filter, but an exported receiver can still be targeted
-        // directly — so ignore any sender that is not us or the system relaying our PendingIntent
+        // directly — so require the per-install token that only our own PendingIntent carries
         // (issue #15).
+        //
+        // This used to read `sendingPackage`, which is not a member of BroadcastReceiver at all and
+        // did not compile. The real API, `getSentFromPackage()`, is API 34+ (minSdk here is 24) and
+        // returns null unless the sender opted into sharing its identity, so it could not have done
+        // this job either.
         if (action == StudyPlanAlarmScheduler.ACTION_DAILY_RESET) {
-            val sender = sendingPackage
-            if (sender != null && sender != context.packageName && sender != "android") {
-                Log.w(TAG, "Ignoring ACTION_DAILY_RESET from untrusted sender: $sender")
+            val presented = intent.getStringExtra(StudyPlanAlarmScheduler.EXTRA_RESET_TOKEN)
+            if (presented != StudyPlanAlarmScheduler.dailyResetToken(context)) {
+                Log.w(TAG, "Ignoring ACTION_DAILY_RESET without a valid token")
                 return
             }
         }
