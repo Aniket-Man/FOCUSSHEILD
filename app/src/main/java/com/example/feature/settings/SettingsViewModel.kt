@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 data class SettingsUiState(
@@ -201,6 +202,15 @@ class SettingsViewModel(
         return engine.createEnableAdminIntent()
     }
 
+    /**
+     * Marks the pending device-admin request as consumed at the moment the system screen is
+     * launched, so a recomposition (rotation, theme change) cannot launch it a second time
+     * (issue #28).
+     */
+    fun onDeviceAdminRequestLaunched() {
+        _pendingDeviceAdminRequest.value = false
+    }
+
     fun onDeviceAdminRequestResult() {
         _pendingDeviceAdminRequest.value = false
         checkDeviceAdminStatus()
@@ -242,6 +252,13 @@ class SettingsViewModel(
         }
     }
 
+    /**
+     * Writes the edited profile locally.
+     *
+     * Returns the [Job] doing the write so a caller that has follow-up work depending on the new
+     * values — the cloud push in `ProfileScreen`, which would otherwise snapshot and upload the
+     * pre-edit profile — can await it instead of racing it (issue #29).
+     */
     fun updateUserProfile(
         userName: String,
         photoUri: String?,
@@ -249,17 +266,15 @@ class SettingsViewModel(
         motto: String,
         academicGoal: String,
         dailyGoalMinutes: Int
-    ) {
-        viewModelScope.launch {
-            preferencesRepository.updateUserProfile(
-                userName = userName,
-                photoUri = photoUri,
-                avatarPreset = avatarPreset,
-                motto = motto,
-                academicGoal = academicGoal,
-                dailyGoalMinutes = dailyGoalMinutes
-            )
-        }
+    ): Job = viewModelScope.launch {
+        preferencesRepository.updateUserProfile(
+            userName = userName,
+            photoUri = photoUri,
+            avatarPreset = avatarPreset,
+            motto = motto,
+            academicGoal = academicGoal,
+            dailyGoalMinutes = dailyGoalMinutes
+        )
     }
 
     fun updateUserPhoto(uri: String?) {

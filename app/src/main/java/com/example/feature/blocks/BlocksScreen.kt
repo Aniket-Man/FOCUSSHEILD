@@ -187,6 +187,9 @@ fun BlocksScreen(
 
     LaunchedEffect(pendingDeviceAdminRequest) {
         if (pendingDeviceAdminRequest) {
+            // Consume before launching: the flag lives in the ViewModel, so a rotation used to
+            // re-run this effect and relaunch the device-admin screen (issue #28).
+            settingsViewModel.onDeviceAdminRequestLaunched()
             deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
         }
     }

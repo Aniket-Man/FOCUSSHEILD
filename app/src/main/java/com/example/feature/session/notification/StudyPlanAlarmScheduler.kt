@@ -56,12 +56,27 @@ object StudyPlanAlarmScheduler {
 
     /**
      * Schedules alarms for all given study plan items that occur in the future today.
+     *
+     * The midnight re-arm is armed **first**, and each plan is armed defensively. It used to be
+     * armed last, after the loop: a single malformed plan that threw took the daily reset with it,
+     * and with it every future reminder until the user happened to open the app again (issue #28).
+     * The re-arm is the thing that brings the whole schedule back tomorrow, so it can never be
+     * downstream of fallible per-plan work.
      */
     fun schedulePlanReminders(context: Context, plans: List<StudyPlanEntity>) {
-        for (plan in plans) {
-            scheduleSinglePlanReminder(context, plan)
-        }
         scheduleMidnightDailyReset(context)
+        for (plan in plans) {
+            try {
+                scheduleSinglePlanReminder(context, plan)
+            } catch (e: RuntimeException) {
+                Log.e(
+                    TAG,
+                    "Could not schedule reminder for plan '${plan.subjectName}' (${plan.id}); " +
+                        "continuing with the remaining plans",
+                    e
+                )
+            }
+        }
     }
 
     /**
@@ -158,9 +173,16 @@ object StudyPlanAlarmScheduler {
     /**
      * Schedules an alarm to fire right after midnight (00:00:05) every day
      * to execute daily session resets, prepare today's fresh plan, and reschedule notifications.
+     *
+     * @return true when the alarm is armed. Callers use this to re-try in a `finally` rather than
+     *   assuming success — losing this one alarm silently disables every reminder the app has.
      */
-    fun scheduleMidnightDailyReset(context: Context) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    fun scheduleMidnightDailyReset(context: Context): Boolean {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        if (alarmManager == null) {
+            Log.e(TAG, "AlarmManager unavailable; midnight daily reset not armed")
+            return false
+        }
 
         val calendar = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, 1)
@@ -184,19 +206,22 @@ object StudyPlanAlarmScheduler {
 
         val pendingIntent = PendingIntent.getBroadcast(context, REQUEST_CODE_DAILY_RESET, intent, flags)
 
-        try {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
             } else {
                 alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
             }
             Log.d(TAG, "Scheduled Midnight Daily Reset at $triggerMillis")
+            true
         } catch (e: SecurityException) {
             // No alarm permission on this build/OEM: the reset also runs on the next launch
             // (FocusShieldApp seeds today's plans), so this is reported rather than fatal.
             Log.e(TAG, "Midnight daily reset could not be armed (permission): ${e.message}")
+            false
         } catch (e: IllegalStateException) {
             Log.e(TAG, "Midnight daily reset could not be armed: ${e.message}")
+            false
         }
     }
 

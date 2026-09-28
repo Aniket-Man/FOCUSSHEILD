@@ -100,6 +100,7 @@ import com.example.cloud.auth.AuthState
 import com.example.cloud.storage.ProfileImageUploader
 import com.example.feature.account.AccountViewModel
 import com.example.feature.update.ui.UpdateViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
@@ -154,27 +155,66 @@ fun ProfileScreen(
         }
     }
 
-    // After an authenticated profile save: upload a new image (or delete a cleared one), then mark the
-    // profiles row dirty + request a sync so the text fields and the avatar path reach the cloud.
-    val pushEditedProfileToCloud: (String?, String?) -> Unit = { photoBefore, photoAfter ->
+    // After an authenticated profile save: wait for the local write, upload a new image (or delete a
+    // cleared one), and only then mark the profiles row dirty + request a sync.
+    //
+    // Two ordering bugs used to live here (issue #29):
+    //  1. a failed `uploadOwnImage` skipped `setCloudAvatarPath` but still marked the row dirty and
+    //     requested a sync, so the edited text fields reached the cloud while the stored avatar path
+    //     still pointed at the *old* image — a reinstall/restore then silently reverted the photo;
+    //  2. `updateUserProfile` was fire-and-forget, so the sync could snapshot the profile before the
+    //     local DataStore write had landed and upload the pre-edit values.
+    //
+    // Now the local write is awaited, and a failed avatar step aborts the push entirely: the edit
+    // stays local and fully consistent, the user is told, and the next successful save (or sync)
+    // sends the complete profile.
+    val pushEditedProfileToCloud: (Job, String?, String?) -> Unit = { localWrite, photoBefore, photoAfter ->
         val uid = (accountState.auth as? AuthState.Authenticated)?.userId
         if (uid != null) {
             cloudScope.launch {
+                // (2) The sync reads local state; it must not start before the edit has been written.
+                localWrite.join()
+
                 val repo = FocusShieldApp.instance.preferencesRepository
                 val installState = FocusShieldApp.instance.cloudInstallState
-                if (photoAfter != null) {
-                    val uploaded = cloudUploader.uploadOwnImage(photoAfter)
-                    if (uploaded) {
-                        try { repo.setCloudAvatarPath(ProfileImageUploader.objectPath(uid)) } catch (_: Throwable) {}
+
+                val avatarConsistent: Boolean = when {
+                    photoAfter != null -> {
+                        val uploaded = cloudUploader.uploadOwnImage(photoAfter)
+                        uploaded && runCatching {
+                            repo.setCloudAvatarPath(ProfileImageUploader.objectPath(uid))
+                        }.isSuccess
                     }
-                } else if (photoBefore != null) {
-                    val cloudPathBefore = try { repo.cloudAvatarPath() } catch (_: Throwable) { null }
-                    if (cloudPathBefore != null) {
-                        cloudUploader.deleteOwnImage()
-                        try { repo.setCloudAvatarPath(null) } catch (_: Throwable) {}
+
+                    photoBefore != null -> {
+                        val cloudPathBefore = runCatching { repo.cloudAvatarPath() }.getOrNull()
+                        if (cloudPathBefore == null) {
+                            true // nothing stored in the cloud, so nothing can go out of step
+                        } else {
+                            cloudUploader.deleteOwnImage() &&
+                                runCatching { repo.setCloudAvatarPath(null) }.isSuccess
+                        }
                     }
+
+                    else -> true // the photo did not change
                 }
-                try { installState.setProfileDirty(true) } catch (_: Throwable) {}
+
+                if (!avatarConsistent) {
+                    // (1) Do NOT push a partial edit. Silence here is what lost people's photos.
+                    android.util.Log.w(
+                        "ProfileScreen",
+                        "Avatar step failed; profile edit kept local instead of syncing partially"
+                    )
+                    android.widget.Toast.makeText(
+                        context,
+                        "Your photo could not be uploaded, so this edit was saved on this device " +
+                            "only. Check your connection and save again to sync it.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                runCatching { installState.setProfileDirty(true) }
                 FocusShieldApp.instance.syncGateway.requestSync()
             }
         }
@@ -528,6 +568,9 @@ fun ProfileScreen(
 
                         LaunchedEffect(pendingDeviceAdminRequest) {
                             if (pendingDeviceAdminRequest) {
+                                // Consume before launching, so a rotation cannot relaunch the
+                                // device-admin screen (issue #28).
+                                settingsViewModel.onDeviceAdminRequestLaunched()
                                 deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
                             }
                         }
@@ -777,7 +820,9 @@ fun ProfileScreen(
                 currentDailyGoalMinutes = prefs.dailyGoalMinutes,
                 onDismiss = { showEditProfileSheet = false },
                 onSaveProfile = { name, photo, preset, motto, goal, minutes ->
-                    settingsViewModel.updateUserProfile(
+                    // The returned Job is the local DataStore write; the cloud push awaits it so it
+                    // can never snapshot pre-edit values (issue #29).
+                    val localWrite = settingsViewModel.updateUserProfile(
                         userName = name,
                         photoUri = photo,
                         avatarPreset = preset,
@@ -785,7 +830,7 @@ fun ProfileScreen(
                         academicGoal = goal,
                         dailyGoalMinutes = minutes
                     )
-                    pushEditedProfileToCloud(prefs.userPhotoUri, photo)
+                    pushEditedProfileToCloud(localWrite, prefs.userPhotoUri, photo)
                 }
             )
         }

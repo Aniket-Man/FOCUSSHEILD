@@ -53,6 +53,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
@@ -84,6 +86,14 @@ private enum class SetupSubView {
     SELECT_APPS
 }
 
+/**
+ * Saves [SetupSubView] by ordinal so the open sub-sheet survives rotation and process death.
+ */
+private val SetupSubViewSaver: Saver<SetupSubView, Int> = Saver(
+    save = { it.ordinal },
+    restore = { ordinal -> SetupSubView.entries.getOrNull(ordinal) ?: SetupSubView.MAIN }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FocusSessionSetupSheet(
@@ -96,7 +106,14 @@ fun FocusSessionSetupSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
 
-    var activeSubView by remember { mutableStateOf(SetupSubView.MAIN) }
+    // rememberSaveable, not remember: a rotation (or any configuration change) used to throw the
+    // user back to the main page of the sheet, losing whichever sub-sheet they were filling in
+    // (issue #28). The enum is saved by ordinal so it survives process death too.
+    var activeSubView by rememberSaveable(stateSaver = SetupSubViewSaver) {
+        mutableStateOf(SetupSubView.MAIN)
+    }
+    // Deliberately NOT saveable: this holds callbacks, which cannot be written to a Bundle. A
+    // pending prompt is re-derived from the toggle the user taps again.
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     val pendingDeviceAdminRequest by viewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
@@ -108,6 +125,10 @@ fun FocusSessionSetupSheet(
 
     LaunchedEffect(pendingDeviceAdminRequest) {
         if (pendingDeviceAdminRequest) {
+            // Consume the request *before* launching. The flag is ViewModel state that outlives the
+            // composition, so on rotation this effect re-ran with it still true and shoved the user
+            // back into the device-admin screen they had just dismissed (issue #28).
+            viewModel.onDeviceAdminRequestLaunched()
             deviceAdminLauncher.launch(viewModel.getDeviceAdminIntent())
         }
     }

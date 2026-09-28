@@ -10,10 +10,7 @@ import com.example.data.local.entity.FocusScheduleEntity
 import com.example.feature.session.notification.FocusScheduleAlarmScheduler
 import com.example.feature.session.notification.ScheduleTime
 import com.example.feature.session.notification.ScheduleValidation
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
 
 /**
  * Room-first store for automated focus schedules, plus the alarm side-effects that must follow every
@@ -33,8 +30,7 @@ import kotlinx.coroutines.launch
  */
 class FocusScheduleRepository(
     private val dao: FocusScheduleDao,
-    private val context: Context? = null,
-    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+    private val context: Context? = null
 ) {
     val allSchedules: Flow<List<FocusScheduleEntity>> = dao.getAllSchedulesFlow()
 
@@ -92,6 +88,8 @@ class FocusScheduleRepository(
         val normalized = validateAndNormalize(schedule)
             ?: return reject("addSchedule", schedule)
 
+        rejectOverlap("addSchedule", normalized)?.let { return it }
+
         dao.insertSchedule(normalized)
         SyncTracker.enqueueUpsert(
             SyncTables.FOCUS_SCHEDULES,
@@ -113,6 +111,8 @@ class FocusScheduleRepository(
     suspend fun updateSchedule(schedule: FocusScheduleEntity): SaveResult {
         val normalized = validateAndNormalize(schedule)
             ?: return reject("updateSchedule", schedule)
+
+        rejectOverlap("updateSchedule", normalized)?.let { return it }
 
         dao.updateSchedule(normalized)
         SyncTracker.enqueueUpsert(
@@ -161,11 +161,18 @@ class FocusScheduleRepository(
         }
     }
 
-    fun syncAllAlarms(context: Context) {
-        coroutineScope.launch {
-            val enabled = dao.getEnabledSchedules()
-            FocusScheduleAlarmScheduler.rescheduleAllSchedules(context, enabled)
-        }
+    /**
+     * Re-plans and re-arms every enabled schedule.
+     *
+     * `suspend`, and therefore awaited by its caller. It used to fire a `launch` on a repository
+     * scope from inside a `BroadcastReceiver`'s `goAsync()` block: the receiver could call
+     * `finish()` — and the process could then be killed — while the re-arm was still queued, and
+     * any exception it threw landed nowhere. Boot is exactly when that is most likely, and exactly
+     * when leaving schedules unarmed matters most (issue #28).
+     */
+    suspend fun syncAllAlarms(context: Context) {
+        val enabled = dao.getEnabledSchedules()
+        FocusScheduleAlarmScheduler.rescheduleAllSchedules(context, enabled)
     }
 
     // ---- validation -------------------------------------------------------------------
@@ -180,6 +187,32 @@ class FocusScheduleRepository(
 
     /** Null when [schedule] can be stored, otherwise the user-presentable reason it cannot. */
     fun validate(schedule: FocusScheduleEntity): String? = ScheduleValidation.validate(schedule)
+
+    /**
+     * Null when [normalized] collides with nothing, otherwise a [SaveResult.Rejected] naming the
+     * schedule it collides with.
+     *
+     * Overlaps used to be accepted silently and then lost at runtime: the alarm for the second
+     * schedule fired, found a session already running, and wrote one debug line before giving up.
+     * The planner UI still showed both windows as protected (issue #28). Refusing the save is the
+     * only point at which the user can actually see and fix the conflict.
+     */
+    private suspend fun rejectOverlap(
+        operation: String,
+        normalized: FocusScheduleEntity
+    ): SaveResult.Rejected? {
+        if (!normalized.isEnabled) return null
+        val clash = ScheduleValidation.findOverlap(normalized, dao.getEnabledSchedules())
+            ?: return null
+        val reason = "This overlaps \"${clash.title}\" " +
+            "(${clash.startTime}–${clash.endTime}). Adjust one of the two windows."
+        Log.w(
+            TAG,
+            "$operation rejected schedule '${normalized.title}' (${normalized.id}): " +
+                "overlaps '${clash.title}' (${clash.id})"
+        )
+        return SaveResult.Rejected(reason)
+    }
 
     private suspend fun reject(operation: String, schedule: FocusScheduleEntity): SaveResult {
         val reason = validate(schedule) ?: "invalid schedule"
