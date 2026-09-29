@@ -64,6 +64,15 @@ class FocusSessionManager(
 
     /**
      * Starts a new session with the specified parameters.
+     *
+     * Refuses when a session is already RUNNING or PAUSED. Without that guard a second call simply
+     * overwrote `_activeSession` with a fresh UUID, and the live session — never persisted, never
+     * completed — was gone along with every minute the user had put into it. A double tap on
+     * "Start" was enough (issue #28). The alarm path already guarded against this; the UI path did
+     * not, so the guard now lives in the one place both paths go through.
+     *
+     * End, cancel or reset the current session first; the failure is a plain [IllegalStateException]
+     * whose message is shown by [com.example.feature.session.SessionViewModel] as a validation error.
      */
     fun startSession(
         mode: SessionMode,
@@ -81,6 +90,23 @@ class FocusSessionManager(
         blockNotifications: Boolean = false,
         defaultBreakMinutes: Int = 5
     ): Result<FocusSession> {
+        // Guard *before* any mutation: breakManager.reset() and the engine starts below are
+        // side effects that must not happen when the call is going to be refused.
+        val existing = _activeSession.value
+        val currentState = _sessionState.value
+        if (existing != null &&
+            !existing.isCompleted &&
+            !existing.isCancelled &&
+            (currentState == SessionState.RUNNING || currentState == SessionState.PAUSED)
+        ) {
+            return Result.failure(
+                IllegalStateException(
+                    "A ${existing.mode.name.lowercase()} session is already " +
+                        "${currentState.name.lowercase()}; end or cancel it before starting another."
+                )
+            )
+        }
+
         val now = currentTimeProvider()
         breakManager.reset()
 

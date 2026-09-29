@@ -9,7 +9,9 @@ package com.example.feature.update.domain
  *
  * @param versionName normalized, leading `v` stripped — `v1.0.1` and `1.0.1` both arrive as `1.0.1`.
  * @param versionCode the release's own Android version code when it states one. GitHub tags do not,
- *   so this is usually null; [UpdateInfo.versionName] is the comparison of record.
+ *   so this is usually null. When both the release and the running build state one, the code
+ *   decides whether this is an update (see
+ *   [com.example.feature.update.domain.SemanticVersion.isNewerRelease]); otherwise versionName does.
  * @param apkUrl null when the release carries no `.apk` asset — the UI then offers no install button
  *   and says so, rather than linking something that is not an APK (prompt.txt §3).
  */

@@ -49,11 +49,17 @@ object CloudJson {
         return this
     }
 
-    /** Optional text that treats JSON null and missing the same (null). */
-    private fun JSONObject.optNullableString(key: String): String? =
-        if (isNull(key)) null else optString(key, "").takeIf { it.isNotEmpty() || has(key) }?.let {
-            if (isNull(key)) null else optString(key)
-        }
+    /**
+     * Optional text that treats JSON null and a missing key the same (null). A *present* value must
+     * actually be a string: `optString` would coerce a number or object into text, silently turning
+     * a corrupt payload into plausible data, so a non-string rejects the row instead.
+     */
+    private fun JSONObject.optNullableString(key: String): String? {
+        if (isNull(key)) return null
+        val value = opt(key)
+        return value as? String
+            ?: throw CloudDataException(TABLE_UNKNOWN, key, value, "expected text or null")
+    }
 
     // ---- strict field readers ---------------------------------------------------------
     //
@@ -119,6 +125,18 @@ object CloudJson {
         val value = opt(key)
         return value as? String
             ?: throw CloudDataException(table, key, value, "expected text")
+    }
+
+    /**
+     * Required epoch-millis timestamp (creation times, target dates). Falling back to "now" would
+     * fabricate plausible-looking history on restore — every rebuilt row would claim it was created
+     * at restore time — so a missing value rejects the row instead of inventing one.
+     */
+    private fun JSONObject.requiredLng(table: String, key: String): Long {
+        if (!has(key) || isNull(key)) {
+            throw CloudDataException(table, key, null, "required timestamp is missing")
+        }
+        return lng(key, 0L)
     }
 
     /** Enum-by-name parsing with no fallback: an unknown name is a rejected row, not a default. */
@@ -205,12 +223,11 @@ object CloudJson {
 
     fun scheduleFromCloud(j: JSONObject): FocusScheduleEntity {
         val table = SyncTables.FOCUS_SCHEDULES
-        // A schedule's whole purpose is to fire at a specific time on specific days, so these two
-        // fields are validated with the same strict parser the alarm scheduler uses. A row whose
-        // times/days cannot be understood is rejected here — it would otherwise be stored and then
-        // either silently skipped by the scheduler or (previously) fired at a substituted time.
-        val startTime = j.clockTime(table, "startTime", "09:00")
-        val endTime = j.clockTime(table, "endTime", "12:00")
+        // A schedule's whole purpose is to fire at a specific time on specific days, so these fields
+        // are validated with the same strict parser the alarm scheduler uses, and absence is fatal:
+        // a defaulted "09:00"/"MON–FRI" row would fire at an invented time the user never chose.
+        val startTime = j.clockTime(table, "startTime", null)
+        val endTime = j.clockTime(table, "endTime", null)
         val days = if (j.has("daysOfWeek") && !j.isNull("daysOfWeek")) {
             val raw = j.opt("daysOfWeek")
             val text = raw as? String
@@ -220,7 +237,7 @@ object CloudJson {
             }
             text
         } else {
-            "MON,TUE,WED,THU,FRI"
+            throw CloudDataException(table, "daysOfWeek", null, "required day list is missing")
         }
 
         return FocusScheduleEntity(
@@ -240,7 +257,7 @@ object CloudJson {
             description = j.text(table, "description", ""),
             blockedAppPackages = j.text(table, "blockedAppPackages", ""),
             blockNotifications = j.bool("blockNotifications", false),
-            createdAt = j.lng("createdAt", System.currentTimeMillis())
+            createdAt = j.requiredLng(table, "createdAt")
         )
     }
 
@@ -254,9 +271,9 @@ object CloudJson {
 
     fun blockedAppFromCloud(j: JSONObject): BlockedAppEntity = BlockedAppEntity(
         packageName = j.identity(SyncTables.BLOCKED_APPS, "packageName"),
-        appName = j.optString("appName"),
+        appName = j.text(SyncTables.BLOCKED_APPS, "appName", ""),
         isEnabled = j.bool("isEnabled", true),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.BLOCKED_APPS, "createdAt")
     )
 
     // ---- blocked_websites ------------------------------------------------------------
@@ -278,7 +295,7 @@ object CloudJson {
             setOf("MANUAL", "ADULT"),
             "MANUAL"
         ),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.BLOCKED_WEBSITES, "createdAt")
     )
 
     // ---- app_limits ------------------------------------------------------------------
@@ -303,11 +320,11 @@ object CloudJson {
         id = j.identity(SyncTables.STUDY_CHANNELS, "id"),
         // Not part of the identity and nullable in the schema: a partial row still restores.
         channelId = j.text(SyncTables.STUDY_CHANNELS, "channelId", ""),
-        channelName = j.optString("channelName"),
-        channelUrl = j.optString("channelUrl"),
-        thumbnailUrl = j.optString("thumbnailUrl", ""),
+        channelName = j.text(SyncTables.STUDY_CHANNELS, "channelName", ""),
+        channelUrl = j.text(SyncTables.STUDY_CHANNELS, "channelUrl", ""),
+        thumbnailUrl = j.text(SyncTables.STUDY_CHANNELS, "thumbnailUrl", ""),
         isApproved = j.bool("isApproved", true),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.STUDY_CHANNELS, "createdAt")
     )
 
     // ---- study_subjects --------------------------------------------------------------
@@ -322,11 +339,11 @@ object CloudJson {
 
     fun subjectFromCloud(j: JSONObject): SubjectEntity = SubjectEntity(
         id = j.identity(SyncTables.STUDY_SUBJECTS, "id"),
-        name = j.optString("name"),
-        colorHex = j.optString("colorHex", "#7C3AED"),
-        iconIdentifier = j.optString("iconIdentifier", "default"),
+        name = j.text(SyncTables.STUDY_SUBJECTS, "name", ""),
+        colorHex = j.text(SyncTables.STUDY_SUBJECTS, "colorHex", "#7C3AED"),
+        iconIdentifier = j.text(SyncTables.STUDY_SUBJECTS, "iconIdentifier", "default"),
         isArchived = j.bool("isArchived", false),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.STUDY_SUBJECTS, "createdAt")
     )
 
     // ---- study_topics ----------------------------------------------------------------
@@ -341,8 +358,8 @@ object CloudJson {
         id = j.identity(SyncTables.STUDY_TOPICS, "id"),
         // Nullable in the schema (a topic can arrive before its subject); not an identity field.
         subjectId = j.text(SyncTables.STUDY_TOPICS, "subjectId", ""),
-        name = j.optString("name"),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        name = j.text(SyncTables.STUDY_TOPICS, "name", ""),
+        createdAt = j.requiredLng(SyncTables.STUDY_TOPICS, "createdAt")
     )
 
     // ---- study_plans ---------------------------------------------------------------
@@ -367,19 +384,20 @@ object CloudJson {
 
     fun studyPlanFromCloud(j: JSONObject): StudyPlanEntity = StudyPlanEntity(
         id = j.identity(SyncTables.STUDY_PLANS, "id"),
-        subjectId = j.optString("subjectId"),
-        subjectName = j.optString("subjectName"),
-        topicName = j.optString("topicName"),
+        subjectId = j.text(SyncTables.STUDY_PLANS, "subjectId", ""),
+        subjectName = j.text(SyncTables.STUDY_PLANS, "subjectName", ""),
+        topicName = j.text(SyncTables.STUDY_PLANS, "topicName", ""),
         plannedDurationMinutes = j.int("plannedDurationMinutes", 60),
-        targetDate = j.lng("targetDate", System.currentTimeMillis()),
+        targetDate = j.requiredLng(SyncTables.STUDY_PLANS, "targetDate"),
         isCompleted = j.bool("isCompleted", false),
-        colorHex = j.optString("colorHex", "#7C3AED"),
-        createdAt = j.lng("createdAt", System.currentTimeMillis()),
-        dateString = j.optString("dateString", ""),
+        colorHex = j.text(SyncTables.STUDY_PLANS, "colorHex", "#7C3AED"),
+        createdAt = j.requiredLng(SyncTables.STUDY_PLANS, "createdAt"),
+        dateString = j.text(SyncTables.STUDY_PLANS, "dateString", ""),
         // Times are validated exactly like a focus schedule's: a plan reminder must fire at the
-        // time the plan says, or not at all.
-        startTime = j.clockTime(SyncTables.STUDY_PLANS, "startTime", "08:00"),
-        endTime = j.clockTime(SyncTables.STUDY_PLANS, "endTime", "09:00"),
+        // time the plan says, or not at all — so an absent time rejects the row instead of
+        // being replaced with an invented "08:00"/"09:00".
+        startTime = j.clockTime(SyncTables.STUDY_PLANS, "startTime", null),
+        endTime = j.clockTime(SyncTables.STUDY_PLANS, "endTime", null),
         startMinutes = j.int("startMinutes", 480),
         endMinutes = j.int("endMinutes", 540),
         // study_plans.status is written only by StudyPlanDao (PLANNED / COMPLETED).
@@ -389,7 +407,7 @@ object CloudJson {
             setOf("PLANNED", "COMPLETED"),
             "PLANNED"
         ),
-        notes = j.optString("notes", "")
+        notes = j.text(SyncTables.STUDY_PLANS, "notes", "")
     )
 
     // ---- keywords (natural key; Room autogen id is NOT synced) ----------------------
@@ -407,7 +425,7 @@ object CloudJson {
         // "allow" and "block" are opposite behaviours; guessing one would silently invert the rule.
         type = j.oneOf(SyncTables.BLOCKED_KEYWORDS, "keyword_type", setOf("allow", "block"), "block"),
         isActive = j.bool("is_active", true),
-        createdAt = j.lng("created_at", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.BLOCKED_KEYWORDS, "created_at")
     )
 
     // ---- session_records -------------------------------------------------------------
@@ -439,10 +457,10 @@ object CloudJson {
         return SessionRecordEntity(
             id = j.identity(SyncTables.SESSION_RECORDS, "id"),
             mode = mode,
-            title = j.optString("title"),
-            subject = j.optString("subject"),
-            topic = j.optString("topic"),
-            goal = j.optString("goal"),
+            title = j.text(SyncTables.SESSION_RECORDS, "title", ""),
+            subject = j.text(SyncTables.SESSION_RECORDS, "subject", ""),
+            topic = j.text(SyncTables.SESSION_RECORDS, "topic", ""),
+            goal = j.text(SyncTables.SESSION_RECORDS, "goal", ""),
             plannedDurationMillis = j.lng("plannedDurationMillis", 0L),
             actualDurationMillis = j.lng("actualDurationMillis", 0L),
             startTime = j.lng("startTime", 0L),
@@ -451,7 +469,7 @@ object CloudJson {
             cancelled = j.bool("cancelled", false),
             pomodoroCycles = j.int("pomodoroCycles", 1),
             completedPomodoroCycles = j.int("completedPomodoroCycles", 0),
-            createdAt = j.lng("createdAt", System.currentTimeMillis())
+            createdAt = j.requiredLng(SyncTables.SESSION_RECORDS, "createdAt")
         )
     }
 
@@ -489,18 +507,18 @@ object CloudJson {
         )
         return StudyActivityEntity(
             id = j.identity(SyncTables.STUDY_ACTIVITIES, "id"),
-            sessionId = j.optString("sessionId"),
+            sessionId = j.text(SyncTables.STUDY_ACTIVITIES, "sessionId", ""),
             activityType = type,
             source = source,
-            subject = j.optString("subject"),
-            topic = j.optString("topic"),
+            subject = j.text(SyncTables.STUDY_ACTIVITIES, "subject", ""),
+            topic = j.text(SyncTables.STUDY_ACTIVITIES, "topic", ""),
             channelName = j.optNullableString("channelName"),
             channelId = j.optNullableString("channelId"),
             videoTitle = j.optNullableString("videoTitle"),
             startedAt = j.lng("startedAt", 0L),
             endedAt = j.lng("endedAt", 0L),
             durationMillis = j.lng("durationMillis", 0L),
-            createdAt = j.lng("createdAt", System.currentTimeMillis())
+            createdAt = j.requiredLng(SyncTables.STUDY_ACTIVITIES, "createdAt")
         )
     }
 
@@ -517,14 +535,16 @@ object CloudJson {
         .put("createdAt", e.createdAt)
 
     fun breakRecordFromCloud(j: JSONObject): BreakRecordEntity = BreakRecordEntity(
-        id = j.optString("id"),
-        sessionId = j.optString("sessionId"),
+        id = j.identity(SyncTables.BREAK_RECORDS, "id"),
+        // The session link is part of this row's meaning: an orphan break record with a blank or
+        // coerced sessionId would attach to no session (or, via optString, to a fabricated id).
+        sessionId = j.identity(SyncTables.BREAK_RECORDS, "sessionId"),
         requestedDurationMillis = j.lng("requestedDurationMillis", 0L),
         actualDurationMillis = j.lng("actualDurationMillis", 0L),
         startTime = j.lng("startTime", 0L),
         endTime = j.lng("endTime", 0L),
         completed = j.bool("completed", true),
-        createdAt = j.lng("createdAt", System.currentTimeMillis())
+        createdAt = j.requiredLng(SyncTables.BREAK_RECORDS, "createdAt")
     )
 
     // ---- blocked_attempts ------------------------------------------------------------
@@ -571,8 +591,8 @@ object CloudJson {
             timestamp = j.lng("timestamp", 0L),
             eventType = type,
             source = source,
-            packageName = j.optString("packageName"),
-            appName = j.optString("appName"),
+            packageName = j.text(SyncTables.BLOCKED_ATTEMPTS, "packageName", ""),
+            appName = j.text(SyncTables.BLOCKED_ATTEMPTS, "appName", ""),
             domain = j.optNullableString("domain"),
             channelId = j.optNullableString("channelId"),
             channelName = j.optNullableString("channelName"),
@@ -615,11 +635,11 @@ object CloudJson {
 
     fun scratchCardFromCloud(j: JSONObject): ScratchCardEntity = ScratchCardEntity(
         sessionId = j.identity(SyncTables.SCRATCH_CARDS, "sessionId"),
-        createdAt = j.lng("createdAt", 0L),
-        rewardType = j.optString("rewardType"),
-        rewardEmoji = j.optString("rewardEmoji"),
-        rewardTitle = j.optString("rewardTitle"),
-        rewardMessage = j.optString("rewardMessage"),
+        createdAt = j.requiredLng(SyncTables.SCRATCH_CARDS, "createdAt"),
+        rewardType = j.text(SyncTables.SCRATCH_CARDS, "rewardType", ""),
+        rewardEmoji = j.text(SyncTables.SCRATCH_CARDS, "rewardEmoji", ""),
+        rewardTitle = j.text(SyncTables.SCRATCH_CARDS, "rewardTitle", ""),
+        rewardMessage = j.text(SyncTables.SCRATCH_CARDS, "rewardMessage", ""),
         studyMinutes = j.int("studyMinutes", 0),
         isRevealed = j.bool("isRevealed", false)
     )

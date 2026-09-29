@@ -15,11 +15,12 @@ Releases are the distribution channel the project already has. The updater reads
 is no credential of any kind inside the APK (§1, §15). The repository slug is a compile-time
 constant in `GitHubReleaseRepository`; nothing about the source is user-configurable.
 
-> ⚠️ **Blocker — the repository is currently private.** GitHub returns **404** for
+> ⚠️ **Private repository ⇒ silent "up to date".** GitHub returns **404** for
 > `releases/latest` on a private repo to an unauthenticated caller, and §15 forbids embedding a PAT
 > to fix that. Until the repo is public, or the endpoint is replaced by a backend the app can call,
-> every check resolves to "couldn't check for updates". This is the intended consequence of the
-> security rule, not a bug — and it is why the fetch sits behind an interface (§15).
+> every check resolves to `404 → null` → "up to date" (§1/§4): the updater never *errors*, it just
+> never sees a release. This is the intended consequence of the security rule, not a bug — and it is
+> why the fetch sits behind an interface (§15).
 
 ### 1.1 Making it work while the repository is private
 
@@ -49,15 +50,17 @@ Accepted payload shapes (`ReleaseJsonParser`), so a backend can serve the simple
 
 Asset selection only ever accepts a name ending in `.apk`: when several qualify, the one naming the
 release version wins, then the shortest name. A release with no `.apk` leaves `apkUrl` null and the
-UI offers no install button instead of linking something that is not an installer.
+UI offers no install button instead of linking something that is not an installer. Every candidate
+URL must also be **https** on a GitHub host or on the configured feed's own host
+(`UpdateUrlPolicy`); cleartext or foreign-host links are dropped at parse time and the same rule is
+re-applied when the download starts, so a tampered cached offer cannot redirect the bytes.
 
 Failure reporting is explicit (`ReleaseResponseMapper`), because "the updater is inert" and "you are
 already up to date" must never be confused:
 
 | Response | Result |
 | --- | --- |
-| `404` from a `github.com` host | "This build's release feed (GitHub) is not reachable without signing in…" |
-| `404` from a configured feed | "No published release was found at this build's update feed." |
+| `404` (any host) | `null` → "up to date" — a missing release, an unpublished feed, and a private repo all look identical by design |
 | `401`/`403` (or `X-RateLimit-Remaining: 0`, `429`) | rate-limited / refused message |
 | any other non-2xx | "Couldn't check for updates (server said N)." |
 | 2xx with unreadable JSON | "The update server sent an unreadable response." |
@@ -91,6 +94,7 @@ flight, and the popup all agree by construction.
 | `feature/update/data/GitHubReleaseRepository.kt` | The only GitHub-aware class (feed URL or GitHub API) |
 | `feature/update/data/ReleaseJsonParser.kt` | Payload → `UpdateInfo`, + `.apk` asset selection |
 | `feature/update/data/ReleaseResponseMapper.kt` | HTTP status → release / user-presentable failure |
+| `feature/update/data/UpdateUrlPolicy.kt` | https-only + trusted-host rule for every URL the updater touches |
 | `feature/update/data/UpdatePreferences.kt` | Local persistence (cooldowns, dot, cached release) |
 | `feature/update/data/UpdateChecker.kt` | Feed → `UpToDate` / `Available` / `Failed` / `Skipped` |
 | `feature/update/data/UpdateDownloadManager.kt` | Download, validate, clean up, install intent |
@@ -99,13 +103,18 @@ flight, and the popup all agree by construction.
 | `feature/update/ui/UpdateViewModel.kt` | ViewModel layer |
 | `feature/update/ui/UpdateScreen.kt` | The dedicated update screen (§8) |
 | `feature/update/ui/UpdateAvailableDialog.kt` | The once-per-version popup (§6) |
+| `feature/update/work/UpdateCheckWorker.kt` | WorkManager periodic check (7 h, §4) |
 
 ## 3. Version comparison (§2)
 
 `SemanticVersion.compare` splits on `-` into a core and a pre-release tail, compares core components
 numerically (padding missing components with zero), and ranks a bare release above its own
-pre-release. `v1.0.1` and `1.0.1` are the same version. Equal or older ⇒ no update, ever — the
-comparison is never a string compare.
+pre-release. `v1.0.1` and `1.0.1` are the same version. Core segments must **all** be numeric: a
+tag like `release-2024` or `1.rc.5` never parses, so it can never outrank the installed version.
+Pre-release tails compare per semver §11.4 — numeric identifiers by magnitude, numeric below
+alphanumeric, a longer tail above its prefix. When **both** sides state a `versionCode`, that
+decides alone; the name comparison is only the fallback. Equal, older, or unparseable ⇒ no update,
+ever — the comparison is never a string compare.
 
 `BuildConfig.VERSION_NAME` / `VERSION_CODE` are read from `app/build.gradle.kts`. Per §24 those are
 bumped **by hand, per release** — never automatically per build.
@@ -117,12 +126,15 @@ bumped **by hand, per release** — never automatically per build.
 | Cold start | `FocusShieldApp.onCreate` → `restore()` then `checkInBackground()` |
 | Return to foreground | `MainActivity.onResume` → `checkInBackground()` |
 | Connectivity regained | `connectivityMonitor.isOnline` collector → `checkInBackground()` |
+| Periodic worker | `UpdateCheckScheduler` → WorkManager, every **7 hours** (deliberately longer than the 6-hour cooldown so the wake-up is never swallowed by it; the legacy 6-hour unique work is cancelled each schedule) |
 | User taps "Check for updates" | `UpdateManager.checkManually()` |
 
 Automatic checks are gated by `UpdateChecker.isDueForCheck`: **6 hours** after a successful check,
 **15 minutes** after a failed one, and they are skipped outright while offline. Manual checks bypass
 both. `checkInBackground` additionally holds a `Mutex`, so overlapping triggers collapse into one
-request rather than queueing.
+request rather than queueing. The periodic worker feeds the same `checkInBackground()` path, so it
+is subject to every gate above; checks are also skipped while an install flow (download, install
+hand-off) is already in progress.
 
 A failed *automatic* check never raises UI: it falls back to whatever release was last cached, or to
 `Idle`. Only a manual check surfaces "Couldn't check for updates." with a **Try Again** button
@@ -155,7 +167,8 @@ These two have independent, persisted lifetimes, and both survive "Later" — wh
 `UpdateDownloadManager.download` streams to `<name>.part` and renames only on success, so an
 interrupted download can never leave a file that looks installable. It checks free space first
 (20 MB floor), reports integer progress 0→100, honours cancellation between chunks, and rejects
-non-`.apk` URLs and `text/html` / `application/json` responses. Afterwards `validateApk` requires a
+non-`.apk` URLs, http/off-host links (§1), and `text/html` / `application/json` responses. Afterwards
+`validateApk` requires a
 non-empty file, ZIP `PK` magic, and a `getPackageArchiveInfo` package name equal to
 `context.packageName`.
 
@@ -183,8 +196,9 @@ the cloud-synced `FocusPreferencesRepository` — update bookkeeping is about *t
 never uploaded.
 
 Beyond the scalars, the last known `UpdateInfo` is stored as JSON so a cold start can render the
-update screen before any network call. `UpdateManager.restore()` first rejects offers that are equal
-to or older than the running `BuildConfig.VERSION_NAME`; this clears stale red-dot, notification,
+update screen before any network call. `UpdateManager.restore()` first rejects offers that are not
+newer than the running install (versionCode when both sides state one, name otherwise); this clears
+stale red-dot, notification,
 JSON, and download state even when the app was updated externally. It rehydrates
 `UpdateState.Downloaded` only when `downloadedPath` still exists on disk, `downloadedVersion` still
 matches, and no newer `latestKnownVersion` was recorded. A mismatched partial cache is discarded and
@@ -208,7 +222,8 @@ notes for confirmation first.
 
 ## 10. Known limitations
 
-- Private repository ⇒ 404 ⇒ updater inert (§1/§15 conflict, documented above).
+- Private repository ⇒ 404 ⇒ checks always answer "up to date": nothing is ever offered and no
+  error is raised (§1/§15 conflict, documented above).
 - The unauthenticated API is rate-limited to 60 requests/hour per IP. The 6-hour cooldown keeps a
   single device far below that.
 - Release notes are parsed as a small markdown subset (headings, bullets, `**bold**`, `` `code` ``)

@@ -2,6 +2,7 @@ package com.example.cloud.auth
 
 import android.content.Context
 import com.example.cloud.SupabaseConfig
+import com.example.cloud.http.SupabaseApiException
 import com.example.cloud.http.SupabaseHttp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,15 +84,23 @@ class AuthRepository(context: Context) {
         _authState.value
     }
 
-    /** Clear the local + server session; Room and local profile data are untouched. */
+    /**
+     * Invalidate the session on the server, then clear local state.
+     *
+     * A 4xx from GoTrue means the token is already dead server-side, so local clearing
+     * still proceeds. Transport errors and 5xx are rethrown — the caller surfaces them and
+     * the local session is kept so a retry can revoke it later; the user is never shown as
+     * signed-out while the server session is still live (issue #20).
+     */
     suspend fun signOut() {
         opMutex.withLock {
             val session = store.load()
             if (session != null) {
                 try {
                     client.signOut(session.accessToken)
-                } catch (_: Exception) {
-                    // Best-effort server revoke; always clear locally.
+                } catch (e: SupabaseApiException) {
+                    if (e.status !in 400..499) throw e
+                    // 4xx: session already invalid/expired remotely — safe to clear locally.
                 }
             }
             store.clear()

@@ -51,22 +51,37 @@ android {
   }
 
   signingConfigs {
+    // Release signing is only wired in when the keystore file and both credentials exist.
+    // A fresh clone without my-upload-key.jks / STORE_PASSWORD / KEY_PASSWORD still builds;
+    // signed releases require providing them (issue #24).
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-      enableV1Signing = true
-      enableV2Signing = true
+      val keystorePassword = System.getenv("STORE_PASSWORD")
+      val signingKeyPassword = System.getenv("KEY_PASSWORD")
+      if (keystorePath.isNotEmpty() &&
+        file(keystorePath).exists() &&
+        !keystorePassword.isNullOrEmpty() &&
+        !signingKeyPassword.isNullOrEmpty()
+      ) {
+        storeFile = file(keystorePath)
+        storePassword = keystorePassword
+        keyAlias = "upload"
+        keyPassword = signingKeyPassword
+        enableV1Signing = true
+        enableV2Signing = true
+      }
     }
+    // Shared debug keystore — only used when the file is actually present in the repo root.
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-      enableV1Signing = true
-      enableV2Signing = true
+      val sharedDebugKeystore = rootProject.file("debug.keystore")
+      if (sharedDebugKeystore.exists()) {
+        storeFile = sharedDebugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+        enableV1Signing = true
+        enableV2Signing = true
+      }
     }
   }
 
@@ -76,9 +91,21 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Attach signing only when the config was fully populated (keystore + passwords present);
+      // otherwise the release build proceeds unsigned instead of failing on a fresh clone.
+      val releaseSigning = signingConfigs.getByName("release")
+      if (releaseSigning.storeFile?.exists() == true && releaseSigning.storePassword != null) {
+        signingConfig = releaseSigning
+      }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Fall back to AGP's default debug keystore when the repo's shared one is absent,
+      // so `assembleDebug` works out of the box on any fresh clone (issue #24).
+      val sharedDebug = signingConfigs.getByName("debugConfig")
+      if (sharedDebug.storeFile?.exists() == true) {
+        signingConfig = sharedDebug
+      }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -176,6 +203,7 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  implementation(libs.androidx.security.crypto)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
@@ -201,5 +229,25 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.hilt.work)
   "ksp"(libs.hilt.work.compiler)
-  implementation(libs.firebase.crashlytics)
 }
+
+// Room schema export (FocusShieldDatabase.exportSchema = true): KSP writes the versioned JSON
+// schemas here so future migrations can be validated against them instead of relying on
+// destructive fallbacks. The first build on this config generates app/schemas/ — commit it.
+ksp {
+  arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+// NOTE on screenshot goldens.
+//
+// Goldens are written into the source tree (`app/src/test/screenshots`) by the explicit
+// `filePath` in GreetingScreenshotTest, so a drift shows up in a code-review diff. Roborazzi's
+// own `verifyRoborazziDebug` task is deliberately NOT wired into `check`: it does not manage
+// images captured with an explicit `filePath` and throws a NullPointerException inside
+// `captureRoboImage` when it tries to. Use the flag form instead, which does work:
+//
+//     ./gradlew testDebugUnitTest -Proborazzi.test.record=true   # re-record
+//     ./gradlew testDebugUnitTest -Proborazzi.test.verify=true   # compare
+//
+// The test itself asserts that the screen actually rendered and that an image was really written,
+// so it can no longer pass vacuously the way it used to (issue #31).

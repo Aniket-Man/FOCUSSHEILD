@@ -296,6 +296,10 @@ class AccountViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 authRepository.signOut()
+            } catch (t: Exception) {
+                // Server revoke failed (offline / 5xx): surface it instead of silently
+                // pretending the sign-out happened (issue #20).
+                _info.value = friendly(t)
             } finally {
                 _busy.value = null
             }

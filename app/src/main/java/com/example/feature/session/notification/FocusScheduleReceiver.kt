@@ -6,6 +6,7 @@ import android.content.Intent
 import android.database.SQLException
 import android.util.Log
 import com.example.FocusShieldApp
+import com.example.data.local.entity.FocusScheduleEntity
 import com.example.feature.session.engine.FocusSessionManager
 import com.example.feature.session.service.FocusSessionForegroundService
 import kotlinx.coroutines.CancellationException
@@ -86,6 +87,56 @@ class FocusScheduleReceiver : BroadcastReceiver() {
             return
         }
 
+        // Re-arming is done in a `finally` around everything that can throw below. Previously the
+        // re-arm was the last statement on the success path, so a notification that could not be
+        // posted or a ForegroundServiceStartNotAllowedException left the schedule with no next
+        // alarm at all — a recurring schedule silently became a one-off (issue #28).
+        try {
+            runSchedule(app, context, schedule, scheduleId)
+        } finally {
+            if (schedule.repeatEnabled) {
+                try {
+                    FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(context, schedule)
+                } catch (e: RuntimeException) {
+                    Log.e(TAG, "Could not re-arm repeating schedule '${schedule.title}'", e)
+                }
+            } else {
+                // One-time schedule: it has fired, so it is switched off. Re-enabling it (or editing
+                // the date) re-arms it; the explicit disable also keeps the list UI honest.
+                try {
+                    db.focusScheduleDao().setScheduleEnabled(schedule.id, false)
+                    Log.d(TAG, "One-time schedule '${schedule.title}' fired and has been disabled")
+                } catch (e: SQLException) {
+                    Log.e(TAG, "Could not disable fired one-time schedule '${schedule.title}'", e)
+                }
+            }
+        }
+    }
+
+    /** The fallible part: notify, and auto-start when the schedule asks for it. */
+    private suspend fun runSchedule(
+        app: FocusShieldApp,
+        context: Context,
+        schedule: FocusScheduleEntity,
+        scheduleId: String
+    ) {
+        // A DST transition moves the UTC offset without any broadcast an app can hear, so every
+        // absolute alarm armed before it is now an hour out. Detect it here and re-plan everything
+        // from the new offset (issue #28).
+        if (TimeZoneOffsetGuard.refreshAndDetectShift(context)) {
+            Log.i(TAG, "UTC offset changed since these alarms were armed; re-planning all schedules")
+            try {
+                app.focusScheduleRepository.syncAllAlarms(context)
+                StudyPlanAlarmScheduler.schedulePlanReminders(
+                    context,
+                    app.studyPlanRepository.ensureTodayPlansExist()
+                )
+                TimeZoneOffsetGuard.record(context)
+            } catch (e: SQLException) {
+                Log.e(TAG, "Could not re-plan alarms after the offset change", e)
+            }
+        }
+
         SessionNotificationHelper.showScheduleStartNotification(context = context, schedule = schedule)
 
         if (schedule.isAutoStartSession) {
@@ -135,17 +186,18 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                     }
                 }
             } else {
-                Log.d(TAG, "A session is already active; not auto-starting '${schedule.title}'")
+                // Overlapping windows are now rejected when a schedule is saved
+                // (ScheduleValidation.findOverlap), so reaching this branch means a *manually*
+                // started session is running over a scheduled one. That is a real protection gap
+                // for the scheduled window, so it is reported at warning level rather than as a
+                // debug line nobody sees. The "session starting" notification above has already
+                // told the user their scheduled window is due.
+                Log.w(
+                    TAG,
+                    "A ${active.state} session is already active; scheduled window " +
+                        "'${schedule.title}' ($scheduleId) will not auto-start"
+                )
             }
-        }
-
-        if (schedule.repeatEnabled) {
-            FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(context, schedule)
-        } else {
-            // One-time schedule: it has fired, so it is switched off. Re-enabling it (or editing the
-            // date) re-arms it; the explicit disable also keeps the list UI honest.
-            db.focusScheduleDao().setScheduleEnabled(schedule.id, false)
-            Log.d(TAG, "One-time schedule '${schedule.title}' fired and has been disabled")
         }
     }
 

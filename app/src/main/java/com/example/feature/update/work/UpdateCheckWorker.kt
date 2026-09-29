@@ -57,14 +57,23 @@ class UpdateCheckWorker(
  */
 object UpdateCheckScheduler {
 
-    private const val UNIQUE_WORK_NAME = "focusshield_update_check"
+    private const val UNIQUE_WORK_NAME = "focusshield_update_check_v2"
 
     /**
-     * Matches [com.example.feature.update.data.UpdateChecker.AUTO_CHECK_INTERVAL] so the worker and
-     * the in-app cooldown agree on what "due" means. WorkManager's own batching and Doze make the
-     * real cadence looser than this, which is intended — this is a background safety net, not a poll.
+     * The original 6-hour request, cancelled on every schedule() so existing installs pick up the
+     * new cadence: [ExistingPeriodicWorkPolicy.KEEP] never rewrites an already-enqueued request's
+     * period, which would leave the old, too-short schedule in force forever after an app update.
      */
-    private const val PERIOD_HOURS = 6L
+    private const val LEGACY_UNIQUE_WORK_NAME = "focusshield_update_check"
+
+    /**
+     * Deliberately *longer* than
+     * [com.example.feature.update.data.UpdateChecker.AUTO_CHECK_INTERVAL] (6h): the cooldown now
+     * starts when a check's request goes out, and WorkManager's timing is inexact — a period equal
+     * to the cooldown lets a run land just inside the still-open window and be skipped, repeating
+     * every other run and halving the real cadence (issue #26). At 7h every run is due.
+     */
+    private const val PERIOD_HOURS = 7L
 
     /** Idempotent, so it is safe to call on every process start. */
     fun schedule(context: Context) {
@@ -77,7 +86,10 @@ object UpdateCheckScheduler {
                 )
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            val workManager = WorkManager.getInstance(context)
+            // Retire the pre-issue-#26 6-hour request (no-op once it is gone).
+            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME)
+            workManager.enqueueUniquePeriodicWork(
                 UNIQUE_WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
                 request

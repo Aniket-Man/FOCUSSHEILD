@@ -48,6 +48,7 @@ vico = "1.15.0"
 lottieCompose = "6.4.1"
 glanceAppwidget = "1.1.1"
 androidxWork = "2.7.1"
+securityCrypto = "1.1.0-alpha06"
 
 
 [libraries]
@@ -111,13 +112,12 @@ lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", versio
 androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glanceAppwidget" }
 androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glanceAppwidget" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltNavigationCompose" }
 hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hiltNavigationCompose" }
-firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
-firebase-crashlytics-gradle = { group = "com.google.firebase", name = "firebase-crashlytics-gradle" }
 
 
 [plugins]
@@ -129,4 +129,3 @@ secrets = { id = "com.google.android.libraries.mapsplatform.secrets-gradle-plugi
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
-firebase-crashlytics = { id = "com.google.gms.google-services", version.ref = "googleServices" }

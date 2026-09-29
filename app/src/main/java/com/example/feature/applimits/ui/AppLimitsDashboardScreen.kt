@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,7 +90,17 @@ fun AppLimitsDashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
+    val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsStateWithLifecycle()
+    val overlayLaunchWarning by viewModel.overlayLaunchWarning.collectAsStateWithLifecycle()
+    val strictLockMessage by viewModel.strictLockMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // The service state can change while the user is in system Settings; re-read it on entry so
+    // the enforcement banner is correct the moment the dashboard appears (the flow keeps it
+    // live afterwards).
+    LaunchedEffect(Unit) {
+        viewModel.checkAccessibilityStatus()
+    }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<AppLimitUiItem?>(null) }
@@ -175,6 +187,17 @@ fun AppLimitsDashboardScreen(
                     totalUsedMinutesToday = uiState.totalUsedMinutesToday,
                     activeLimitsCount = uiState.activeLimitsCount,
                     reachedLimitsCount = uiState.reachedLimitsCount
+                )
+            }
+
+            item {
+                AppLimitsWarnings(
+                    accessibilityEnabled = isAccessibilityEnabled,
+                    hasActiveLimits = uiState.activeLimitsCount > 0,
+                    overlayLaunchWarning = overlayLaunchWarning,
+                    strictLockMessage = strictLockMessage,
+                    onEnableAccessibility = { showAccessibilityRequired = true },
+                    onDismissStrictMessage = { viewModel.clearStrictLockMessage() }
                 )
             }
 
@@ -595,6 +618,96 @@ private fun AppLimitCard(
                         color = if (item.isLimitReached) FocusColors.BlockedRed else FocusColors.TextSecondary
                     )
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppLimitsWarnings(
+    accessibilityEnabled: Boolean,
+    hasActiveLimits: Boolean,
+    overlayLaunchWarning: String?,
+    strictLockMessage: String?,
+    onEnableAccessibility: () -> Unit,
+    onDismissStrictMessage: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Enforcement is performed entirely by the accessibility service. Checking this only when
+        // a limit was created left users with limits and no service believing they were protected
+        // while every limit silently failed to fire — so the warning is persistent, not one-shot.
+        if (!accessibilityEnabled && hasActiveLimits) {
+            WarningBanner(
+                container = FocusColors.BlockedRed.copy(alpha = 0.10f),
+                title = "App limits are not being enforced",
+                body = "The accessibility service is off, so limited apps can open freely. Turn it back on to restore protection.",
+                actionLabel = "Enable",
+                onAction = onEnableAccessibility
+            )
+        }
+
+        overlayLaunchWarning?.let { warning ->
+            WarningBanner(
+                container = FocusColors.AmberOrange.copy(alpha = 0.12f),
+                title = "A block screen could not be displayed",
+                body = warning
+            )
+        }
+
+        strictLockMessage?.let { message ->
+            WarningBanner(
+                container = FocusColors.AmberOrange.copy(alpha = 0.12f),
+                title = "Action blocked by Strict Mode",
+                body = message,
+                actionLabel = "Dismiss",
+                onAction = onDismissStrictMessage
+            )
+        }
+    }
+}
+
+@Composable
+private fun WarningBanner(
+    container: androidx.compose.ui.graphics.Color,
+    title: String,
+    body: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = FocusShapes.card,
+        colors = CardDefaults.cardColors(containerColor = container),
+        border = BorderStroke(1.dp, FocusColors.CardBorderSubtle)
+    ) {
+        Column(modifier = Modifier.padding(FocusSpacing.md)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = FocusColors.TextPrimary
+                )
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = FocusColors.TextSecondary,
+                    lineHeight = 18.sp
+                )
+            )
+            if (actionLabel != null && onAction != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onAction,
+                    shape = FocusShapes.medium,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FocusColors.Primary,
+                        contentColor = FocusColors.TextOnDark
+                    )
+                ) {
+                    Text(actionLabel, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

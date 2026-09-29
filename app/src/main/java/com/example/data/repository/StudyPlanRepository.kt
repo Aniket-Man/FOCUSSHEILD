@@ -20,8 +20,6 @@ class StudyPlanRepository(
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    // TAG is in the public companion object below (single companion object per class).
-
     val allPlans: Flow<List<StudyPlanEntity>> = studyPlanDao.getAllPlansFlow()
 
     fun getTodayPlansFlow(): Flow<List<StudyPlanEntity>> {

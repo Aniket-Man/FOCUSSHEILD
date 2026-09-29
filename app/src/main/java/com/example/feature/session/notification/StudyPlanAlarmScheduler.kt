@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import com.example.data.local.entity.StudyPlanEntity
 import java.util.Calendar
+import java.util.UUID
 
 /**
  * Robust Scheduler for Today's Study Plan Reminders and Midnight Daily Session Reset.
@@ -29,19 +30,87 @@ object StudyPlanAlarmScheduler {
     const val EXTRA_END_TIME = "extra_end_time"
     const val EXTRA_DURATION_MINUTES = "extra_duration_minutes"
     const val EXTRA_NOTES = "extra_notes"
+
+    /**
+     * Per-install secret carried by the midnight-reset PendingIntent.
+     *
+     * The receiver is exported (it has to be, for BOOT_COMPLETED and friends), so any app on the
+     * device can target it with an explicit intent carrying [ACTION_DAILY_RESET] and make it run a
+     * full reset whenever it likes. There is no portable way to identify a broadcast's sender —
+     * `BroadcastReceiver.getSentFromPackage()` exists only on API 34+, and even there it returns
+     * null unless the sender opted into sharing its identity, so it is useless here (minSdk is 24).
+     *
+     * A token that only this app can read is portable and actually verifies what matters: that the
+     * broadcast came from our own PendingIntent (issue #15).
+     */
+    const val EXTRA_RESET_TOKEN = "extra_reset_token"
+
+    private const val TOKEN_PREFS = "focus_shield_alarm_tokens"
+    private const val KEY_DAILY_RESET_TOKEN = "daily_reset_token"
+
+    /**
+     * The stable per-install daily-reset token, generated on first use.
+     *
+     * Stored in app-private [android.content.SharedPreferences], so it is unreadable by other apps
+     * on a non-rooted device. Stability matters: a token that changed per re-arm would invalidate
+     * the alarm already sitting in AlarmManager.
+     */
+    fun dailyResetToken(context: Context): String {
+        val prefs = context.applicationContext
+            .getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        prefs.getString(KEY_DAILY_RESET_TOKEN, null)?.let { return it }
+        val token = UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_DAILY_RESET_TOKEN, token).apply()
+        return token
+    }
     const val EXTRA_AUTO_START = "extra_auto_start"
     const val EXTRA_START_PLAN_SESSION = "extra_start_plan_session"
+
+    /** Secret token stamped into plan-session intents and verified on receipt (issue #15). */
+    const val EXTRA_SESSION_TRUST_TOKEN = "extra_session_trust_token"
+
+    private const val TRUST_PREFS = "focus_shield_trust_prefs"
+    private const val KEY_SESSION_TOKEN = "session_launch_token"
+
+    /**
+     * App-private random token proving a plan-session intent came from FocusShield's own
+     * notification. The MainActivity is exported, so without this any app could forge
+     * [EXTRA_START_PLAN_SESSION] and auto-start a session. Persisted so taps on notifications
+     * posted before a process death still match.
+     */
+    fun sessionLaunchToken(context: Context): String {
+        val prefs = context.getSharedPreferences(TRUST_PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_SESSION_TOKEN, null)
+            ?: java.util.UUID.randomUUID().toString().also { token ->
+                prefs.edit().putString(KEY_SESSION_TOKEN, token).apply()
+            }
+    }
 
     private const val REQUEST_CODE_DAILY_RESET = 99999
 
     /**
      * Schedules alarms for all given study plan items that occur in the future today.
+     *
+     * The midnight re-arm is armed **first**, and each plan is armed defensively. It used to be
+     * armed last, after the loop: a single malformed plan that threw took the daily reset with it,
+     * and with it every future reminder until the user happened to open the app again (issue #28).
+     * The re-arm is the thing that brings the whole schedule back tomorrow, so it can never be
+     * downstream of fallible per-plan work.
      */
     fun schedulePlanReminders(context: Context, plans: List<StudyPlanEntity>) {
-        for (plan in plans) {
-            scheduleSinglePlanReminder(context, plan)
-        }
         scheduleMidnightDailyReset(context)
+        for (plan in plans) {
+            try {
+                scheduleSinglePlanReminder(context, plan)
+            } catch (e: RuntimeException) {
+                Log.e(
+                    TAG,
+                    "Could not schedule reminder for plan '${plan.subjectName}' (${plan.id}); " +
+                        "continuing with the remaining plans",
+                    e
+                )
+            }
+        }
     }
 
     /**
@@ -138,9 +207,16 @@ object StudyPlanAlarmScheduler {
     /**
      * Schedules an alarm to fire right after midnight (00:00:05) every day
      * to execute daily session resets, prepare today's fresh plan, and reschedule notifications.
+     *
+     * @return true when the alarm is armed. Callers use this to re-try in a `finally` rather than
+     *   assuming success — losing this one alarm silently disables every reminder the app has.
      */
-    fun scheduleMidnightDailyReset(context: Context) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    fun scheduleMidnightDailyReset(context: Context): Boolean {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        if (alarmManager == null) {
+            Log.e(TAG, "AlarmManager unavailable; midnight daily reset not armed")
+            return false
+        }
 
         val calendar = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, 1)
@@ -154,6 +230,8 @@ object StudyPlanAlarmScheduler {
 
         val intent = Intent(context, BootAndDailyResetReceiver::class.java).apply {
             action = ACTION_DAILY_RESET
+            // Proves to the receiver that this broadcast is ours; see [EXTRA_RESET_TOKEN].
+            putExtra(EXTRA_RESET_TOKEN, dailyResetToken(context))
         }
 
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -164,19 +242,22 @@ object StudyPlanAlarmScheduler {
 
         val pendingIntent = PendingIntent.getBroadcast(context, REQUEST_CODE_DAILY_RESET, intent, flags)
 
-        try {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
             } else {
                 alarmManager.set(AlarmManager.RTC_WAKEUP, triggerMillis, pendingIntent)
             }
             Log.d(TAG, "Scheduled Midnight Daily Reset at $triggerMillis")
+            true
         } catch (e: SecurityException) {
             // No alarm permission on this build/OEM: the reset also runs on the next launch
             // (FocusShieldApp seeds today's plans), so this is reported rather than fatal.
             Log.e(TAG, "Midnight daily reset could not be armed (permission): ${e.message}")
+            false
         } catch (e: IllegalStateException) {
             Log.e(TAG, "Midnight daily reset could not be armed: ${e.message}")
+            false
         }
     }
 

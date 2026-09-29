@@ -46,7 +46,9 @@ class UpdateManager(
     private val preferences: UpdatePreferences,
     private val downloadManager: UpdateDownloadManager,
     private val scope: CoroutineScope,
-    private val installedVersionName: String
+    private val installedVersionName: String,
+    /** The running build's `versionCode`; must agree with what the checker compares. */
+    private val installedVersionCode: Int? = null
 ) {
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -71,9 +73,8 @@ class UpdateManager(
     private var installCandidate: UpdateState.Downloaded? = null
 
     /** Restores any persisted update state. Safe to call once, from `Application.onCreate`. */
-    fun restore() {
-        scope.launch {
-            val needsFreshCheck = stateMutex.withLock {
+    fun restore(): Job = scope.launch {
+        val needsFreshCheck = stateMutex.withLock {
                 val prefs = preferences.current()
                 val rawInfo = prefs.latestInfoJson
                 val restored = rawInfo?.let(::decodeInfo)
@@ -135,7 +136,6 @@ class UpdateManager(
             // the duplicate launch harmless.
             if (needsFreshCheck) runBackgroundCheck()
         }
-    }
 
     /**
      * Automatic check — app launch, return to foreground, or connectivity regained.
@@ -157,20 +157,48 @@ class UpdateManager(
      */
     suspend fun runBackgroundCheck() {
         checkMutex.withLock {
+            // An automatic check (launch, resume, reconnect, worker) must never race the download
+            // flow: an Available/UpToDate result would replace Downloading/Downloaded/Installing
+            // and strand the validated APK — refreshFromCache() does not bring Downloaded back,
+            // only restore() does — and a later download() would delete the orphaned file. There
+            // is nothing to gain from checking while an install is in progress anyway.
+            if (isUpdateFlowBusy()) return@withLock
             val result = checker.check(manual = false)
             stateMutex.withLock { applyResult(result, manual = false) }
         }
     }
 
-    /** User-initiated check from Profile → New Updates. Bypasses the cooldown and may report failure. */
-    fun checkManually() {
-        scope.launch {
-            checkMutex.withLock {
-                stateMutex.withLock { _state.value = UpdateState.Checking }
-                val result = checker.check(manual = true)
-                stateMutex.withLock { applyResult(result, manual = true) }
-            }
+    /**
+     * User-initiated check from Profile → New Updates. Bypasses the cooldown and may report failure.
+     *
+     * Deliberately short-circuits while a download is running, a validated APK is waiting to be
+     * installed, or Android's installer is in front (see [isUpdateFlowBusy]): flipping through the
+     * Checking state would discard that work, and returning from the installer must land back on
+     * Downloaded rather than on a fresh network result that can replace it with UpdateAvailable.
+     */
+    fun checkManually(): Job = scope.launch {
+        checkMutex.withLock {
+            // The installer (or its permission screen) was dismissed: hand the retained candidate
+            // back first, then re-evaluate whether a check is even appropriate.
+            if (_state.value is UpdateState.Installing) cancelInstall()
+            if (isUpdateFlowBusy()) return@withLock
+            stateMutex.withLock { _state.value = UpdateState.Checking }
+            val result = checker.check(manual = true)
+            stateMutex.withLock { applyResult(result, manual = true) }
         }
+    }
+
+    /**
+     * True while an APK is downloading, downloaded-but-not-installed, or being handed to the system
+     * installer — states a check must not overwrite. [UpdateState.Downloaded] is only ever restored
+     * by [restore] or [cancelInstall], so losing it to a check would hide a finished download until
+     * the next process start (and the validated file would then be deleted by the next download()).
+     */
+    private fun isUpdateFlowBusy(): Boolean {
+        val state = _state.value
+        return state is UpdateState.Downloading ||
+            state is UpdateState.Downloaded ||
+            state is UpdateState.Installing
     }
 
     private suspend fun applyResult(result: UpdateCheckResult, manual: Boolean) {
@@ -338,9 +366,8 @@ class UpdateManager(
     }
 
     /** Called by the ViewModel when the screen opens, so a cached offer is shown without a re-check. */
-    fun refreshFromCache() {
-        scope.launch {
-            val needsFreshCheck = stateMutex.withLock {
+    fun refreshFromCache(): Job = scope.launch {
+        val needsFreshCheck = stateMutex.withLock {
                 if (
                     _state.value is UpdateState.Downloaded ||
                     _state.value is UpdateState.Downloading ||
@@ -392,7 +419,6 @@ class UpdateManager(
 
             if (needsFreshCheck) runBackgroundCheck()
         }
-    }
 
     private suspend fun refreshDot() {
         val info = current
@@ -427,7 +453,12 @@ class UpdateManager(
     }
 
     private fun isNewerThanInstalled(info: UpdateInfo): Boolean =
-        SemanticVersion.isNewer(info.versionName, installedVersionName)
+        SemanticVersion.isNewerRelease(
+            candidate = info.versionName,
+            candidateVersionCode = info.versionCode,
+            installed = installedVersionName,
+            installedVersionCode = installedVersionCode
+        )
 
     private suspend fun persistInfo(info: UpdateInfo?) {
         preferences.setLatestInfoJson(info?.let(::encodeInfo))

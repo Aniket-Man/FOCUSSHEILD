@@ -93,9 +93,12 @@ fun UpdateScreen(
     val installLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // The user either completed the install or backed out; re-checking on return is what
-        // eventually clears the red dot and moves the screen off "update available" (prompt.txt §7).
-        viewModel.checkForUpdates()
+        // Android is back from the installer. A *completed* install kills this process (the red dot
+        // is cleared by restore() on the next launch, prompt.txt §7), so this callback only runs
+        // when the user backed out — restore the retained Downloaded state instead of firing a
+        // check, which would flip through Checking and could discard the validated APK (it is only
+        // ever restored by restore()/cancelInstall(), never by refreshFromCache()).
+        viewModel.cancelInstall()
     }
     val unknownSourcesLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()

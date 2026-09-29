@@ -304,8 +304,7 @@ class CloudSchemaContractTest {
 
     @Test
     fun `the schema declares no synced table the app does not know about`() {
-        // 13 Room-backed + profiles + user_preferences. app_limits is not created by the schema
-        // at all (asserted below), so it must not appear here either.
+        // 13 Room-backed + profiles + user_preferences (app_limits was retired per CLOUD_SYNC_AUDIT.md).
         val expectedKnown = SYNCED_ROOM_TABLES.map { it.cloudTable }.toSet() +
             setOf(SyncTables.PROFILES, SyncTables.USER_PREFERENCES)
         val unexpected = sqlTables.keys - expectedKnown
@@ -625,14 +624,54 @@ class CloudSchemaContractTest {
 
     @Test
     fun `absent optional columns still use their documented defaults`() {
-        // Partial payloads are legitimate (nullable columns), so absence must not reject the row.
+        // Optional cosmetics are legitimate (nullable columns), so absence must not reject the row.
+        // The identity and required timestamps are a different story (see the tests below).
         val row = JSONObject()
             .put("id", "sub-1")
             .put("name", "Physics")
+            .put("createdAt", 1_700_000_000_000L)
         val subject = CloudJson.subjectFromCloud(row)
         assertEquals("Physics", subject.name)
         assertEquals("#7C3AED", subject.colorHex)
         assertFalse(subject.isArchived)
+    }
+
+    @Test
+    fun `a missing createdAt rejects the row instead of fabricating restore time`() {
+        val row = JSONObject()
+            .put("id", "sub-1")
+            .put("name", "Physics")
+        val failure = runCatching { CloudJson.subjectFromCloud(row) }.exceptionOrNull()
+        assertTrue("expected CloudDataException, got $failure", failure is CloudDataException)
+        assertEquals("createdAt", (failure as CloudDataException).field)
+    }
+
+    @Test
+    fun `a missing schedule time rejects the row instead of defaulting to 09 00`() {
+        val row = CloudJson.focusScheduleToJson(FocusScheduleEntity(id = "sch-x", title = "X"))
+        row.remove("startTime")
+        val failure = runCatching { CloudJson.scheduleFromCloud(row) }.exceptionOrNull()
+        assertTrue("expected CloudDataException, got $failure", failure is CloudDataException)
+        assertEquals("startTime", (failure as CloudDataException).field)
+    }
+
+    @Test
+    fun `a break record without a session link rejects the row instead of an empty id`() {
+        val row = CloudJson.breakRecordToJson(
+            BreakRecordEntity(
+                id = "brk-1",
+                sessionId = "sess-1",
+                requestedDurationMillis = 1L,
+                actualDurationMillis = 1L,
+                startTime = 1L,
+                endTime = 2L,
+                createdAt = 1L
+            )
+        )
+        row.remove("sessionId")
+        val failure = runCatching { CloudJson.breakRecordFromCloud(row) }.exceptionOrNull()
+        assertTrue("expected CloudDataException, got $failure", failure is CloudDataException)
+        assertEquals("sessionId", (failure as CloudDataException).field)
     }
 
     // ---- 6. outbox diagnostics ----------------------------------------------------------

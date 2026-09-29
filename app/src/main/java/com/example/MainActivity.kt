@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     val openUpdatesRequest = _openUpdatesRequest.asStateFlow()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_MyApplication)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIncomingIntent(intent)
@@ -113,6 +114,13 @@ class MainActivity : ComponentActivity() {
                 intent.getBooleanExtra(StudyPlanAlarmScheduler.EXTRA_START_PLAN_SESSION, false)
 
         if (isPlanAction) {
+            // Only honour payloads stamped with our own notification token (issue #15): the
+            // activity is exported, so any app could otherwise forge these extras and make
+            // FocusShield auto-start a plan session.
+            val token = intent.getStringExtra(StudyPlanAlarmScheduler.EXTRA_SESSION_TRUST_TOKEN)
+            if (token == null || token != StudyPlanAlarmScheduler.sessionLaunchToken(this)) {
+                return
+            }
             val subject = intent.getStringExtra(StudyPlanAlarmScheduler.EXTRA_SUBJECT) ?: return
             val topic = intent.getStringExtra(StudyPlanAlarmScheduler.EXTRA_TOPIC) ?: "Focus Block"
             val duration = intent.getIntExtra(StudyPlanAlarmScheduler.EXTRA_DURATION_MINUTES, 60)

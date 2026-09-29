@@ -34,12 +34,20 @@ class UpdateDownloadException(message: String) : Exception(message)
  *    rejected rather than handed to the installer (prompt.txt §20). No checksum is asserted — the
  *    GitHub API publishes none, and inventing one would be worse than omitting it (prompt.txt §20
  *    "Do NOT invent a checksum").
+ *  - **Fetched from a trusted host over https.** The URL is re-checked against
+ *    [UpdateUrlPolicy] at fetch time, even though the payload parser already filtered it, so a
+ *    tampered cached offer cannot point the download elsewhere — and never over cleartext.
  *  - **A content URI, never `file://`** (prompt.txt §9). The APK lives in the app's cache and is
  *    shared through the existing `FileProvider`.
  */
 class UpdateDownloadManager(
     private val context: Context,
-    private val client: OkHttpClient = defaultClient()
+    private val client: OkHttpClient = defaultClient(),
+    /**
+     * Hosts beyond GitHub's own that may serve the APK for this build — the configured feed's host.
+     * See [com.example.feature.update.data.GitHubReleaseRepository.apkHostAllowList].
+     */
+    private val allowedHosts: Set<String> = emptySet()
 ) {
 
     /**
@@ -61,6 +69,12 @@ class UpdateDownloadManager(
             )
         if (!url.endsWith(".apk", ignoreCase = true)) {
             throw UpdateDownloadException("The update link does not point to an APK file.")
+        }
+        // Second, independent URL check: https only, on a host this build trusts (see the class
+        // doc). The parser filtered this URL when the offer was created; repeating the check here
+        // means a tampered/persisted offer can never redirect the bytes.
+        if (!UpdateUrlPolicy.isAllowedApkUrl(url, allowedHosts)) {
+            throw UpdateDownloadException("The update link is not from a trusted update source.")
         }
 
         val dir = updatesDir()

@@ -25,6 +25,7 @@ sealed class Screen(val route: String) {
     object StudyChannels : Screen("study_channels")
     object WebsiteBlocker : Screen("website_blocker")
     object Update : Screen("update")
+    object Splash : Screen("splash")
     object Onboarding : Screen("onboarding")
     object Rewards : Screen("rewards")
 }
