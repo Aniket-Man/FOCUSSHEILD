@@ -37,8 +37,9 @@ class AppLimitSessionStore(context: Context) {
     /**
      * A restored session plus the moment it was persisted.
      *
-     * The date is what keeps yesterday's snapshot from being re-armed today: the daily allowance
-     * resets at midnight, so a session started on another day is stale and must be dropped.
+     * The date tells the restorer whether the snapshot crossed midnight: the daily allowance
+     * resets at midnight, so a session recorded on another day is rolled forward onto today with
+     * its baseline reset rather than re-armed with yesterday's (see restoreSessionFromDisk).
      * [savedAtElapsed]/[savedAtWall] anchor the "how much time passed while the process was dead"
      * calculation: elapsedRealtime while it still refers to the same boot, otherwise the wall
      * timestamp, otherwise (legacy snapshot with neither) the session's own `startedAt`.
