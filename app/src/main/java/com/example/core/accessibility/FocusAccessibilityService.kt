@@ -612,9 +612,11 @@ class FocusAccessibilityService : AccessibilityService() {
                                         clickPauseButtonInNodeTree(currentRoot)
                                         try { currentRoot?.recycle() } catch (_: Exception) {}
                                     }
-                                    // Floor, matching AppLimitManager and the dashboard's minutes.
+                                    // Floor the remaining millis themselves (issue #49, C2):
+                                    // subtracting floored used minutes from the limit rounded the
+                                    // remaining *up* — "1m remaining" while seconds were left.
                                     val usedMins = (appLimitDecision.usedDailyMillis / 60000L).toInt().coerceAtLeast(0)
-                                    val remMins = (appLimitDecision.dailyLimitMinutes - usedMins).coerceAtLeast(0)
+                                    val remMins = (appLimitDecision.remainingDailyMillis / 60000L).toInt().coerceAtLeast(0)
                                     appLimitManager.launchOverlay(
                                         packageName = appLimitDecision.packageName,
                                         appName = appLimitDecision.appName,

@@ -88,9 +88,13 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
             val usedMillis = systemUsedMillis
             val usedMin = (usedMillis / 60000L).toInt()
             val totalLimitMin = limit.dailyLimitMinutes
-            val remainingMin = (totalLimitMin - usedMin).coerceAtLeast(0)
+            // Floor the remaining millis, not the limit minus floored used minutes — that
+            // rounded the remaining *up*, so the row promised "1m remaining" while seconds were
+            // left and the engine was about to block (issue #49, C2). The reached flag is the
+            // same millisecond comparison the engine makes.
+            val remainingMin = ((totalLimitMin * 60000L - usedMillis).coerceAtLeast(0L) / 60000L).toInt()
             val isBypassed = usage?.isBypassedForToday == true
-            val isReached = !isBypassed && limit.isEnabled && remainingMin == 0
+            val isReached = !isBypassed && limit.isEnabled && usedMillis >= totalLimitMin * 60000L
             val pct = if (totalLimitMin > 0) (usedMin.toFloat() / totalLimitMin.toFloat()).coerceIn(0f, 1f) else 0f
 
             if (limit.isEnabled) {

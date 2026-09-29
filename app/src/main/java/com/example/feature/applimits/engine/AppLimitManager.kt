@@ -369,14 +369,17 @@ class AppLimitManager private constructor(
             }
         }
 
-        // Floor, matching the dashboard's minutes exactly: round() blocked at 59.5 s while the
-        // dashboard still said "1m remaining" (issue #27, item 6).
-        val usedMinutes = (accumulatedUsed / 60000L).toInt().coerceAtLeast(0)
-        val remainingDailyMinutes = (dailyLimitMinutes - usedMinutes).coerceAtLeast(0)
+        // One millisecond-precision comparison decides exhaustion (issue #49, C2). The three
+        // terms OR-ed here before (minute floor of the allowance, ms remainder, direct ms
+        // compare) happened to fire at the same instant — but the minute arithmetic pattern
+        // they embodied was copied into every display site, where limit-minus-floored-used
+        // rounded the remaining *up* and let the UI promise "1m remaining" while seconds were
+        // left and the next evaluation blocked. Display sites now floor the remaining millis
+        // directly; this verdict is ms-only.
         val remainingDailyMillis = (dailyLimitMillis - accumulatedUsed).coerceAtLeast(0L)
 
         val isStrict = limit.isStrictOverride
-        val isExhausted = remainingDailyMinutes <= 0 || remainingDailyMillis <= 0L || accumulatedUsed >= dailyLimitMillis
+        val isExhausted = accumulatedUsed >= dailyLimitMillis
 
         return if (!isExhausted) {
             AppLimitDecision.REQUIRE_USAGE_SELECTION(
@@ -820,10 +823,14 @@ class AppLimitManager private constructor(
         val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
 
-        // Floor, same as checkAppLimitDecision and the dashboard (issue #27, item 6).
+        // Display minutes floor the *remaining millis* (issue #27, item 6; issue #49, C2): the
+        // limit minus floored used minutes rounded the remaining up and could promise a minute
+        // the user did not have. The verdict is a pure millisecond comparison, so the mode raised
+        // (SESSION_COMPLETE vs DAILY_LIMIT_REACHED) is exactly the comparison
+        // checkAppLimitDecision uses to block.
         val totalDailyUsedMinutes = (totalDailyUsedMillis / 60000L).toInt().coerceAtLeast(0)
-        val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
-        val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
+        val remainingDailyMinutes = ((dailyLimitMillis - totalDailyUsedMillis).coerceAtLeast(0L) / 60000L).toInt()
+        val isDailyExhausted = totalDailyUsedMillis >= dailyLimitMillis
 
         // 3. Trigger overlay popup with forceLaunch
         launchOverlay(

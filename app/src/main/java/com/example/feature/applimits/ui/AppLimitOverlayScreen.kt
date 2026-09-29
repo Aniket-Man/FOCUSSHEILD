@@ -122,13 +122,19 @@ fun AppLimitOverlayScreen(
 
     val totalDailyLimit = dailyLimitMinutes.coerceAtLeast(1)
     val actualUsedMinutes = usedMinutes.coerceAtLeast(0)
-    val actualRemainingDailyMinutes = if (mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED || remainingDailyMinutes <= 0) {
+    // Exhaustion is the engine's verdict (the mode), not a floored minute count. With
+    // millisecond-precision decisions a selection prompt can legitimately arrive with "0m" of
+    // daily allowance left (59:59.5 of 60:00, issue #49 C2) — reading that as exhausted hid
+    // the duration options behind the day's-up screen while the engine would still have
+    // accepted a session. The value the engine passes is floored from remaining millis, so the
+    // label never promises a minute that is already gone: "0m left", not "1m left".
+    val actualRemainingDailyMinutes = if (mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED) {
         0
     } else {
-        (totalDailyLimit - actualUsedMinutes).coerceIn(0, totalDailyLimit)
+        remainingDailyMinutes.coerceIn(0, totalDailyLimit)
     }
 
-    val isExhausted = actualRemainingDailyMinutes <= 0 || mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED
+    val isExhausted = mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED
 
     Box(
         modifier = modifier
