@@ -69,34 +69,8 @@ object UpdateNotificationHelper {
      * repeat would replace rather than stack anyway.
      */
     fun notifyUpdateAvailable(context: Context, versionName: String) {
-        initialize(context)
-        if (!hasNotificationPermission(context)) return
-
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_UPDATES, true)
-        }
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val contentIntent = PendingIntent.getActivity(context, NOTIF_ID_UPDATE, intent, flags)
-
-        val title = "FocusShield update available"
-        val message = "FocusShield v$versionName is now available."
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_UPDATES)
-            .setSmallIcon(R.drawable.ic_focus_notification)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setAutoCancel(true)
-            .setContentIntent(contentIntent)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(context).notify(NOTIF_ID_UPDATE, notification)
-        } catch (_: SecurityException) {
-        }
+        // Disabled: GitHub update push notifications are removed.
+        clear(context)
     }
 
     /** Removes the announcement once the update has been installed or marked read (prompt.txt §7). */

@@ -23,8 +23,8 @@ class UpdateViewModel @Inject constructor(
 
     val state: StateFlow<UpdateState> = manager.state
 
-    /** Drives the small red dot on Profile → New Updates. */
-    val showDot: StateFlow<Boolean> = manager.showDot
+    /** Drives the small red dot on Profile → New Updates (permanently disabled). */
+    val showDot: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
 
     init {
         // Show a cached offer (or a completed download) immediately, without re-hitting the network.

@@ -89,12 +89,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.example.core.accessibility.AccessibilityHelper.updateState(this)
         com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
-        // Automatic re-check on return to foreground. Cooldown-gated inside the checker, so this is
-        // cheap and never a per-resume network request (prompt.txt §4).
-        try {
-            (application as FocusShieldApp).updateManager.checkInBackground()
-        } catch (_: Exception) {
-        }
+
     }
 
     override fun onNewIntent(intent: Intent) {

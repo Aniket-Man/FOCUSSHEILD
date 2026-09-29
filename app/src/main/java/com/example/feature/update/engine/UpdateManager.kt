@@ -139,29 +139,16 @@ class UpdateManager(
 
     /**
      * Automatic check — app launch, return to foreground, or connectivity regained.
-     *
-     * Never reports failure and never raises the popup on its own beyond the one allowed per version
-     * (prompt.txt §4/§16).
      */
     fun checkInBackground() {
         scope.launch { runBackgroundCheck() }
     }
 
     /**
-     * The same automatic check, run inline to completion.
-     *
-     * [checkInBackground] is fire-and-forget, which suits the launch/resume/connectivity triggers but
-     * not the periodic worker: WorkManager has to know when the work actually finished, and a worker
-     * that returns while its request is still in flight can have its process torn down mid-call.
-     * Both paths funnel through here so the cooldown rule still lives in exactly one place.
+     * The background check implementation.
      */
     suspend fun runBackgroundCheck() {
         checkMutex.withLock {
-            // An automatic check (launch, resume, reconnect, worker) must never race the download
-            // flow: an Available/UpToDate result would replace Downloading/Downloaded/Installing
-            // and strand the validated APK — refreshFromCache() does not bring Downloaded back,
-            // only restore() does — and a later download() would delete the orphaned file. There
-            // is nothing to gain from checking while an install is in progress anyway.
             if (isUpdateFlowBusy()) return@withLock
             val result = checker.check(manual = false)
             stateMutex.withLock { applyResult(result, manual = false) }

@@ -218,36 +218,12 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.feature.session.notification.SessionNotificationHelper.initialize(this)
         com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this)
 
-        // Update checker (prompt.txt §4). Restore persisted state so a download that finished before
-        // the process died is still offered, then check once on launch. Both are cooldown-gated and
-        // failure-silent, so this never spams the user or the network.
-        com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
-        // The triggers below all need the app to be in use, so arm the periodic worker too — it is
-        // what notices a release published while FocusShield stays closed. Idempotent (unique work,
-        // KEEP), network-constrained, and gated by the same cooldown as every other check.
+        // Update checker background tasks and push notifications are disabled
         try {
-            com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
+            com.example.feature.update.work.UpdateCheckScheduler.cancel(this)
         } catch (_: Throwable) {
         }
-        applicationScope.launch {
-            try {
-                updateManager.restore()
-                updateManager.checkInBackground()
-            } catch (_: Exception) {
-            }
-        }
-        // Re-check when connectivity comes back, which is the moment a previously-offline check
-        // becomes meaningful. Only the offline → online edge triggers a check.
-        applicationScope.launch {
-            try {
-                var wasOnline = connectivityMonitor.isOnline.value
-                connectivityMonitor.isOnline.collect { online ->
-                    if (online && !wasOnline) updateManager.checkInBackground()
-                    wasOnline = online
-                }
-            } catch (_: Exception) {
-            }
-        }
+        com.example.feature.update.notification.UpdateNotificationHelper.clear(this)
 
         // Restore any active session from disk that was running prior to process restart
         try {

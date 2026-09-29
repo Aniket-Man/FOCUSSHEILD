@@ -71,17 +71,12 @@ android {
         enableV2Signing = true
       }
     }
-    // Shared debug keystore — only used when the file is actually present in the repo root.
+    // Debug signing configuration
     create("debugConfig") {
-      val sharedDebugKeystore = rootProject.file("debug.keystore")
-      if (sharedDebugKeystore.exists()) {
-        storeFile = sharedDebugKeystore
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-        enableV1Signing = true
-        enableV2Signing = true
-      }
+      storeFile = file("${rootDir}/debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
     }
   }
 
@@ -99,12 +94,7 @@ android {
       }
     }
     debug {
-      // Fall back to AGP's default debug keystore when the repo's shared one is absent,
-      // so `assembleDebug` works out of the box on any fresh clone (issue #24).
-      val sharedDebug = signingConfigs.getByName("debugConfig")
-      if (sharedDebug.storeFile?.exists() == true) {
-        signingConfig = sharedDebug
-      }
+      signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
   compileOptions {

@@ -1,12 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-      - 'arena/**'
-      - 'fix/**'
-      - 'feat/**'
   pull_request:
   workflow_dispatch:
 

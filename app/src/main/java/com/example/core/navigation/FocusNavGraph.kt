@@ -82,24 +82,7 @@ fun FocusNavGraph(
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
-    // The "update available" popup lives at the host level so it can surface wherever the user is,
-    // and — because showPrompt is a persisted, version-keyed flag — it can never reappear on every
-    // navigation (prompt.txt §6).
-    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
-    val promptedUpdate = (updateState as? UpdateState.UpdateAvailable)
-        ?.takeIf { it.showPrompt }
-        ?.info
-    if (promptedUpdate != null) {
-        UpdateAvailableDialog(
-            info = promptedUpdate,
-            onDownload = {
-                updateViewModel.onLater()
-                navController.navigate(Screen.Update.route) { launchSingleTop = true }
-                updateViewModel.download()
-            },
-            onLater = { updateViewModel.onLater() }
-        )
-    }
+    // UpdateAvailableDialog popup disabled - no update pushing to user
 
     // Root-redirect gate (issue #18): every launch intent below must wait until the
     // splash→Home/Onboarding redirect has run. Two independent LaunchedEffects racing the
@@ -210,7 +193,7 @@ fun FocusNavGraph(
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
-                showUpdateDot = showUpdateDot,
+                showUpdateDot = false,
                 onStartPlanSession = { planItem ->
                     sessionViewModel.configureForStudyPlan(
                         subjectName = planItem.subject,

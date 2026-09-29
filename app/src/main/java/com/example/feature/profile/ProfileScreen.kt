@@ -637,16 +637,12 @@ fun ProfileScreen(
 
                             ProfileNavigationRow(
                                 title = "New Updates",
-                                subtitle = if (showUpdateDot) {
-                                    "A new FocusShield version is available"
-                                } else {
-                                    "Check for the latest version of FocusShield"
-                                },
+                                subtitle = "Check for the latest version of FocusShield",
                                 icon = Icons.Rounded.SystemUpdate,
                                 iconTint = FocusColors.Primary,
                                 onClick = onNavigateToUpdates,
                                 testTag = "profile_updates_row",
-                                showBadge = showUpdateDot
+                                showBadge = false
                             )
 
                             ProfileNavigationRow(

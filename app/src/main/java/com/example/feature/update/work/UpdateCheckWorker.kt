@@ -77,23 +77,15 @@ object UpdateCheckScheduler {
 
     /** Idempotent, so it is safe to call on every process start. */
     fun schedule(context: Context) {
-        try {
-            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(PERIOD_HOURS, TimeUnit.HOURS)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
-                .build()
+        cancel(context)
+    }
 
+    /** Cancels any background update check worker so updates are not checked or pushed periodically. */
+    fun cancel(context: Context) {
+        try {
             val workManager = WorkManager.getInstance(context)
-            // Retire the pre-issue-#26 6-hour request (no-op once it is gone).
             workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME)
-            workManager.enqueueUniquePeriodicWork(
-                UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
-                request
-            )
+            workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
         } catch (e: Throwable) {
             android.util.Log.w("UpdateCheckScheduler", "WorkManager unavailable or not initialized: ${e.message}")
         }
