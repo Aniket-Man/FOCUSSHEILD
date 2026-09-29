@@ -1,6 +1,7 @@
 package com.example.feature.applimits.engine
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 
 /**
@@ -19,8 +20,13 @@ import android.util.Log
  * snapshot, and nothing else needs to query it.
  *
  * Only structural changes are written (start / pause / resume / finish) — never the 500 ms tick —
- * because the elapsed time is derived from `startedAt` minus the paused time rather than stored
- * per tick.
+ * because the elapsed time is derived from a clock anchor recorded at the last save rather than
+ * stored per tick. The anchor is [SystemClock.elapsedRealtime] (monotonic, survives nothing but a
+ * reboot): deriving the restore gap from `startedAt` and the wall clock let a manual time change,
+ * an NTP step or a timezone shift move the "deadline" arbitrarily far — a session could be
+ * declared finished the moment it was restored, or never finish at all. The wall timestamp is kept
+ * only as a fallback for snapshots written by an older build and across a reboot, where the
+ * monotonic clock has no relationship to the moment the session was saved.
  */
 class AppLimitSessionStore(context: Context) {
 
@@ -29,14 +35,20 @@ class AppLimitSessionStore(context: Context) {
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
-     * A restored session plus the local date it belongs to.
+     * A restored session plus the moment it was persisted.
      *
-     * The date is what keeps yesterday's snapshot from being re-armed today: the daily allowance
-     * resets at midnight, so a session started on another day is stale and must be dropped.
+     * The date tells the restorer whether the snapshot crossed midnight: the daily allowance
+     * resets at midnight, so a session recorded on another day is rolled forward onto today with
+     * its baseline reset rather than re-armed with yesterday's (see restoreSessionFromDisk).
+     * [savedAtElapsed]/[savedAtWall] anchor the "how much time passed while the process was dead"
+     * calculation: elapsedRealtime while it still refers to the same boot, otherwise the wall
+     * timestamp, otherwise (legacy snapshot with neither) the session's own `startedAt`.
      */
     data class Snapshot(
         val dateString: String,
-        val session: ActiveAppUsageSession
+        val session: ActiveAppUsageSession,
+        val savedAtElapsed: Long = 0L,
+        val savedAtWall: Long = 0L
     )
 
     fun save(session: ActiveAppUsageSession, dateString: String) {
@@ -56,6 +68,8 @@ class AppLimitSessionStore(context: Context) {
                 putBoolean(KEY_IS_PAUSED, session.isPaused)
                 putLong(KEY_TOTAL_PAUSED, session.totalPausedMillis)
                 putLong(KEY_LAST_PAUSE_AT, session.lastPauseTimestamp)
+                putLong(KEY_SAVED_AT_ELAPSED, SystemClock.elapsedRealtime())
+                putLong(KEY_SAVED_AT_WALL, System.currentTimeMillis())
                 apply()
             }
         } catch (e: Exception) {
@@ -74,6 +88,8 @@ class AppLimitSessionStore(context: Context) {
 
             Snapshot(
                 dateString = dateString,
+                savedAtElapsed = prefs.getLong(KEY_SAVED_AT_ELAPSED, 0L),
+                savedAtWall = prefs.getLong(KEY_SAVED_AT_WALL, 0L),
                 session = ActiveAppUsageSession(
                     id = prefs.getString(KEY_ID, null) ?: java.util.UUID.randomUUID().toString(),
                     packageName = packageName,
@@ -120,5 +136,7 @@ class AppLimitSessionStore(context: Context) {
         const val KEY_IS_PAUSED = "isPaused"
         const val KEY_TOTAL_PAUSED = "totalPausedMillis"
         const val KEY_LAST_PAUSE_AT = "lastPauseTimestamp"
+        const val KEY_SAVED_AT_ELAPSED = "savedAtElapsed"
+        const val KEY_SAVED_AT_WALL = "savedAtWall"
     }
 }

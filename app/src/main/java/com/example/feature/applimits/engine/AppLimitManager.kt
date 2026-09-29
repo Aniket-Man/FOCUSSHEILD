@@ -2,6 +2,7 @@ package com.example.feature.applimits.engine
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.util.Log
 import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.UsageResult
@@ -88,8 +89,19 @@ class AppLimitManager private constructor(
      */
     private val sessionStore = AppLimitSessionStore(appContext)
 
-    // Fast in-memory cache of enabled limits
-    private val enabledLimits = ConcurrentHashMap<String, AppLimitEntity>()
+    /**
+     * Fast in-memory pre-filter of enabled limits — never the source of truth for a decision:
+     * [checkAppLimitDecision] re-reads the row fresh, because a limit disabled in the UI kept
+     * deciding from this cache until the Room flow round-tripped, so protection the user had
+     * just turned off kept blocking (issue #49, C4).
+     *
+     * An immutable map behind a `@Volatile` reference: the refresh builds a new map and swaps
+     * the reference, which readers see either fully old or fully new — the previous
+     * `clear()` + `putAll()` on a shared ConcurrentHashMap let a concurrent gate read an empty
+     * cache mid-refresh and conclude "not limited".
+     */
+    @Volatile
+    private var enabledLimits: Map<String, AppLimitEntity> = emptyMap()
 
     /**
      * When each package's limit-block episode was last recorded, keyed by package.
@@ -141,8 +153,12 @@ class AppLimitManager private constructor(
      * or an OEM battery manager; there is no foreground service while an App Limit session runs),
      * so the timer simply stopped existing and the popup never came back. Restoring the snapshot
      * puts the deadline, the pause bookkeeping and the daily-usage baseline back, and the elapsed
-     * time is re-derived from the wall clock so a session that should already have finished is
-     * finalised instead of being silently dropped.
+     * time grows by the gap between the snapshot's clock anchor and now — the monotonic
+     * elapsedRealtime when it still refers to the same boot, the saved wall timestamp otherwise
+     * (reboot, or a snapshot written by an older build), `startedAt` as a last resort. Deriving
+     * that gap from the wall clock alone (the old behaviour) let a time change made while the
+     * process was dead jump the deadline days forward or rewind it, so a session either finished
+     * on restore or never finished at all.
      *
      * Nothing is shown from here: at restore time we do not know which app is in the foreground,
      * so raising a blocker could throw a full-screen popup over whatever the user is doing (the
@@ -155,23 +171,31 @@ class AppLimitManager private constructor(
         if (_activeSession.value != null) return
 
         val snapshot = sessionStore.load() ?: return
+        val today = appLimitRepository.getTodayDateString()
 
-        // Yesterday's allowance is over; a stale snapshot must not re-arm it today.
-        if (snapshot.dateString != appLimitRepository.getTodayDateString()) {
-            Log.i(tag, "Discarding app limit session snapshot from ${snapshot.dateString}")
-            clearPersistedSession()
-            return
+        // A snapshot from another day used to be discarded, which silently killed a session the
+        // user had chosen — and which the dashboard still showed as running — the first time the
+        // process died across midnight (start 23:30, restore 00:10 → no timer, no blocker, and
+        // the rest of the day's usage was free). Roll it onto today instead: keep the session and
+        // its remaining time, reset the daily baseline to the new day (yesterday's baseline would
+        // double-count yesterday's usage against today's allowance), and re-persist so the new
+        // date survives another restart.
+        val rolledFromAnotherDay = snapshot.dateString != today
+        val session = if (rolledFromAnotherDay) {
+            Log.i(tag, "Rolling app limit session snapshot from ${snapshot.dateString} onto $today")
+            snapshot.session.copy(initialDailyUsedMillis = 0L)
+        } else {
+            snapshot.session
         }
-
-        val session = snapshot.session
         val elapsed = if (session.isPaused) {
             // Still parked outside the app — keep the frozen clock and wait for the user to return.
             session.elapsedMillis
         } else {
-            (System.currentTimeMillis() - session.startedAt - session.totalPausedMillis).coerceAtLeast(0L)
+            session.elapsedMillis + restoreGapMillis(snapshot)
         }
         val restored = session.copy(elapsedMillis = elapsed)
         _activeSession.value = restored
+        if (rolledFromAnotherDay) persistActiveSession()
 
         if (restored.isSessionExpired) {
             Log.i(tag, "Restored an expired session for ${restored.appName}; finalising it")
@@ -183,6 +207,31 @@ class AppLimitManager private constructor(
             )
             startTicker()
         }
+    }
+
+    /**
+     * Unpaused wall time between the snapshot being written and now, in this process's terms.
+     *
+     * Preference order:
+     * 1. **Monotonic** — `elapsedRealtime` delta, valid only while both ends belong to the same
+     *    boot (a saved value larger than "now" means the device rebooted). Immune to every
+     *    wall-clock change: manual time edits, NTP steps, timezone moves.
+     * 2. **Saved wall timestamp** — same-boot check impossible (reboot), but the snapshot still
+     *    records when it was written.
+     * 3. **`startedAt`** — legacy snapshot from a build without anchors; the original derivation,
+     *    paused time subtracted, kept purely so an old snapshot still restores sanely.
+     */
+    private fun restoreGapMillis(snapshot: AppLimitSessionStore.Snapshot): Long {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (snapshot.savedAtElapsed > 0L && nowElapsed >= snapshot.savedAtElapsed) {
+            return nowElapsed - snapshot.savedAtElapsed
+        }
+        if (snapshot.savedAtWall > 0L) {
+            return (System.currentTimeMillis() - snapshot.savedAtWall).coerceAtLeast(0L)
+        }
+        val session = snapshot.session
+        return (System.currentTimeMillis() - session.startedAt - session.totalPausedMillis)
+            .coerceAtLeast(0L)
     }
 
     /** Mirrors the live session to disk. Called on start/pause/resume only, never on the 500 ms tick. */
@@ -203,17 +252,13 @@ class AppLimitManager private constructor(
         scope.launch {
             try {
                 val active = appLimitRepository.getActiveLimits()
-                active.forEach { enabledLimits[it.packageName] = it }
+                enabledLimits = active.associateBy { it.packageName }
             } catch (e: Exception) {
                 Log.e(tag, "Initial load active limits error: ${e.message}")
             }
             appLimitRepository.getActiveLimitsFlow().collectLatest { limits ->
-                // Atomic swap: build a new map then replace the reference to avoid
-                // a window where enabledLimits is empty during repopulation.
-                val updated = ConcurrentHashMap<String, AppLimitEntity>()
-                limits.forEach { updated[it.packageName] = it }
-                enabledLimits.clear()
-                enabledLimits.putAll(updated)
+                // Build the whole map, then swap the reference (atomic, see enabledLimits).
+                enabledLimits = limits.associateBy { it.packageName }
             }
         }
     }
@@ -230,7 +275,7 @@ class AppLimitManager private constructor(
                 appLimitRepository.getLimitByPackage(packageName)
             }
             if (fromDb != null && fromDb.isEnabled) {
-                enabledLimits[packageName] = fromDb
+                enabledLimits = enabledLimits + (packageName to fromDb)
                 true
             } else {
                 false
@@ -241,22 +286,22 @@ class AppLimitManager private constructor(
     }
 
     fun onLimitSaved(limit: AppLimitEntity) {
-        if (limit.isEnabled) {
-            enabledLimits[limit.packageName] = limit
+        enabledLimits = if (limit.isEnabled) {
+            enabledLimits + (limit.packageName to limit)
         } else {
-            enabledLimits.remove(limit.packageName)
+            enabledLimits - limit.packageName
         }
     }
 
     fun onLimitDeleted(packageName: String) {
-        enabledLimits.remove(packageName)
+        enabledLimits = enabledLimits - packageName
     }
 
     fun getLimit(packageName: String): AppLimitEntity? {
         return enabledLimits[packageName] ?: try {
             kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 appLimitRepository.getLimitByPackage(packageName)?.also {
-                    if (it.isEnabled) enabledLimits[it.packageName] = it
+                    if (it.isEnabled) enabledLimits = enabledLimits + (it.packageName to it)
                 }
             }
         } catch (_: Exception) { null }
@@ -288,14 +333,15 @@ class AppLimitManager private constructor(
             return AppLimitDecision.ALLOW_FOCUS_SESSION_RULES
         }
 
-        val limit = enabledLimits[packageName] ?: run {
-            val fromDb = appLimitRepository.getLimitByPackage(packageName)
-            if (fromDb != null && fromDb.isEnabled) {
-                enabledLimits[packageName] = fromDb
-                fromDb
-            } else {
-                null
-            }
+        // The limit row is read fresh, every decision (issue #49, C4). The cache above is only
+        // a pre-filter for the hot paths; deciding from it let a just-disabled (or deleted)
+        // limit keep blocking until the flow emission landed, and cached rows were never
+        // invalidated by edits made elsewhere in the app.
+        val limit = try {
+            appLimitRepository.getLimitByPackage(packageName)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to read limit for $packageName; treating as not limited: ${e.message}")
+            null
         } ?: return AppLimitDecision.ALLOW_NOT_LIMITED
 
         if (!limit.isEnabled) return AppLimitDecision.ALLOW_NOT_LIMITED
@@ -331,14 +377,17 @@ class AppLimitManager private constructor(
             }
         }
 
-        // Floor, matching the dashboard's minutes exactly: round() blocked at 59.5 s while the
-        // dashboard still said "1m remaining" (issue #27, item 6).
-        val usedMinutes = (accumulatedUsed / 60000L).toInt().coerceAtLeast(0)
-        val remainingDailyMinutes = (dailyLimitMinutes - usedMinutes).coerceAtLeast(0)
+        // One millisecond-precision comparison decides exhaustion (issue #49, C2). The three
+        // terms OR-ed here before (minute floor of the allowance, ms remainder, direct ms
+        // compare) happened to fire at the same instant — but the minute arithmetic pattern
+        // they embodied was copied into every display site, where limit-minus-floored-used
+        // rounded the remaining *up* and let the UI promise "1m remaining" while seconds were
+        // left and the next evaluation blocked. Display sites now floor the remaining millis
+        // directly; this verdict is ms-only.
         val remainingDailyMillis = (dailyLimitMillis - accumulatedUsed).coerceAtLeast(0L)
 
         val isStrict = limit.isStrictOverride
-        val isExhausted = remainingDailyMinutes <= 0 || remainingDailyMillis <= 0L || accumulatedUsed >= dailyLimitMillis
+        val isExhausted = accumulatedUsed >= dailyLimitMillis
 
         return if (!isExhausted) {
             AppLimitDecision.REQUIRE_USAGE_SELECTION(
@@ -395,25 +444,11 @@ class AppLimitManager private constructor(
         }
     }
 
-    private fun isIgnoredOverlayOrImePackage(pkg: String): Boolean {
-        if (pkg.isBlank()) return true
-        val lower = pkg.lowercase()
-        return lower.startsWith("com.example") ||
-                lower.startsWith("com.aistudio.focusshield") ||
-                lower == "android" ||
-                lower.contains("inputmethod") ||
-                lower.contains("keyboard") ||
-                lower.contains("honeyboard") ||
-                lower.contains("swiftkey") ||
-                lower.contains("systemui") ||
-                lower.contains("permissioncontroller")
-    }
-
     /**
      * Called by Accessibility Service whenever the foreground window package changes.
      */
     fun onForegroundPackageChanged(packageName: String) {
-        if (isIgnoredOverlayOrImePackage(packageName)) {
+        if (!AppLimitPackageFilter.shouldTrackForeground(packageName)) {
             return
         }
 
@@ -553,7 +588,10 @@ class AppLimitManager private constructor(
                 val todayDate = appLimitRepository.getTodayDateString()
                 val usage = appLimitRepository.getUsage(packageName, todayDate)
                 val currentCount = usage?.emergencyUsesCount ?: 0
-                val limit = enabledLimits[packageName] ?: appLimitRepository.getLimitByPackage(packageName)
+                // Fresh row: the emergency allowance is enforcement, not display — a stale
+                // cache entry could grant (or refuse) a pass after the user edited the limit
+                // (issue #49, C4).
+                val limit = appLimitRepository.getLimitByPackage(packageName)
                 val allowedCount = limit?.emergencyUsesAllowed ?: 1
                 if (currentCount >= allowedCount) {
                     Log.w(tag, "Emergency uses exhausted for $packageName (count: $currentCount, allowed: $allowedCount)")
@@ -599,7 +637,7 @@ class AppLimitManager private constructor(
     fun removeLimitPermanently(packageName: String) {
         scope.launch {
             appLimitRepository.deleteLimit(packageName)
-            enabledLimits.remove(packageName)
+            enabledLimits = enabledLimits - packageName
             _activeSession.value = null
             stopTicker()
             clearPersistedSession()
@@ -612,38 +650,66 @@ class AppLimitManager private constructor(
         tickerJob = scope.launch {
             var tickCount = 0
             // UsageStats-derived session elapsed, refreshed every 10th tick (~5 s). Null while
-            // the query fails or the permission is denied, which falls back to wall-clock.
+            // the query fails or the permission is denied, which falls back to the monotonic clock.
             var usageElapsed: Long? = null
+            // Monotonic baseline for this coroutine: the elapsedRealtime of the previous tick.
+            // Each unpaused tick adds (now - lastTick) to the session's elapsed, replacing
+            // `wall clock - startedAt - totalPaused` — that formula let a manual time change, an
+            // NTP step or a DST/timezone move jump the running timer forward or rewind it
+            // mid-session (deadline hours away in seconds, or never reached at all). The baseline
+            // lives in this coroutine, so a pause rebase can never race the update{} below.
+            var lastTickElapsed = SystemClock.elapsedRealtime()
             while (true) {
                 delay(500L)
                 val session = _activeSession.value ?: break
-                val now = System.currentTimeMillis()
+                val nowTickElapsed = SystemClock.elapsedRealtime()
                 tickCount++
 
                 val currentElapsed = if (session.isPaused) {
+                    // Parked outside the app: credit nothing, and rebase so the paused interval is
+                    // not added when the user returns (coming back restarts this ticker anyway;
+                    // the rebase covers the pause boundary this tick straddles — at most one
+                    // 500 ms tick of unpaused time, and only ever in the user's favour).
+                    lastTickElapsed = nowTickElapsed
                     session.elapsedMillis
                 } else {
-                    val wallElapsed = (now - session.startedAt - session.totalPausedMillis).coerceAtLeast(0L)
+                    val monotonicElapsed = session.elapsedMillis +
+                        (nowTickElapsed - lastTickElapsed).coerceAtLeast(0L)
+                    lastTickElapsed = nowTickElapsed
                     if (tickCount % 10 == 1) {
                         val usage = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
                         usageElapsed = if (usage.status == UsageResult.UsageStatus.VALID) {
-                            (usage.usageMillis - session.initialDailyUsedMillis).coerceAtLeast(0L)
+                            val derived = usage.usageMillis - session.initialDailyUsedMillis
+                            // Negative delta = the daily window rolled past the session's
+                            // baseline (midnight, or a UsageStats reset). The sample is
+                            // meaningless — not "zero seconds used". It used to be coerced to 0,
+                            // which fed a non-null 0 into the override below and pinned elapsed
+                            // at its current value: the session then never expired and the
+                            // blocker for it never came back.
+                            if (derived >= 0L) derived else null
                         } else {
                             null
                         }
                     }
-                    // UsageStats is the authoritative clock: it only accumulates while the app
-                    // actually holds the foreground, so screen-off / service-off periods no longer
-                    // drain the allowance (wall clock did, contradicting saveSessionRecord's
-                    // "usage comes from UsageStatsManager" rule). min() with wall time caps the
-                    // derived value against daily-window resets at midnight and stats lag; max()
-                    // with the live value keeps elapsed monotonic — a reset daily window must
-                    // never rewind a running session. Falls back to wall clock when unavailable.
+                    // UsageStats is the authoritative clock while it agrees with reality: it only
+                    // accumulates while the app actually holds the foreground, so screen-off /
+                    // service-off periods do not drain the allowance (wall clock did, contradicting
+                    // saveSessionRecord's "usage comes from UsageStatsManager" rule).
+                    //
+                    // A sample that is missing or *behind* the timer is not authoritative — query
+                    // failure, stats lag, or a day rollover that threw away the history the
+                    // baseline was measured against. The old floor, max(sample, elapsed), pinned
+                    // elapsed at its current value in exactly those cases and stopped the session
+                    // clock for as long as the disagreement lasted; falling back to the monotonic
+                    // elapsed keeps the session expiring on time instead. When the sample is ahead,
+                    // min() caps it against the monotonic elapsed so stats can never count more
+                    // than real time permits. Either way the result is >= the live value, so
+                    // elapsed never rewinds.
                     val derived = usageElapsed
-                    if (derived == null) {
-                        wallElapsed
+                    if (derived == null || derived < session.elapsedMillis) {
+                        monotonicElapsed
                     } else {
-                        maxOf(minOf(derived, wallElapsed), session.elapsedMillis)
+                        minOf(derived, monotonicElapsed)
                     }
                 }
 
@@ -754,10 +820,14 @@ class AppLimitManager private constructor(
         val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
 
-        // Floor, same as checkAppLimitDecision and the dashboard (issue #27, item 6).
+        // Display minutes floor the *remaining millis* (issue #27, item 6; issue #49, C2): the
+        // limit minus floored used minutes rounded the remaining up and could promise a minute
+        // the user did not have. The verdict is a pure millisecond comparison, so the mode raised
+        // (SESSION_COMPLETE vs DAILY_LIMIT_REACHED) is exactly the comparison
+        // checkAppLimitDecision uses to block.
         val totalDailyUsedMinutes = (totalDailyUsedMillis / 60000L).toInt().coerceAtLeast(0)
-        val remainingDailyMinutes = (dailyLimitMinutes - totalDailyUsedMinutes).coerceAtLeast(0)
-        val isDailyExhausted = remainingDailyMinutes <= 0 || totalDailyUsedMillis >= dailyLimitMillis
+        val remainingDailyMinutes = ((dailyLimitMillis - totalDailyUsedMillis).coerceAtLeast(0L) / 60000L).toInt()
+        val isDailyExhausted = totalDailyUsedMillis >= dailyLimitMillis
 
         // 3. Trigger overlay popup with forceLaunch
         launchOverlay(
@@ -1047,13 +1117,44 @@ class AppLimitManager private constructor(
     /**
      * True while the app-limit engine still wants the block on screen for [packageName].
      * Used to stop the relaunch loop once the user has resolved the prompt.
+     *
+     * Deliberately cheap. [startOverlayAndVerify] calls this before *every* attempt — every
+     * 1.2 s during the burst, then every 10 s — and the old answer came from
+     * [checkAppLimitDecision], which reaches its verdict through a UsageStatsManager query:
+     * a system service hammered from a background loop, and worse, any transient
+     * PERMISSION_DENIED/QUERY_FAILED mid-retry flipped the verdict to "not blocked" and
+     * silently cancelled a block that was valid when the loop started (issue #49, O2).
+     * So the usage numbers are never re-read here — only the cheap, structural state that can
+     * genuinely retire a pending block: Focus Session taking over, a started session, the
+     * limit turned off or deleted, today's bypass.
      */
-    private suspend fun shouldStillShowOverlay(packageName: String): Boolean =
-        when (checkAppLimitDecision(packageName)) {
-            is AppLimitDecision.REQUIRE_USAGE_SELECTION,
-            is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> true
-            else -> false
+    private suspend fun shouldStillShowOverlay(packageName: String): Boolean {
+        // Same answers checkAppLimitDecision gives for these cases, minus the usage query.
+        val focusSession = sessionManager.activeSession.value
+        val isFocusRunning = sessionManager.sessionState.value == com.example.feature.session.domain.SessionState.RUNNING
+        if (isFocusRunning && focusSession != null) return false // Focus Session owns the screen now
+
+        // The user picked a duration: the selection prompt has been answered.
+        if (isSessionActiveFor(packageName)) return false
+
+        val limit = try {
+            appLimitRepository.getLimitByPackage(packageName)
+        } catch (e: Exception) {
+            Log.w(tag, "Could not re-read limit for $packageName; stopping block retry: ${e.message}")
+            null
         }
+        if (limit == null || !limit.isEnabled) return false
+
+        val usage = try {
+            appLimitRepository.getUsage(packageName, appLimitRepository.getTodayDateString())
+        } catch (e: Exception) {
+            Log.w(tag, "Could not re-read usage for $packageName; keeping block: ${e.message}")
+            null
+        }
+        if (usage?.isBypassedForToday == true) return false
+
+        return true
+    }
 
     companion object {
         @Volatile

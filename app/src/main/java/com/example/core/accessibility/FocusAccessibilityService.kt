@@ -12,6 +12,7 @@ import com.example.data.preferences.FocusPreferences
 import com.example.feature.applimits.engine.AppLimitDecision
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
+import com.example.feature.applimits.engine.AppLimitPackageFilter
 import com.example.feature.blocker.FocusBlockerManager
 import com.example.feature.youtube.detector.YouTubeDetectionRules
 import com.example.feature.youtube.engine.YouTubeBlockDecision
@@ -77,32 +78,6 @@ class FocusAccessibilityService : AccessibilityService() {
         null
     }
 
-    private fun isExcludedFromAppLimits(rawPackageName: String): Boolean {
-        if (rawPackageName.isBlank()) return true
-        val lower = rawPackageName.lowercase()
-        if (lower.startsWith("com.example") ||
-            lower.startsWith("com.aistudio.focusshield") ||
-            lower == applicationContext.packageName.lowercase()
-        ) {
-            return true
-        }
-
-        return lower == "android" ||
-                lower == "com.android.systemui" ||
-                lower.contains("launcher") ||
-                lower.contains("nexuslauncher") ||
-                lower.contains("launcher3") ||
-                lower == "com.android.server.telecom" ||
-                lower.contains("inputmethod") ||
-                lower.contains("honeyboard") ||
-                lower.contains("keyboard") ||
-                lower.contains("swiftkey") ||
-                lower == "com.google.android.packageinstaller" ||
-                lower == "com.android.packageinstaller" ||
-                lower == "com.google.android.permissioncontroller" ||
-                lower == "com.android.permissioncontroller"
-    }
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         isServiceRunning = true
@@ -132,6 +107,16 @@ class FocusAccessibilityService : AccessibilityService() {
 
         // Track screen state so watch-time capture stops when the screen goes dark
         com.example.core.tracking.ScreenStateTracker.register(this)
+
+        // Run the app-limit gate once against whatever is actually on screen (issue #49, O1).
+        // Every other path into the gate is an accessibility event, and a static screen behind a
+        // freshly killed process emits none — the blocker owed to the limited app the user was
+        // still sitting in never came back until they happened to touch something.
+        // FLAG_RETRIEVE_INTERACTIVE_WINDOWS (set above) lets rootInActiveWindow answer without
+        // waiting for an event; the 1 s delay gives the window stack and the freshly restored
+        // sessions a beat to settle. onUnbind's removeCallbacksAndMessages drops the callback if
+        // the service is torn down first.
+        mainThreadHandler.postDelayed({ evaluateGateFromCurrentWindow() }, 1000L)
 
         // Observe user preferences for shorts/reels blocking
         serviceScope.launch {
@@ -218,8 +203,17 @@ class FocusAccessibilityService : AccessibilityService() {
             val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
             val now = System.currentTimeMillis()
 
-            // Update foreground tracking on window state changes
-            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // Update foreground tracking on window state changes — and, until something has been
+            // tracked at all, on whatever the first event is (issue #49, W2). After a service
+            // (re)bind the first event to arrive can be WINDOW_CONTENT_CHANGED/VIEW_SCROLLED
+            // instead of a window transition; gating only on window-state changes then left
+            // lastForegroundPackage/currentForegroundPackage null until one happened, so limit
+            // evaluation ran blind and isBlockedAppInForeground() could not tell where the user
+            // was. Seeding on the first event is idempotent for the common case (the event's own
+            // package) and the very next window-state change corrects any exotic mismatch.
+            val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                    eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            if (isWindowStateChange || lastForegroundPackage == null) {
                 if (lastForegroundPackage != null &&
                     YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage) &&
                     !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
@@ -567,98 +561,156 @@ class FocusAccessibilityService : AccessibilityService() {
             }
 
             // 4. Timed App Limit System (Priority 3 - evaluated when no Focus Session is actively blocking the app)
-            if (appLimitManager != null) {
-                val isYouTubePackage = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
-                val isBrowserPackage = com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
-                val protectionState = blockerManager?.getCurrentProtectionState(now)
-                val isSessionRunningOrPaused = protectionState?.let { it.sessionState.name == "RUNNING" || it.sessionState.name == "PAUSED" } ?: false
-                val sessionActiveWithYouTubeStudyMode = isSessionRunningOrPaused && (protectionState?.isYouTubeStudyModeEnabled == true)
-                val sessionActiveWithBrowserStudyMode = isSessionRunningOrPaused && (protectionState?.isBrowserStudyModeEnabled == true)
-
-                // The blocker for this app is already on screen: nothing to decide, and nothing to
-                // launch. Without this the gate re-raised the popup on every event the limited app
-                // emitted from *behind* the blocker (500 ms throttle) — a new activity instance on
-                // top of the one being read, each one finishing the previous one. A launch that
-                // lands in that handshake is dropped silently, which is how the blocker could
-                // disappear for good; the storm also re-sent the media-pause key and re-scanned the
-                // node tree five times a second while the user was trying to read the popup.
-                val isBlockerOnScreen = com.example.feature.applimits.ui.AppLimitOverlayActivity
-                    .isVisibleFor(rawPackageName)
-
-                if (!isExcludedFromAppLimits(rawPackageName) &&
-                    !isBlockerOnScreen &&
-                    !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
-                    !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
-                ) {
-                    val isLimited = appLimitManager.isPackageLimited(rawPackageName)
-                    val isSessionActive = appLimitManager.isSessionActiveFor(rawPackageName)
-
-                    val lastCheckTime = lastAppLimitCheckTimestamps[rawPackageName] ?: 0L
-                    val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
-
-                    val shouldCheck = (isWindowStateChange && (now - lastCheckTime > 300L)) ||
-                            (isLimited && !isSessionActive && (now - lastCheckTime > 500L))
-
-                    if (shouldCheck) {
-                        lastAppLimitCheckTimestamps[rawPackageName] = now
-                        serviceScope.launch {
-                            when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
-                                is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
-                                    Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName} ($rawPackageName)")
-                                    // Media is paused by AppLimitManager.launchOverlay itself, once per
-                                    // launch request rather than once per accessibility event.
-                                    if (isYouTubePackage) {
-                                        val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
-                                        clickPauseButtonInNodeTree(currentRoot)
-                                        try { currentRoot?.recycle() } catch (_: Exception) {}
-                                    }
-                                    // Floor, matching AppLimitManager and the dashboard's minutes.
-                                    val usedMins = (appLimitDecision.usedDailyMillis / 60000L).toInt().coerceAtLeast(0)
-                                    val remMins = (appLimitDecision.dailyLimitMinutes - usedMins).coerceAtLeast(0)
-                                    appLimitManager.launchOverlay(
-                                        packageName = appLimitDecision.packageName,
-                                        appName = appLimitDecision.appName,
-                                        mode = AppLimitOverlayMode.AWAITING_SELECTION,
-                                        usedMinutes = usedMins,
-                                        remainingDailyMinutes = remMins,
-                                        dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
-                                        emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
-                                        isStrict = appLimitDecision.isStrict,
-                                        streakDays = appLimitDecision.streakDays,
-                                        forceLaunch = true
-                                    )
-                                }
-                                is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
-                                    Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName} ($rawPackageName). Enforcing blocker.")
-                                    // Media is paused by AppLimitManager.launchOverlay itself (see above).
-                                    if (isYouTubePackage) {
-                                        val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
-                                        clickPauseButtonInNodeTree(currentRoot)
-                                        try { currentRoot?.recycle() } catch (_: Exception) {}
-                                    }
-                                    appLimitManager.launchOverlay(
-                                        packageName = appLimitDecision.packageName,
-                                        appName = appLimitDecision.appName,
-                                        mode = AppLimitOverlayMode.DAILY_LIMIT_REACHED,
-                                        usedMinutes = appLimitDecision.dailyLimitMinutes,
-                                        remainingDailyMinutes = 0,
-                                        dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
-                                        emergencyUsesCount = appLimitDecision.emergencyUsesCount,
-                                        emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
-                                        isStrict = appLimitDecision.isStrict,
-                                        streakDays = appLimitDecision.streakDays,
-                                        forceLaunch = true
-                                    )
-                                }
-                                else -> {}
-                            }
-                        }
-                    }
-                }
-            }
+            evaluateAppLimitGate(rawPackageName, eventType, now)
         } catch (e: Exception) {
             Log.e(tag, "Error handling accessibility event: ${e.message}")
         }
+    }
+
+    /**
+     * Section 4 of the event pipeline: the timed App Limit gate for [rawPackageName].
+     *
+     * An accessibility event is the normal way in here, but it is not the only way this must
+     * run: a static screen behind a killed process (a paused video, an idle feed) emits no
+     * events at all, so after a process restart the blocker the user was owed never came back
+     * until they happened to touch something (issue #49, O1). [evaluateGateFromCurrentWindow]
+     * drives this same function from `onServiceConnected`, which fires on every process restart
+     * while the service is enabled. Everything the gate needs is resolved here rather than
+     * captured from the caller so both entry points behave identically.
+     */
+    private fun evaluateAppLimitGate(rawPackageName: String, eventType: Int, now: Long) {
+        val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
+        val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
+        if (appLimitManager == null) return
+
+        val isYouTubePackage = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+        val isBrowserPackage = com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
+        val protectionState = blockerManager?.getCurrentProtectionState(now)
+        val isSessionRunningOrPaused = protectionState?.let { it.sessionState.name == "RUNNING" || it.sessionState.name == "PAUSED" } ?: false
+        val sessionActiveWithYouTubeStudyMode = isSessionRunningOrPaused && (protectionState?.isYouTubeStudyModeEnabled == true)
+        val sessionActiveWithBrowserStudyMode = isSessionRunningOrPaused && (protectionState?.isBrowserStudyModeEnabled == true)
+
+        // The blocker for this app is already on screen: nothing to decide, and nothing to
+        // launch. Without this the gate re-raised the popup on every event the limited app
+        // emitted from *behind* the blocker (500 ms throttle) — a new activity instance on
+        // top of the one being read, each one finishing the previous one. A launch that
+        // lands in that handshake is dropped silently, which is how the blocker could
+        // disappear for good; the storm also re-sent the media-pause key and re-scanned the
+        // node tree five times a second while the user was trying to read the popup.
+        val isBlockerOnScreen = com.example.feature.applimits.ui.AppLimitOverlayActivity
+            .isVisibleFor(rawPackageName)
+
+        if (AppLimitPackageFilter.shouldEvaluateForLimits(rawPackageName) &&
+            !isBlockerOnScreen &&
+            !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
+            !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
+        ) {
+            val isLimited = appLimitManager.isPackageLimited(rawPackageName)
+            val isSessionActive = appLimitManager.isSessionActiveFor(rawPackageName)
+
+            val lastCheckTime = lastAppLimitCheckTimestamps[rawPackageName] ?: 0L
+            val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+
+            val shouldCheck = (isWindowStateChange && (now - lastCheckTime > 300L)) ||
+                    (isLimited && !isSessionActive && (now - lastCheckTime > 500L))
+
+            if (shouldCheck) {
+                lastAppLimitCheckTimestamps[rawPackageName] = now
+                serviceScope.launch {
+                    when (val appLimitDecision = appLimitManager.checkAppLimitDecision(rawPackageName)) {
+                        is AppLimitDecision.REQUIRE_USAGE_SELECTION -> {
+                            Log.i(tag, "App Limit: Prompting usage selection for ${appLimitDecision.appName} ($rawPackageName)")
+                            // Media is paused by AppLimitManager.launchOverlay itself, once per
+                            // launch request rather than once per accessibility event.
+                            if (isYouTubePackage) {
+                                val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
+                                clickPauseButtonInNodeTree(currentRoot)
+                                try { currentRoot?.recycle() } catch (_: Exception) {}
+                            }
+                            // Floor the remaining millis themselves (issue #49, C2):
+                            // subtracting floored used minutes from the limit rounded the
+                            // remaining *up* — "1m remaining" while seconds were left.
+                            val usedMins = (appLimitDecision.usedDailyMillis / 60000L).toInt().coerceAtLeast(0)
+                            val remMins = (appLimitDecision.remainingDailyMillis / 60000L).toInt().coerceAtLeast(0)
+                            appLimitManager.launchOverlay(
+                                packageName = appLimitDecision.packageName,
+                                appName = appLimitDecision.appName,
+                                mode = AppLimitOverlayMode.AWAITING_SELECTION,
+                                usedMinutes = usedMins,
+                                remainingDailyMinutes = remMins,
+                                dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
+                                emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
+                                isStrict = appLimitDecision.isStrict,
+                                streakDays = appLimitDecision.streakDays,
+                                forceLaunch = true
+                            )
+                        }
+                        is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> {
+                            Log.i(tag, "App Limit: Daily limit exhausted for ${appLimitDecision.appName} ($rawPackageName). Enforcing blocker.")
+                            // Media is paused by AppLimitManager.launchOverlay itself (see above).
+                            if (isYouTubePackage) {
+                                val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
+                                clickPauseButtonInNodeTree(currentRoot)
+                                try { currentRoot?.recycle() } catch (_: Exception) {}
+                            }
+                            appLimitManager.launchOverlay(
+                                packageName = appLimitDecision.packageName,
+                                appName = appLimitDecision.appName,
+                                mode = AppLimitOverlayMode.DAILY_LIMIT_REACHED,
+                                usedMinutes = appLimitDecision.dailyLimitMinutes,
+                                remainingDailyMinutes = 0,
+                                dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
+                                emergencyUsesCount = appLimitDecision.emergencyUsesCount,
+                                emergencyUsesAllowed = appLimitDecision.emergencyUsesAllowed,
+                                isStrict = appLimitDecision.isStrict,
+                                streakDays = appLimitDecision.streakDays,
+                                forceLaunch = true
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * One-shot app-limit evaluation from the real foreground window, driven by
+     * [onServiceConnected] (issue #49, O1).
+     *
+     * Reads the window stack directly instead of waiting for an event, seeds the foreground
+     * trackers from it — pause/resume bookkeeping and the blocker retry loop's "are we still in
+     * the blocked app" answer both start from reality rather than null — then runs exactly the
+     * gate an accessibility event would have run. FocusShield itself (the screen that usually
+     * just enabled the service) is ignored, mirroring [onAccessibilityEvent]'s own-app early
+     * return.
+     */
+    private fun evaluateGateFromCurrentWindow() {
+        val root = try { rootInActiveWindow } catch (e: Exception) { null }
+        val foregroundPackage = root?.packageName?.toString()
+        try { root?.recycle() } catch (_: Exception) {}
+        if (foregroundPackage.isNullOrBlank()) return
+
+        val isOwnApp = foregroundPackage == packageName ||
+                foregroundPackage == applicationContext.packageName ||
+                foregroundPackage.startsWith("com.example") ||
+                foregroundPackage.startsWith("com.aistudio.focusshield")
+        if (isOwnApp) return
+
+        Log.i(tag, "Service connected with $foregroundPackage in the foreground; running the app-limit gate once")
+
+        val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
+        val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
+
+        lastForegroundPackage = foregroundPackage
+        blockerManager?.onForegroundPackageChanged(foregroundPackage)
+        appLimitManager?.onForegroundPackageChanged(foregroundPackage)
+
+        evaluateAppLimitGate(
+            rawPackageName = foregroundPackage,
+            eventType = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            now = System.currentTimeMillis()
+        )
     }
 
     private fun isShortFormBlockingEnabledFor(packageName: String): Boolean {
