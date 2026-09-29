@@ -160,15 +160,22 @@ class AppLimitManager private constructor(
         if (_activeSession.value != null) return
 
         val snapshot = sessionStore.load() ?: return
+        val today = appLimitRepository.getTodayDateString()
 
-        // Yesterday's allowance is over; a stale snapshot must not re-arm it today.
-        if (snapshot.dateString != appLimitRepository.getTodayDateString()) {
-            Log.i(tag, "Discarding app limit session snapshot from ${snapshot.dateString}")
-            clearPersistedSession()
-            return
+        // A snapshot from another day used to be discarded, which silently killed a session the
+        // user had chosen — and which the dashboard still showed as running — the first time the
+        // process died across midnight (start 23:30, restore 00:10 → no timer, no blocker, and
+        // the rest of the day's usage was free). Roll it onto today instead: keep the session and
+        // its remaining time, reset the daily baseline to the new day (yesterday's baseline would
+        // double-count yesterday's usage against today's allowance), and re-persist so the new
+        // date survives another restart.
+        val rolledFromAnotherDay = snapshot.dateString != today
+        val session = if (rolledFromAnotherDay) {
+            Log.i(tag, "Rolling app limit session snapshot from ${snapshot.dateString} onto $today")
+            snapshot.session.copy(initialDailyUsedMillis = 0L)
+        } else {
+            snapshot.session
         }
-
-        val session = snapshot.session
         val elapsed = if (session.isPaused) {
             // Still parked outside the app — keep the frozen clock and wait for the user to return.
             session.elapsedMillis
@@ -177,6 +184,7 @@ class AppLimitManager private constructor(
         }
         val restored = session.copy(elapsedMillis = elapsed)
         _activeSession.value = restored
+        if (rolledFromAnotherDay) persistActiveSession()
 
         if (restored.isSessionExpired) {
             Log.i(tag, "Restored an expired session for ${restored.appName}; finalising it")
@@ -671,23 +679,37 @@ class AppLimitManager private constructor(
                     if (tickCount % 10 == 1) {
                         val usage = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
                         usageElapsed = if (usage.status == UsageResult.UsageStatus.VALID) {
-                            (usage.usageMillis - session.initialDailyUsedMillis).coerceAtLeast(0L)
+                            val derived = usage.usageMillis - session.initialDailyUsedMillis
+                            // Negative delta = the daily window rolled past the session's
+                            // baseline (midnight, or a UsageStats reset). The sample is
+                            // meaningless — not "zero seconds used". It used to be coerced to 0,
+                            // which fed a non-null 0 into the override below and pinned elapsed
+                            // at its current value: the session then never expired and the
+                            // blocker for it never came back.
+                            if (derived >= 0L) derived else null
                         } else {
                             null
                         }
                     }
-                    // UsageStats is the authoritative clock: it only accumulates while the app
-                    // actually holds the foreground, so screen-off / service-off periods no longer
-                    // drain the allowance (wall clock did, contradicting saveSessionRecord's
-                    // "usage comes from UsageStatsManager" rule). min() with the monotonic elapsed
-                    // caps the derived value against stats lag drift; max() with the live value
-                    // keeps elapsed monotonic — a reset daily window must never rewind a running
-                    // session. Falls back to the monotonic clock when unavailable.
+                    // UsageStats is the authoritative clock while it agrees with reality: it only
+                    // accumulates while the app actually holds the foreground, so screen-off /
+                    // service-off periods do not drain the allowance (wall clock did, contradicting
+                    // saveSessionRecord's "usage comes from UsageStatsManager" rule).
+                    //
+                    // A sample that is missing or *behind* the timer is not authoritative — query
+                    // failure, stats lag, or a day rollover that threw away the history the
+                    // baseline was measured against. The old floor, max(sample, elapsed), pinned
+                    // elapsed at its current value in exactly those cases and stopped the session
+                    // clock for as long as the disagreement lasted; falling back to the monotonic
+                    // elapsed keeps the session expiring on time instead. When the sample is ahead,
+                    // min() caps it against the monotonic elapsed so stats can never count more
+                    // than real time permits. Either way the result is >= the live value, so
+                    // elapsed never rewinds.
                     val derived = usageElapsed
-                    if (derived == null) {
+                    if (derived == null || derived < session.elapsedMillis) {
                         monotonicElapsed
                     } else {
-                        maxOf(minOf(derived, monotonicElapsed), session.elapsedMillis)
+                        minOf(derived, monotonicElapsed)
                     }
                 }
 
