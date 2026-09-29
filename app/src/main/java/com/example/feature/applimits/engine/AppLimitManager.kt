@@ -444,25 +444,11 @@ class AppLimitManager private constructor(
         }
     }
 
-    private fun isIgnoredOverlayOrImePackage(pkg: String): Boolean {
-        if (pkg.isBlank()) return true
-        val lower = pkg.lowercase()
-        return lower.startsWith("com.example") ||
-                lower.startsWith("com.aistudio.focusshield") ||
-                lower == "android" ||
-                lower.contains("inputmethod") ||
-                lower.contains("keyboard") ||
-                lower.contains("honeyboard") ||
-                lower.contains("swiftkey") ||
-                lower.contains("systemui") ||
-                lower.contains("permissioncontroller")
-    }
-
     /**
      * Called by Accessibility Service whenever the foreground window package changes.
      */
     fun onForegroundPackageChanged(packageName: String) {
-        if (isIgnoredOverlayOrImePackage(packageName)) {
+        if (!AppLimitPackageFilter.shouldTrackForeground(packageName)) {
             return
         }
 

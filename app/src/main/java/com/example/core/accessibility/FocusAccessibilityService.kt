@@ -12,6 +12,7 @@ import com.example.data.preferences.FocusPreferences
 import com.example.feature.applimits.engine.AppLimitDecision
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
+import com.example.feature.applimits.engine.AppLimitPackageFilter
 import com.example.feature.blocker.FocusBlockerManager
 import com.example.feature.youtube.detector.YouTubeDetectionRules
 import com.example.feature.youtube.engine.YouTubeBlockDecision
@@ -75,32 +76,6 @@ class FocusAccessibilityService : AccessibilityService() {
         com.example.feature.youtube.engine.YouTubeStudyDwellTracker.instance
     } catch (_: Exception) {
         null
-    }
-
-    private fun isExcludedFromAppLimits(rawPackageName: String): Boolean {
-        if (rawPackageName.isBlank()) return true
-        val lower = rawPackageName.lowercase()
-        if (lower.startsWith("com.example") ||
-            lower.startsWith("com.aistudio.focusshield") ||
-            lower == applicationContext.packageName.lowercase()
-        ) {
-            return true
-        }
-
-        return lower == "android" ||
-                lower == "com.android.systemui" ||
-                lower.contains("launcher") ||
-                lower.contains("nexuslauncher") ||
-                lower.contains("launcher3") ||
-                lower == "com.android.server.telecom" ||
-                lower.contains("inputmethod") ||
-                lower.contains("honeyboard") ||
-                lower.contains("keyboard") ||
-                lower.contains("swiftkey") ||
-                lower == "com.google.android.packageinstaller" ||
-                lower == "com.android.packageinstaller" ||
-                lower == "com.google.android.permissioncontroller" ||
-                lower == "com.android.permissioncontroller"
     }
 
     override fun onServiceConnected() {
@@ -616,7 +591,7 @@ class FocusAccessibilityService : AccessibilityService() {
         val isBlockerOnScreen = com.example.feature.applimits.ui.AppLimitOverlayActivity
             .isVisibleFor(rawPackageName)
 
-        if (!isExcludedFromAppLimits(rawPackageName) &&
+        if (AppLimitPackageFilter.shouldEvaluateForLimits(rawPackageName) &&
             !isBlockerOnScreen &&
             !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
             !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
