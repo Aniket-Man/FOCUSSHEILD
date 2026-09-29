@@ -160,8 +160,16 @@ class AppLimitRepository(
     }
 
     /**
-     * Synchronizes usage with actual system usage.
-     * If system usage is higher, syncs UP. If DB is inflated, caps it DOWN to system value.
+     * Pushes UsageStats' view of today's usage into the daily row — forward only.
+     *
+     * UsageStats can transiently report *less* than it did a moment earlier (a partial query
+     * after a permission flap, the manager's own lag windows, the value falling back to a
+     * narrower interval). The old behaviour deliberately capped inflated rows down to whatever
+     * the system just said, so those dips rolled the DB backward: the difference came back as
+     * free allowance, and anything already decided on the higher number (dashboard totals, the
+     * engine's permission-denied fallback) un-blocked with it (issue #49, C3). A day's usage
+     * only grows — a lower sample is stale, not corrected. [resetUsage] is the deliberate way to
+     * get back to zero and writes directly.
      */
     suspend fun syncSystemUsage(
         packageName: String,
@@ -184,8 +192,8 @@ class AppLimitRepository(
             )
             dailyAppUsageDao.insertOrUpdate(newRecord)
 
-        } else if (existing.usedMillis != systemUsageMillis) {
-            // Sync to system value — works both UP and DOWN
+        } else if (systemUsageMillis > existing.usedMillis) {
+            // Only ever forward: a sample at or below the stored value changes nothing.
             val updated = existing.copy(
                 usedMillis = systemUsageMillis,
                 lastActiveTimestamp = System.currentTimeMillis()
