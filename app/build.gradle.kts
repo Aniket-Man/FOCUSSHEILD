@@ -5,9 +5,11 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.hilt)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  alias(libs.plugins.detekt)
 }
 
 val envProperties = Properties().apply {
@@ -134,6 +136,12 @@ secrets {
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
+detekt {
+  buildUponDefaultConfig = true
+  allRules = false
+  config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+}
+
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
@@ -216,6 +224,11 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
+  implementation(libs.hilt.android)
+  "ksp"(libs.hilt.compiler)
+  implementation(libs.hilt.navigation.compose)
+  implementation(libs.hilt.work)
+  "ksp"(libs.hilt.work.compiler)
 }
 
 // Room schema export (FocusShieldDatabase.exportSchema = true): KSP writes the versioned JSON

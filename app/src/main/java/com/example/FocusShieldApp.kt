@@ -23,11 +23,13 @@ import com.example.data.repository.StudyChannelRepository
 import com.example.data.repository.StudyPlanRepository
 import com.example.data.repository.SubjectRepository
 import com.example.feature.blocker.FocusBlockerManager
+import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+@HiltAndroidApp
 class FocusShieldApp : Application(), ImageLoaderFactory {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

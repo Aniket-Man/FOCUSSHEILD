@@ -6,4 +6,6 @@ plugins {
   alias(libs.plugins.roborazzi) apply false
   alias(libs.plugins.secrets) apply false
   alias(libs.plugins.google.services) apply false
+  alias(libs.plugins.hilt) apply false
+  alias(libs.plugins.detekt) apply false
 }

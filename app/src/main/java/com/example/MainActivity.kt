@@ -21,9 +21,11 @@ import com.example.data.preferences.FocusPreferences
 import com.example.feature.session.notification.PlanLaunchPayload
 import com.example.feature.session.notification.StudyPlanAlarmScheduler
 import com.example.feature.update.notification.UpdateNotificationHelper
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val _incomingPlanPayload = MutableStateFlow<PlanLaunchPayload?>(null)

@@ -3,10 +3,10 @@ package com.example.cloud
 import com.example.BuildConfig
 
 /**
- * Central access to the optional Supabase configuration injected at build time from
- * `local.properties` (gitignored) via `buildConfigField`. Both values are empty strings
- * when the developer has not configured cloud — the app then runs fully offline and every
- * cloud/account entry point reports itself as not configured instead of crashing.
+ * Central access to the optional Supabase configuration injected at build time from the
+ * gitignored `.env` file (see `.env.example`) via `buildConfigField`. Both values are empty
+ * strings when the developer has not configured cloud — the app then runs fully offline and
+ * every cloud/account entry point reports itself as not configured instead of crashing.
  *
  * The anon key is a *publishable* client key (Supabase generates it for in-app use); the
  * service_role key and the database password must never be embedded in the app.

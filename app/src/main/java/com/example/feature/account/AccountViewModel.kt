@@ -10,7 +10,9 @@ import com.example.cloud.http.SupabaseApiException
 import com.example.cloud.sync.CloudInstallState
 import com.example.cloud.sync.SyncCycleOutcome
 import com.example.cloud.sync.SyncGateway
+import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,7 +70,8 @@ data class AccountUiState(
  * explicit [RestoreDecision] for the user to confirm or decline. Declining signs out and leaves the
  * device's Room data untouched — the app is always usable offline, signed out.
  */
-class AccountViewModel(
+@HiltViewModel
+class AccountViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val cloudInstallState: CloudInstallState,
     private val syncGateway: SyncGateway

@@ -22,6 +22,10 @@ import org.robolectric.annotation.Config
  * "the repository is private" was indistinguishable from "no release is published", and the asset
  * selection rules were only exercised by installing a release. These tests pin the two supported
  * payload shapes, the `.apk`-only asset rule, the status → message mapping, and the URL resolution.
+ *
+ * Runs under Robolectric: plain JUnit would hit the mockable android.jar's stubbed
+ * `org.json.JSONObject` ("Method optString not mocked"). Robolectric supplies the real
+ * framework classes while the parser itself stays pure JVM code.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])

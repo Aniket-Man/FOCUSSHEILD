@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -19,7 +20,6 @@ import com.example.FocusShieldApp
 import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
 import com.example.core.ui.BottomTab
-import com.example.BuildConfig
 import com.example.feature.analytics.AnalyticsScreen
 import com.example.feature.analytics.AnalyticsViewModel
 import com.example.feature.applimits.ui.AppLimitsDashboardScreen
@@ -76,22 +76,9 @@ fun FocusNavGraph(
     blockedAppsViewModel: BlockedAppsViewModel = viewModel(),
     appLimitsViewModel: AppLimitsViewModel = viewModel(),
     websiteBlockerViewModel: WebsiteBlockerViewModel = viewModel(),
-    studyChannelsViewModel: StudyChannelsViewModel = viewModel {
-        StudyChannelsViewModel(FocusShieldApp.instance.studyChannelRepository)
-    },
-    accountViewModel: AccountViewModel = viewModel {
-        AccountViewModel(
-            FocusShieldApp.instance.authRepository,
-            FocusShieldApp.instance.cloudInstallState,
-            FocusShieldApp.instance.syncGateway
-        )
-    },
-    updateViewModel: UpdateViewModel = viewModel {
-        UpdateViewModel(
-            manager = FocusShieldApp.instance.updateManager,
-            installedVersionName = BuildConfig.VERSION_NAME
-        )
-    }
+    studyChannelsViewModel: StudyChannelsViewModel = hiltViewModel(),
+    accountViewModel: AccountViewModel = hiltViewModel(),
+    updateViewModel: UpdateViewModel = hiltViewModel()
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 

@@ -4,6 +4,8 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.engine.UpdateManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -13,9 +15,10 @@ import kotlinx.coroutines.flow.StateFlow
  * screen, the Profile red dot, and a background download can never disagree, and nothing is lost
  * when the screen is recreated (prompt.txt §13). See [UpdateManager] for the actual rules.
  */
-class UpdateViewModel(
+@HiltViewModel
+class UpdateViewModel @Inject constructor(
     private val manager: UpdateManager,
-    val installedVersionName: String
+    @javax.inject.Named("installedVersionName") val installedVersionName: String
 ) : ViewModel() {
 
     val state: StateFlow<UpdateState> = manager.state
