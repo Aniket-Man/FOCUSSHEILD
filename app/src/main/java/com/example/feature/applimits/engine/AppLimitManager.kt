@@ -1131,13 +1131,44 @@ class AppLimitManager private constructor(
     /**
      * True while the app-limit engine still wants the block on screen for [packageName].
      * Used to stop the relaunch loop once the user has resolved the prompt.
+     *
+     * Deliberately cheap. [startOverlayAndVerify] calls this before *every* attempt — every
+     * 1.2 s during the burst, then every 10 s — and the old answer came from
+     * [checkAppLimitDecision], which reaches its verdict through a UsageStatsManager query:
+     * a system service hammered from a background loop, and worse, any transient
+     * PERMISSION_DENIED/QUERY_FAILED mid-retry flipped the verdict to "not blocked" and
+     * silently cancelled a block that was valid when the loop started (issue #49, O2).
+     * So the usage numbers are never re-read here — only the cheap, structural state that can
+     * genuinely retire a pending block: Focus Session taking over, a started session, the
+     * limit turned off or deleted, today's bypass.
      */
-    private suspend fun shouldStillShowOverlay(packageName: String): Boolean =
-        when (checkAppLimitDecision(packageName)) {
-            is AppLimitDecision.REQUIRE_USAGE_SELECTION,
-            is AppLimitDecision.REQUIRE_DAILY_LIMIT_BLOCK -> true
-            else -> false
+    private suspend fun shouldStillShowOverlay(packageName: String): Boolean {
+        // Same answers checkAppLimitDecision gives for these cases, minus the usage query.
+        val focusSession = sessionManager.activeSession.value
+        val isFocusRunning = sessionManager.sessionState.value == com.example.feature.session.domain.SessionState.RUNNING
+        if (isFocusRunning && focusSession != null) return false // Focus Session owns the screen now
+
+        // The user picked a duration: the selection prompt has been answered.
+        if (isSessionActiveFor(packageName)) return false
+
+        val limit = try {
+            appLimitRepository.getLimitByPackage(packageName)
+        } catch (e: Exception) {
+            Log.w(tag, "Could not re-read limit for $packageName; stopping block retry: ${e.message}")
+            null
         }
+        if (limit == null || !limit.isEnabled) return false
+
+        val usage = try {
+            appLimitRepository.getUsage(packageName, appLimitRepository.getTodayDateString())
+        } catch (e: Exception) {
+            Log.w(tag, "Could not re-read usage for $packageName; keeping block: ${e.message}")
+            null
+        }
+        if (usage?.isBypassedForToday == true) return false
+
+        return true
+    }
 
     companion object {
         @Volatile
