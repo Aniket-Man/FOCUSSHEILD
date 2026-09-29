@@ -89,8 +89,19 @@ class AppLimitManager private constructor(
      */
     private val sessionStore = AppLimitSessionStore(appContext)
 
-    // Fast in-memory cache of enabled limits
-    private val enabledLimits = ConcurrentHashMap<String, AppLimitEntity>()
+    /**
+     * Fast in-memory pre-filter of enabled limits — never the source of truth for a decision:
+     * [checkAppLimitDecision] re-reads the row fresh, because a limit disabled in the UI kept
+     * deciding from this cache until the Room flow round-tripped, so protection the user had
+     * just turned off kept blocking (issue #49, C4).
+     *
+     * An immutable map behind a `@Volatile` reference: the refresh builds a new map and swaps
+     * the reference, which readers see either fully old or fully new — the previous
+     * `clear()` + `putAll()` on a shared ConcurrentHashMap let a concurrent gate read an empty
+     * cache mid-refresh and conclude "not limited".
+     */
+    @Volatile
+    private var enabledLimits: Map<String, AppLimitEntity> = emptyMap()
 
     /**
      * When each package's limit-block episode was last recorded, keyed by package.
@@ -241,17 +252,13 @@ class AppLimitManager private constructor(
         scope.launch {
             try {
                 val active = appLimitRepository.getActiveLimits()
-                active.forEach { enabledLimits[it.packageName] = it }
+                enabledLimits = active.associateBy { it.packageName }
             } catch (e: Exception) {
                 Log.e(tag, "Initial load active limits error: ${e.message}")
             }
             appLimitRepository.getActiveLimitsFlow().collectLatest { limits ->
-                // Atomic swap: build a new map then replace the reference to avoid
-                // a window where enabledLimits is empty during repopulation.
-                val updated = ConcurrentHashMap<String, AppLimitEntity>()
-                limits.forEach { updated[it.packageName] = it }
-                enabledLimits.clear()
-                enabledLimits.putAll(updated)
+                // Build the whole map, then swap the reference (atomic, see enabledLimits).
+                enabledLimits = limits.associateBy { it.packageName }
             }
         }
     }
@@ -268,7 +275,7 @@ class AppLimitManager private constructor(
                 appLimitRepository.getLimitByPackage(packageName)
             }
             if (fromDb != null && fromDb.isEnabled) {
-                enabledLimits[packageName] = fromDb
+                enabledLimits = enabledLimits + (packageName to fromDb)
                 true
             } else {
                 false
@@ -279,22 +286,22 @@ class AppLimitManager private constructor(
     }
 
     fun onLimitSaved(limit: AppLimitEntity) {
-        if (limit.isEnabled) {
-            enabledLimits[limit.packageName] = limit
+        enabledLimits = if (limit.isEnabled) {
+            enabledLimits + (limit.packageName to limit)
         } else {
-            enabledLimits.remove(limit.packageName)
+            enabledLimits - limit.packageName
         }
     }
 
     fun onLimitDeleted(packageName: String) {
-        enabledLimits.remove(packageName)
+        enabledLimits = enabledLimits - packageName
     }
 
     fun getLimit(packageName: String): AppLimitEntity? {
         return enabledLimits[packageName] ?: try {
             kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 appLimitRepository.getLimitByPackage(packageName)?.also {
-                    if (it.isEnabled) enabledLimits[it.packageName] = it
+                    if (it.isEnabled) enabledLimits = enabledLimits + (it.packageName to it)
                 }
             }
         } catch (_: Exception) { null }
@@ -326,14 +333,15 @@ class AppLimitManager private constructor(
             return AppLimitDecision.ALLOW_FOCUS_SESSION_RULES
         }
 
-        val limit = enabledLimits[packageName] ?: run {
-            val fromDb = appLimitRepository.getLimitByPackage(packageName)
-            if (fromDb != null && fromDb.isEnabled) {
-                enabledLimits[packageName] = fromDb
-                fromDb
-            } else {
-                null
-            }
+        // The limit row is read fresh, every decision (issue #49, C4). The cache above is only
+        // a pre-filter for the hot paths; deciding from it let a just-disabled (or deleted)
+        // limit keep blocking until the flow emission landed, and cached rows were never
+        // invalidated by edits made elsewhere in the app.
+        val limit = try {
+            appLimitRepository.getLimitByPackage(packageName)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to read limit for $packageName; treating as not limited: ${e.message}")
+            null
         } ?: return AppLimitDecision.ALLOW_NOT_LIMITED
 
         if (!limit.isEnabled) return AppLimitDecision.ALLOW_NOT_LIMITED
@@ -594,7 +602,10 @@ class AppLimitManager private constructor(
                 val todayDate = appLimitRepository.getTodayDateString()
                 val usage = appLimitRepository.getUsage(packageName, todayDate)
                 val currentCount = usage?.emergencyUsesCount ?: 0
-                val limit = enabledLimits[packageName] ?: appLimitRepository.getLimitByPackage(packageName)
+                // Fresh row: the emergency allowance is enforcement, not display — a stale
+                // cache entry could grant (or refuse) a pass after the user edited the limit
+                // (issue #49, C4).
+                val limit = appLimitRepository.getLimitByPackage(packageName)
                 val allowedCount = limit?.emergencyUsesAllowed ?: 1
                 if (currentCount >= allowedCount) {
                     Log.w(tag, "Emergency uses exhausted for $packageName (count: $currentCount, allowed: $allowedCount)")
@@ -640,7 +651,7 @@ class AppLimitManager private constructor(
     fun removeLimitPermanently(packageName: String) {
         scope.launch {
             appLimitRepository.deleteLimit(packageName)
-            enabledLimits.remove(packageName)
+            enabledLimits = enabledLimits - packageName
             _activeSession.value = null
             stopTicker()
             clearPersistedSession()
