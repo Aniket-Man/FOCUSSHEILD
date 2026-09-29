@@ -203,8 +203,17 @@ class FocusAccessibilityService : AccessibilityService() {
             val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
             val now = System.currentTimeMillis()
 
-            // Update foreground tracking on window state changes
-            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // Update foreground tracking on window state changes — and, until something has been
+            // tracked at all, on whatever the first event is (issue #49, W2). After a service
+            // (re)bind the first event to arrive can be WINDOW_CONTENT_CHANGED/VIEW_SCROLLED
+            // instead of a window transition; gating only on window-state changes then left
+            // lastForegroundPackage/currentForegroundPackage null until one happened, so limit
+            // evaluation ran blind and isBlockedAppInForeground() could not tell where the user
+            // was. Seeding on the first event is idempotent for the common case (the event's own
+            // package) and the very next window-state change corrects any exotic mismatch.
+            val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                    eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            if (isWindowStateChange || lastForegroundPackage == null) {
                 if (lastForegroundPackage != null &&
                     YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage) &&
                     !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
