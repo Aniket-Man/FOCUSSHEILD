@@ -65,7 +65,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -138,15 +140,24 @@ fun WebsiteBlockerSheet(
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val scope = rememberCoroutineScope()
 
     val isDark = LocalFocusColors.current.isDark
     val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
 
+    // Nested-sheet gesture-dismissal fix: this sheet is stacked on top of the session-setup
+    // sheet. Dismissing it by tapping "Done" or pressing back used to flip the caller's
+    // boolean immediately, yanking the ModalBottomSheet out of composition with no slide-out
+    // animation (it just blinked away, unlike a swipe-down). Animate the sheet to Hidden first,
+    // then notify the caller once it is actually gone. A swipe-down already lands here after the
+    // framework has hidden the sheet, so hide() is a no-op in that path.
     val handleDismiss: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
-        onDismiss()
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) onDismiss()
+        }
     }
 
     DisposableEffect(Unit) {

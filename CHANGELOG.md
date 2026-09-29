@@ -23,6 +23,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). `versionN
 
 ### Fixed
 
+* Nested bottom-sheet gesture dismissal: swiping down (or tapping the scrim) while a sub-page of
+  the focus-session setup sheet — focus time, break or select apps — was open used to drive the
+  sheet to `Hidden` but only reset the sub-view, leaving the setup sheet stranded off-screen while
+  the caller still thought it was open (a soft-lock). It now re-expands and returns to the main
+  page, matching the in-sheet back gesture. The stacked `WebsiteBlockerSheet` and
+  `YouTubeStudyChannelManagerSheet` now animate to `Hidden` before leaving composition, so
+  dismissing them via "Done"/back slides out instead of blinking away.
 * Midnight re-arm is no longer lost when the daily-reset database work throws; alarms are armed
   first and in a `finally` (#28).
 * `FocusScheduleRepository.syncAllAlarms` is a `suspend` function and is awaited by the boot

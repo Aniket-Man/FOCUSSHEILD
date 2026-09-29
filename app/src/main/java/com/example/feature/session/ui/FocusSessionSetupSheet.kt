@@ -1,4 +1,4 @@
-﻿package com.example.feature.session.ui
+package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -138,7 +138,16 @@ fun FocusSessionSetupSheet(
     ModalBottomSheet(
         onDismissRequest = {
             if (activeSubView != SetupSubView.MAIN) {
+                // Nested-sheet gesture-dismissal fix: a swipe-down or scrim tap while a
+                // sub-page (focus time / break / select apps) is open used to only reset
+                // activeSubView. But by the time onDismissRequest fires the gesture has ALREADY
+                // animated sheetState to Hidden, so the whole sheet slid off-screen and never
+                // returned — the setup UI looked closed while the parent still believed it was
+                // open (a soft-lock: nothing responded until the process was restarted).
+                // Re-expand the sheet as we drop back to the main page so the gesture behaves
+                // like an in-sheet "back", matching the BackHandler below.
                 activeSubView = SetupSubView.MAIN
+                coroutineScope.launch { sheetState.show() }
             } else {
                 onDismiss()
             }

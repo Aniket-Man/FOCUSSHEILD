@@ -140,15 +140,23 @@ fun YouTubeStudyChannelManagerSheet(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
 
     val isDark = LocalFocusColors.current.isDark
     val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
 
+    // Nested-sheet gesture-dismissal fix: this manager sheet is stacked on top of the
+    // session-setup sheet. Dismissing via "Done"/back used to flip the caller's boolean
+    // instantly, removing the ModalBottomSheet from composition with no slide-out animation.
+    // Animate to Hidden first, then notify the caller. A swipe-down reaches here after the
+    // framework has already hidden the sheet, so hide() simply resolves immediately.
     val handleDismiss: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
-        onDismiss()
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) onDismiss()
+        }
     }
 
     DisposableEffect(Unit) {
