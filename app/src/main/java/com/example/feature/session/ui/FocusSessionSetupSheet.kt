@@ -41,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -103,15 +104,39 @@ fun FocusSessionSetupSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
 
     // rememberSaveable, not remember: a rotation (or any configuration change) used to throw the
     // user back to the main page of the sheet, losing whichever sub-sheet they were filling in
     // (issue #28). The enum is saved by ordinal so it survives process death too.
-    var activeSubView by rememberSaveable(stateSaver = SetupSubViewSaver) {
+    val activeSubViewState = rememberSaveable(stateSaver = SetupSubViewSaver) {
         mutableStateOf(SetupSubView.MAIN)
     }
+    var activeSubView by activeSubViewState
+
+    // Vetoes the Hidden anchor while a nested sub-sheet (focus time / break / select apps) is
+    // open, so a swipe-down or scrim tap acts like "back": the sheet springs back to Expanded
+    // and the sub-sheet closes. Material3 settles the sheet to Hidden *before* invoking
+    // onDismissRequest, so intercepting there (the old approach) left the sheet
+    // composed-but-hidden — an invisible modal window that swallowed every touch and froze the
+    // app. confirmValueChange is the only hook that runs before the hide is committed.
+    //
+    // Explicitly remember()-ed: rememberModalBottomSheetState keys its saved state on this
+    // lambda, so an unstable identity would silently recreate the sheet state mid-interaction.
+    val confirmSheetValueChange = remember(activeSubViewState) {
+        { target: SheetValue ->
+            if (target == SheetValue.Hidden && activeSubViewState.value != SetupSubView.MAIN) {
+                activeSubViewState.value = SetupSubView.MAIN
+                false
+            } else {
+                true
+            }
+        }
+    }
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = confirmSheetValueChange
+    )
     // Deliberately NOT saveable: this holds callbacks, which cannot be written to a Bundle. A
     // pending prompt is re-derived from the toggle the user taps again.
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
@@ -137,11 +162,12 @@ fun FocusSessionSetupSheet(
 
     ModalBottomSheet(
         onDismissRequest = {
-            if (activeSubView != SetupSubView.MAIN) {
-                activeSubView = SetupSubView.MAIN
-            } else {
-                onDismiss()
-            }
+            // By the time this fires the sheet has already settled to Hidden, so tearing it
+            // down is the only valid response. Gesture-dismiss inside a nested sub-sheet is
+            // intercepted in confirmSheetValueChange above (which can still veto the hide);
+            // handling it here instead used to leave the sheet composed-but-hidden, blocking
+            // all input behind an invisible modal window.
+            onDismiss()
         },
         sheetState = sheetState,
         properties = ModalBottomSheetProperties(
