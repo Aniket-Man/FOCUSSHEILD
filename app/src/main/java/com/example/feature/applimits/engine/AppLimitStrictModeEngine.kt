@@ -29,7 +29,8 @@ class AppLimitStrictModeEngine private constructor(
 ) {
     private val tag = "AppLimitStrictEngine"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val remindedSessions = ConcurrentHashMap<String, Long>()
+    /** Package → id of the temporary session a reminder was already posted for (issue #54). */
+    private val remindedSessions = ConcurrentHashMap<String, String>()
 
     private val channelId = "app_limit_reminders_channel"
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -79,25 +80,35 @@ class AppLimitStrictModeEngine private constructor(
 
     /**
      * Evaluates whether to show a pre-limit reminder notification (e.g., 1 minute remaining).
+     *
+     * The verdict itself lives in [AppLimitReminderPolicy]: the reminder belongs to *actual use*,
+     * so it is posted only while the session is running and the limited app is the app on screen,
+     * and only once per session. The old rule — "whenever under a minute is left, at most once
+     * every two minutes" — kept notifying the user about an app they had walked away from,
+     * because the session ticker (and therefore this check) keeps running while the session is
+     * paused and the parked clock never leaves the window (issue #54).
      */
     fun checkAndSendReminderIfNeeded(
         packageName: String,
         appName: String,
         remainingMillis: Long,
-        showRemindersSetting: Boolean
+        showRemindersSetting: Boolean,
+        sessionId: String,
+        isPaused: Boolean,
+        isLimitedAppInForeground: Boolean
     ) {
-        if (!showRemindersSetting) return
-        val remainingSeconds = remainingMillis / 1000L
+        val shouldRemind = AppLimitReminderPolicy.shouldRemind(
+            remainingMillis = remainingMillis,
+            isPaused = isPaused,
+            isLimitedAppInForeground = isLimitedAppInForeground,
+            showRemindersSetting = showRemindersSetting,
+            sessionId = sessionId,
+            lastRemindedSessionId = remindedSessions[packageName]
+        )
+        if (!shouldRemind) return
 
-        // Trigger reminder if between 30s and 60s remaining and hasn't been notified yet for this session window
-        if (remainingSeconds in 1..60) {
-            val lastReminded = remindedSessions[packageName] ?: 0L
-            val now = System.currentTimeMillis()
-            if (now - lastReminded > 120_000L) { // Only once every 2 mins
-                remindedSessions[packageName] = now
-                sendLimitReminderNotification(packageName, appName, remainingSeconds.toInt())
-            }
-        }
+        remindedSessions[packageName] = sessionId
+        sendLimitReminderNotification(packageName, appName, (remainingMillis / 1000L).toInt())
     }
 
     private fun sendLimitReminderNotification(packageName: String, appName: String, remainingSec: Int) {

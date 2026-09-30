@@ -93,6 +93,8 @@ fun SelectAppsToBlockSheet(
     onBrowserOptionChange: (SpecialAppOption) -> Unit,
     onToggleDistractingMaster: (Boolean, Set<String>) -> Unit,
     onToggleAppBlocked: (String, Boolean) -> Unit,
+    onOpenYouTubeChannels: () -> Unit,
+    onOpenWebsiteBlocker: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -120,29 +122,12 @@ fun SelectAppsToBlockSheet(
 
     var isSpecialAppsExpanded by remember { mutableStateOf(true) }
     var isDistractingExpanded by remember { mutableStateOf(true) }
-    var showYouTubeChannelsDialog by remember { mutableStateOf(false) }
-    var showWebsiteBlockerDialog by remember { mutableStateOf(false) }
 
-    // Nested BackHandler: step back dismisses sub-dialogs first before returning to setup
-    androidx.activity.compose.BackHandler(enabled = showYouTubeChannelsDialog || showWebsiteBlockerDialog) {
-        if (showYouTubeChannelsDialog) {
-            showYouTubeChannelsDialog = false
-        } else if (showWebsiteBlockerDialog) {
-            showWebsiteBlockerDialog = false
-        }
-    }
-
-    if (showYouTubeChannelsDialog) {
-        ManageYouTubeChannelsDialog(onDismiss = { showYouTubeChannelsDialog = false })
-    }
-
-    if (showWebsiteBlockerDialog) {
-        val websiteSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        com.example.feature.websiteblocker.ui.WebsiteBlockerSheet(
-            sheetState = websiteSheetState,
-            onDismiss = { showWebsiteBlockerDialog = false }
-        )
-    }
+    // The YouTube channel manager and the website blocker used to be hosted here as nested
+    // ModalBottomSheets, each with its own window and its own dismissal lifecycle on top of the
+    // setup sheet's. They are pages of the one setup sheet now (SetupSubView.YOUTUBE_CHANNELS /
+    // SetupSubView.WEBSITE_BLOCKER), so this screen only reports the navigation intent upward and
+    // back handling belongs to the single owner of the sheet (issue #52).
 
     LaunchedEffect(Unit) {
         val limitEntities = try { com.example.FocusShieldApp.instance.appLimitRepository.getAllLimits() } catch (e: Exception) { emptyList() }
@@ -338,7 +323,7 @@ fun SelectAppsToBlockSheet(
                                     selectedOption = youtubeOption,
                                     onOptionSelect = onYoutubeOptionChange,
                                     studyModeSubtext = "Watch only study channels >",
-                                    onSubtextClick = { showYouTubeChannelsDialog = true }
+                                    onSubtextClick = onOpenYouTubeChannels
                                 )
 
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -381,7 +366,7 @@ fun SelectAppsToBlockSheet(
                                     selectedOption = browserOption,
                                     onOptionSelect = onBrowserOptionChange,
                                     studyModeSubtext = "Blocks adult sites & manually added sites in browser >",
-                                    onSubtextClick = { showWebsiteBlockerDialog = true }
+                                    onSubtextClick = onOpenWebsiteBlocker
                                 )
                             }
                         }
@@ -719,13 +704,4 @@ val PRESET_STUDY_CHANNELS = listOf(
     PresetChannel("Osmosis", "@osmosis", "Medical"),
     PresetChannel("Ninja Nerd", "@NinjaNerdLectures", "Medical")
 )
-
-@Composable
-fun ManageYouTubeChannelsDialog(
-    onDismiss: () -> Unit
-) {
-    com.example.feature.channels.YouTubeStudyChannelManagerSheet(
-        onDismiss = onDismiss
-    )
-}
 

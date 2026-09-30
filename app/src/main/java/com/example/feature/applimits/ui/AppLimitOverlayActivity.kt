@@ -126,6 +126,32 @@ class AppLimitOverlayActivity : ComponentActivity() {
         finish()
     }
 
+    /**
+     * Closes the blocker by taking the user to the launcher — the "Close <app>" button and system
+     * back both mean exactly this.
+     *
+     * The engine is told first. Leaving the app *is* an answer to the blocker, but nothing used to
+     * record it: `AppLimitManager` had already dropped the expired session before raising this
+     * screen, so the events that arrive while the limited app is torn down behind us re-evaluated
+     * the limit and threw a fresh "how long do you want to use?" popup over the home screen the
+     * user had just reached (issue #53). Enforcement resumes on their next genuine entry.
+     */
+    private fun goHomeAndFinish(packageName: String?) {
+        if (!packageName.isNullOrBlank()) {
+            try {
+                AppLimitManager.instance.onBlockerDismissedByUser(packageName)
+            } catch (e: Exception) {
+                android.util.Log.w("AppLimitOverlay", "Could not record blocker dismissal: ${e.message}")
+            }
+        }
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(homeIntent)
+        finish()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -133,12 +159,7 @@ class AppLimitOverlayActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                startActivity(homeIntent)
-                finish()
+                goHomeAndFinish(overlayParamsState.value?.packageName)
             }
         })
 
@@ -211,14 +232,7 @@ class AppLimitOverlayActivity : ComponentActivity() {
                             AppLimitManager.instance.leaveBlockForToday(data.packageName)
                             openLimitedAppAndFinish(data.packageName)
                         },
-                        onGoToHome = {
-                            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                                addCategory(Intent.CATEGORY_HOME)
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            startActivity(homeIntent)
-                            finish()
-                        }
+                        onGoToHome = { goHomeAndFinish(data.packageName) }
                     )
                 }
             }
