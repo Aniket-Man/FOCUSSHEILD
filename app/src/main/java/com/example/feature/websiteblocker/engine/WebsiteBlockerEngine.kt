@@ -61,27 +61,11 @@ class WebsiteBlockerEngine private constructor(
 
         val isSessionActive = isStudySessionActive()
 
-        // 1. ENGINE 1: Automatic Adult Website Blocker (Lexical + Corpus + DNS Classifier)
+        // 1. ENGINE 1: Automatic Adult Website Blocker (Lexical fast path + family-DNS verdict)
         if (currentPreferences.isAutoAdultWebsiteBlockingEnabled || isSessionActive) {
-            // Check Lexical, TLD, Corpus, and Search Query Classifier
-            val lexicalResult = AdultLexicalClassifier.isAdultContent(rawUrl, cleanDomain)
-            if (lexicalResult is AdultClassificationResult.Adult) {
-                Log.w(TAG, "[Engine 1: Auto Adult] Blocked adult domain via ${lexicalResult.matchedRule}: $cleanDomain (URL: $rawUrl)")
-                return WebsiteBlockDecision.Blocked(
-                    domain = cleanDomain,
-                    engineType = "ADULT_AUTOMATIC",
-                    reason = "Adult Content Filter (${lexicalResult.matchedRule})"
-                )
-            }
-
-            // Check Live DNS Family Filter Classifier
-            if (AdultDnsClassifier.isDomainBlockedByDns(cleanDomain)) {
-                Log.w(TAG, "[Engine 1: Auto Adult] Blocked adult domain via Live DNS Classifier: $cleanDomain (URL: $rawUrl)")
-                return WebsiteBlockDecision.Blocked(
-                    domain = cleanDomain,
-                    engineType = "ADULT_AUTOMATIC",
-                    reason = "Family DNS Filter (Adult Content Blocked)"
-                )
+            evaluateAutoAdult(rawUrl, cleanDomain)?.let { decision ->
+                Log.w(TAG, "[Engine 1: Auto Adult] Blocked domain via ${decision.reason}: $cleanDomain (URL: $rawUrl)")
+                return decision
             }
         }
 
@@ -151,6 +135,37 @@ class WebsiteBlockerEngine private constructor(
 
         val instance: WebsiteBlockerEngine?
             get() = INSTANCE
+
+        /**
+         * Engine 1 decision (offline lexical fast path, then family-DNS verdict), extracted
+         * as a pure function so first-visit DNS classification is unit-testable (issue #56).
+         * Returns null when Engine 1 does not block the domain.
+         */
+        internal fun evaluateAutoAdult(rawUrl: String, domain: String): WebsiteBlockDecision.Blocked? {
+            val cleanDomain = domain.trim().lowercase()
+            if (cleanDomain.isBlank()) return null
+
+            // Offline lexical / corpus / TLD classifier (fast path, no network).
+            val lexicalResult = AdultLexicalClassifier.isAdultContent(rawUrl, cleanDomain)
+            if (lexicalResult is AdultClassificationResult.Adult) {
+                return WebsiteBlockDecision.Blocked(
+                    domain = cleanDomain,
+                    engineType = "ADULT_AUTOMATIC",
+                    reason = "Adult Content Filter (${lexicalResult.matchedRule})"
+                )
+            }
+
+            // Family-DNS verdict (0.0.0.0 sinkhole = adult), decides on the first visit.
+            if (AdultDnsClassifier.verdict(cleanDomain) == AdultDnsVerdict.ADULT) {
+                return WebsiteBlockDecision.Blocked(
+                    domain = cleanDomain,
+                    engineType = "ADULT_AUTOMATIC",
+                    reason = "Family DNS Filter (Adult Content Blocked)"
+                )
+            }
+
+            return null
+        }
 
         // Built-in Adult Domain List (Engine 1)
         private val TOP_ADULT_DOMAINS = setOf(
