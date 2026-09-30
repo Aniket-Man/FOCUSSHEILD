@@ -79,11 +79,42 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.feature.session.SessionSetupState
 import com.example.feature.session.SessionViewModel
 
-private enum class SetupSubView {
+/**
+ * The pages of the session setup flow. All of them live inside the **one** ModalBottomSheet opened
+ * by [FocusSessionSetupSheet].
+ *
+ * WEBSITE_BLOCKER and YOUTUBE_CHANNELS used to be nested `ModalBottomSheet`s opened from inside
+ * SELECT_APPS (issue #52). That put a second modal window on top of the sheet's own window, and
+ * removed it from the composition the instant dismissal was *requested* rather than when the sheet
+ * was actually hidden — so a downward drag on the inner sheet handed the rest of the interaction
+ * straight to the sheet underneath. Appending them here (ordinals of the existing entries are
+ * unchanged, so saved state still restores) keeps every page in a single sheet with a single
+ * gesture owner.
+ */
+internal enum class SetupSubView {
     MAIN,
     FOCUS_TIME,
     BREAK,
-    SELECT_APPS
+    SELECT_APPS,
+    WEBSITE_BLOCKER,
+    YOUTUBE_CHANNELS
+}
+
+/**
+ * The page one step back, or null when there is nowhere left to go and the sheet itself should
+ * close.
+ *
+ * One mapping, used by system back, the in-sheet close/back buttons **and** drag-to-dismiss, so
+ * the three cannot disagree — the drag path used to be the odd one out, jumping straight to MAIN
+ * from any page and leaving the sheet hidden-but-composed.
+ */
+internal fun SetupSubView.backTarget(): SetupSubView? = when (this) {
+    SetupSubView.MAIN -> null
+    SetupSubView.FOCUS_TIME,
+    SetupSubView.BREAK,
+    SetupSubView.SELECT_APPS -> SetupSubView.MAIN
+    SetupSubView.WEBSITE_BLOCKER,
+    SetupSubView.YOUTUBE_CHANNELS -> SetupSubView.SELECT_APPS
 }
 
 /**
@@ -135,14 +166,35 @@ fun FocusSessionSetupSheet(
 
     val coroutineScope = rememberCoroutineScope()
 
-    ModalBottomSheet(
-        onDismissRequest = {
-            if (activeSubView != SetupSubView.MAIN) {
-                activeSubView = SetupSubView.MAIN
-            } else {
+    // Closing for real: play the exit animation, then leave the composition.
+    val closeSheet: () -> Unit = {
+        coroutineScope.launch {
+            try {
+                sheetState.hide()
+            } finally {
                 onDismiss()
             }
-        },
+        }
+    }
+
+    // Material 3 reports `onDismissRequest` *after* it has already animated the sheet to Hidden,
+    // so a request that only rewrites navigation state left the sheet composed and invisible: a
+    // full-screen modal window showing nothing while swallowing every touch, with the setup UI
+    // apparently frozen behind it (issue #52). Stepping back a page therefore has to put the sheet
+    // back on screen; only the last step actually dismisses.
+    val handleSheetDismissRequest: () -> Unit = {
+        val back = activeSubView.backTarget()
+        if (back != null) {
+            activeSubView = back
+            coroutineScope.launch { sheetState.show() }
+        } else {
+            // Already hidden by Material 3 — nothing left to animate.
+            onDismiss()
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = handleSheetDismissRequest,
         sheetState = sheetState,
         properties = ModalBottomSheetProperties(
             shouldDismissOnBackPress = false
@@ -152,17 +204,14 @@ fun FocusSessionSetupSheet(
         dragHandle = null,
         modifier = modifier
     ) {
+        // The only back handler in the flow now that the nested sheets are gone: one step per
+        // press, WEBSITE_BLOCKER/YOUTUBE_CHANNELS -> SELECT_APPS -> MAIN -> close (issue #52).
         androidx.activity.compose.BackHandler(enabled = true) {
-            if (activeSubView != SetupSubView.MAIN) {
-                activeSubView = SetupSubView.MAIN
+            val back = activeSubView.backTarget()
+            if (back != null) {
+                activeSubView = back
             } else {
-                coroutineScope.launch {
-                    try {
-                        sheetState.hide()
-                    } finally {
-                        onDismiss()
-                    }
-                }
+                closeSheet()
             }
         }
 
@@ -309,7 +358,30 @@ fun FocusSessionSetupSheet(
                         },
                         onToggleDistractingMaster = { enabled, allPkgs -> viewModel.toggleDistractingMaster(enabled, allPkgs) },
                         onToggleAppBlocked = { pkg, blocked -> viewModel.toggleAppBlocked(pkg, blocked) },
+                        onOpenYouTubeChannels = { activeSubView = SetupSubView.YOUTUBE_CHANNELS },
+                        onOpenWebsiteBlocker = { activeSubView = SetupSubView.WEBSITE_BLOCKER },
                         onClose = { activeSubView = SetupSubView.MAIN }
+                    )
+                }
+
+                SetupSubView.WEBSITE_BLOCKER -> {
+                    // The same content the nested sheet used to host, and the same content
+                    // WebsiteBlockerScreen renders standalone — just without a second modal window
+                    // of its own (issue #52).
+                    com.example.feature.websiteblocker.ui.WebsiteBlockerSheetContent(
+                        onDismiss = { activeSubView = SetupSubView.SELECT_APPS },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.84f)
+                    )
+                }
+
+                SetupSubView.YOUTUBE_CHANNELS -> {
+                    com.example.feature.channels.YouTubeStudyChannelContent(
+                        onDismiss = { activeSubView = SetupSubView.SELECT_APPS },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.84f)
                     )
                 }
             }

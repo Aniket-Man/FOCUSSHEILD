@@ -120,6 +120,13 @@ class AppLimitManager private constructor(
     val activeSession: StateFlow<ActiveAppUsageSession?> = _activeSession.asStateFlow()
 
     /**
+     * Packages whose blocker the user answered by leaving the app, and which must therefore not be
+     * prompted again until they genuinely re-enter it (issue #53). See [AppLimitReentryGate] for
+     * why this is a re-entry gate and not a timer.
+     */
+    private val reentryGate = AppLimitReentryGate()
+
+    /**
      * Non-null while the blocker pipeline is failing: set when a retry episode exhausts its
      * horizon without [AppLimitOverlayActivity] ever confirming on screen, cleared when a launch
      * is confirmed or a fresh request comes in. Failed starts were previously log-only even
@@ -358,6 +365,15 @@ class AppLimitManager private constructor(
             return AppLimitDecision.ALLOW_ACTIVE_SESSION
         }
 
+        // The user already answered this app's blocker by closing the app. Nothing else records
+        // that choice — `_activeSession` is null by the time the "time's up" blocker is even
+        // raised — so without this the events that arrive while the app is being torn down behind
+        // the blocker re-prompt the user with a fresh selection popup over the home screen they
+        // just reached (issue #53). The gate opens again the moment they really re-enter the app.
+        if (reentryGate.isArmedFor(packageName)) {
+            return AppLimitDecision.ALLOW_BLOCKER_DISMISSED
+        }
+
         // Check remaining daily allowance from system usage stats and database
         val dailyLimitMinutes = limit.dailyLimitMinutes
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
@@ -456,6 +472,10 @@ class AppLimitManager private constructor(
         currentForegroundPackage = packageName
         val now = System.currentTimeMillis()
 
+        // Movement is what opens the re-entry gate: leaving confirms the exit, coming back retires
+        // the suppression so the next decision is taken normally (issue #53).
+        reentryGate.onForegroundPackage(packageName)
+
         // A block whose launch never landed is re-armed the moment the user steps back into the app
         // it belongs to. This is the one signal that does not depend on the app producing further
         // accessibility events while its blocker is missing, so a static screen (a paused video,
@@ -540,6 +560,9 @@ class AppLimitManager private constructor(
         _activeSession.value = initialSession
         currentForegroundPackage = packageName
         lastForegroundTimestamp = System.currentTimeMillis()
+        // A duration was chosen, so any earlier "dismissed by closing the app" suppression for
+        // this package is spent (issue #53).
+        reentryGate.clear(packageName)
         persistActiveSession()
         startTicker()
 
@@ -624,6 +647,7 @@ class AppLimitManager private constructor(
         scope.launch {
             val todayDate = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, todayDate, true)
+            reentryGate.clear(packageName)
             _activeSession.value = null
             stopTicker()
             clearPersistedSession()
@@ -638,6 +662,7 @@ class AppLimitManager private constructor(
         scope.launch {
             appLimitRepository.deleteLimit(packageName)
             enabledLimits = enabledLimits - packageName
+            reentryGate.clear(packageName)
             _activeSession.value = null
             stopTicker()
             clearPersistedSession()
@@ -726,14 +751,22 @@ class AppLimitManager private constructor(
 
                 val updatedSession = _activeSession.value?.takeIf { it.id == session.id } ?: break
 
-                // Reminder check: notify user when time is almost up if enabled
+                // Reminder check: notify the user when time is almost up, but only while they are
+                // actually in the app (issue #54). This ticker keeps running while the session is
+                // parked outside the app, and the parked clock satisfies the "under a minute left"
+                // window on every tick — which is how the reminder ended up repeating forever for
+                // an app the user was not using. Pause state and the tracked foreground package
+                // are both passed in; the once-per-session rule lives in AppLimitReminderPolicy.
                 val limit = enabledLimits[updatedSession.packageName]
                 if (limit != null && limit.showRemindersBeforeLimit) {
                     AppLimitStrictModeEngine.instance.checkAndSendReminderIfNeeded(
                         packageName = updatedSession.packageName,
                         appName = updatedSession.appName,
                         remainingMillis = updatedSession.remainingSessionMillis,
-                        showRemindersSetting = limit.showRemindersBeforeLimit
+                        showRemindersSetting = limit.showRemindersBeforeLimit,
+                        sessionId = updatedSession.id,
+                        isPaused = updatedSession.isPaused,
+                        isLimitedAppInForeground = currentForegroundPackage == updatedSession.packageName
                     )
                 }
 
@@ -1088,8 +1121,32 @@ class AppLimitManager private constructor(
     private fun rearmPendingOverlayIfNeeded(packageName: String) {
         if (!pendingOverlayIntents.containsKey(packageName)) return
         if (AppLimitOverlayActivity.isVisibleFor(packageName)) return
+        // A blocker the user has already dismissed by leaving must not come back with them.
+        if (reentryGate.isArmedFor(packageName)) return
         Log.i(tag, "Re-arming pending blocker for $packageName")
         startOverlayAndVerify(packageName)
+    }
+
+    /**
+     * The user answered [packageName]'s blocker by closing the app (the "Close <app>" button, or
+     * system back, both of which go to the launcher).
+     *
+     * Everything that could otherwise put a blocker back on screen for this app is retired here:
+     * the pending launch request, the retry loop working on it, the launch debounce, and — through
+     * [AppLimitReentryGate] — the decision itself, until the app is genuinely opened again. Before
+     * this existed the request was deliberately left armed for a later re-entry while the gate
+     * simultaneously re-decided from scratch, so the dismissal produced a second popup immediately
+     * and a stale one later (issue #53).
+     *
+     * Safe to call from the main thread; does no I/O.
+     */
+    fun onBlockerDismissedByUser(packageName: String) {
+        if (packageName.isBlank()) return
+        reentryGate.onBlockerDismissed(packageName)
+        pendingOverlayIntents.remove(packageName)
+        overlayLaunchJobs.remove(packageName)?.cancel()
+        lastOverlayLaunchPerPackage.remove(packageName)
+        Log.i(tag, "Blocker for $packageName dismissed by the user; suppressing until they reopen it")
     }
 
     /**
@@ -1136,6 +1193,10 @@ class AppLimitManager private constructor(
 
         // The user picked a duration: the selection prompt has been answered.
         if (isSessionActiveFor(packageName)) return false
+
+        // The user answered by closing the app instead (issue #53). A loop already in flight when
+        // they pressed the button must stop too, not just the next decision.
+        if (reentryGate.isArmedFor(packageName)) return false
 
         val limit = try {
             appLimitRepository.getLimitByPackage(packageName)
@@ -1191,6 +1252,12 @@ sealed interface AppLimitDecision {
     data object ALLOW_NOT_LIMITED : AppLimitDecision
     data object ALLOW_BYPASSED_TODAY : AppLimitDecision
     data object ALLOW_ACTIVE_SESSION : AppLimitDecision
+
+    /**
+     * The user answered this app's blocker by closing the app, and has not opened it again since.
+     * Enforcement resumes on their next genuine entry (issue #53).
+     */
+    data object ALLOW_BLOCKER_DISMISSED : AppLimitDecision
 
     data class REQUIRE_USAGE_SELECTION(
         val packageName: String,
