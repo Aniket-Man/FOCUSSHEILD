@@ -111,7 +111,7 @@ class UpstreamDnsTest {
 
     /** Minimal real UDP server: replies with the same transaction id / question and one A record. */
     private class EchoDnsServer {
-        private val socket = DatagramSocket(InetAddress.getLoopbackAddress(), 0)
+        private val socket = DatagramSocket(0, InetAddress.getLoopbackAddress())
         private val running = AtomicBoolean(true)
         private val started = CountDownLatch(1)
         private val thread = Thread {
