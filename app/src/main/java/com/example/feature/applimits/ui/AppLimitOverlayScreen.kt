@@ -36,8 +36,6 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FormatQuote
-import androidx.compose.material.icons.rounded.HourglassBottom
-import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Security
@@ -78,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.example.R
 import com.example.core.design.FocusColors
+import com.example.core.ui.FocusBrandMark
 import com.example.core.design.FocusShapes
 import com.example.core.ui.FocusLottieAnimation
 import com.example.feature.applimits.engine.AppLimitOverlayMode
@@ -152,7 +151,7 @@ fun AppLimitOverlayScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar: Minimalist Hourglass + "Turn off" button (Hidden in Strict Mode)
+            // Top Bar: compact Focus brand mark + "Turn off" button (hidden in Strict Mode)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -160,16 +159,16 @@ fun AppLimitOverlayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Minimalist Hourglass Symbol (exact style from image)
+                // Folded-map mark, retaining the previous compact monochrome treatment
                 Box(
                     modifier = Modifier
                         .size(36.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.HourglassEmpty,
+                        imageVector = FocusBrandMark,
                         contentDescription = "Focus Limit",
-                        tint = Color.White,
+                        tint = FocusColors.Primary,
                         modifier = Modifier.size(28.dp)
                     )
                 }

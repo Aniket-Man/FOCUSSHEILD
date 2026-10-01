@@ -13,8 +13,10 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.example.R
 
 /**
  * Over-the-display Study Mode popup shown over the YouTube Home feed during an active study session.
@@ -169,11 +171,11 @@ object YouTubeHomeFeedOverlayManager {
             elevation = dp(12).toFloat()
         }
 
-        // Shield icon
-        val icon = TextView(context).apply {
-            text = "🛡️"
-            textSize = 30f
-            gravity = Gravity.CENTER
+        // Folded-map Focus mark, in the same compact purple style as the in-app button
+        val icon = ImageView(context).apply {
+            setImageResource(R.drawable.ic_focus_brand_mark)
+            setColorFilter(Color.parseColor("#9B7CF6"))
+            scaleType = ImageView.ScaleType.FIT_CENTER
         }
 
         // Title
@@ -236,7 +238,12 @@ object YouTubeHomeFeedOverlayManager {
             }
         }
 
-        card.addView(icon)
+        card.addView(
+            icon,
+            LinearLayout.LayoutParams(dp(34), dp(34)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+        )
         card.addView(title)
         card.addView(message)
         card.addView(subMessage)

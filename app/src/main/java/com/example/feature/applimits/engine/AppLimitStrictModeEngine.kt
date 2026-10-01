@@ -123,7 +123,7 @@ class AppLimitStrictModeEngine private constructor(
         )
 
         val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_focus_notification)
             .setContentTitle("⏰ $appName Time Almost Up")
             .setContentText("You have less than 1 minute left before your $appName limit is reached. Wrap up your task!")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

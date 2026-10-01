@@ -21,11 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +49,7 @@ enum class BottomTab(
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
-    FOCUS("Focus", Icons.Rounded.HourglassBottom, Icons.Outlined.HourglassEmpty),
+    FOCUS("Focus", FocusBrandMark, FocusBrandMark),
     PLANNER("Planner", Icons.Rounded.CalendarMonth, Icons.Outlined.CalendarToday),
     STATS("Stats", Icons.Rounded.Leaderboard, Icons.Outlined.Leaderboard),
     BLOCKS("Blocks", Icons.Rounded.Block, Icons.Outlined.Block)

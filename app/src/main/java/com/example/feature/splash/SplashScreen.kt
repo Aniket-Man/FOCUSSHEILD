@@ -157,7 +157,7 @@ fun SplashScreen(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(horizontal = 24.dp)
         ) {
-            // Shield Icon with multi-layer glowing container
+            // Folded-map app logo with a multi-layer glowing container
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier

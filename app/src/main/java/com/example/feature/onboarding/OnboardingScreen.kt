@@ -46,7 +46,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Accessibility
-import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.AutoGraph
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -108,6 +107,7 @@ import com.example.core.design.LocalFocusColors
 import com.example.core.design.FocusSpacing
 import com.example.core.permission.AwaitPermissionGrantEffect
 import com.example.core.permission.OnboardingPermission
+import com.example.core.ui.FocusBrandMark
 import com.example.core.ui.FocusLottieAnimation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -455,7 +455,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.HourglassEmpty,
+                        imageVector = FocusBrandMark,
                         contentDescription = null,
                         tint = Color(0xFF1A1503),
                         modifier = Modifier.size(46.dp)
