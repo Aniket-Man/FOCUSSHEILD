@@ -97,7 +97,6 @@ object YouTubeNodeExtractor {
             for (viewId in SHORTS_PLAYER_VIEW_IDS) {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
                 if (nodes != null && nodes.isNotEmpty()) {
-                    nodes.forEach { try { it.recycle() } catch (_: Exception) {} }
                     return true
                 }
             }
@@ -136,14 +135,11 @@ object YouTubeNodeExtractor {
             for (viewId in WATCH_PAGE_VIEW_IDS) {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
                 if (nodes != null && nodes.isNotEmpty()) {
-                    nodes.forEach { try { it.recycle() } catch (_: Exception) {} }
                     return true
                 }
             }
             val titleNodes = rootNode.findAccessibilityNodeInfosByViewId("$YT:id/watch_title_text")
-            val hasTitle = titleNodes != null && titleNodes.isNotEmpty()
-            titleNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
-            hasTitle
+            titleNodes != null && titleNodes.isNotEmpty()
         } catch (_: Exception) {
             false
         }
@@ -158,7 +154,6 @@ object YouTubeNodeExtractor {
             for (viewId in HOME_FEED_VIEW_IDS) {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
                 if (nodes != null && nodes.isNotEmpty()) {
-                    nodes.forEach { try { it.recycle() } catch (_: Exception) {} }
                     return true
                 }
             }
@@ -174,7 +169,6 @@ object YouTubeNodeExtractor {
             if (nodes != null) {
                 for (node in nodes) {
                     val selected = node.isSelected
-                    try { node.recycle() } catch (_: Exception) {}
                     if (selected) return true
                 }
             }
@@ -256,7 +250,6 @@ object YouTubeNodeExtractor {
                 if (nodes != null) {
                     for (node in nodes) {
                         val text = node.text?.toString()?.trim()
-                        try { node.recycle() } catch (_: Exception) {}
                         if (!text.isNullOrBlank() && text.length >= 3) return text
                     }
                 }
@@ -281,12 +274,10 @@ object YouTubeNodeExtractor {
                     for (node in nodes) {
                         val resId = node.viewIdResourceName ?: ""
                         if (EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
-                            try { node.recycle() } catch (_: Exception) {}
                             continue
                         }
                         val text = node.text?.toString()?.trim() ?: ""
                         val desc = node.contentDescription?.toString()?.trim() ?: ""
-                        try { node.recycle() } catch (_: Exception) {}
 
                         val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
                         if (handleMatch != null) {
@@ -326,17 +317,12 @@ object YouTubeNodeExtractor {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
                 if (!nodes.isNullOrEmpty()) {
                     watchContainer = nodes.first()
-                    for (i in 1 until nodes.size) {
-                        try { nodes[i].recycle() } catch (_: Exception) {}
-                    }
                     break
                 }
             } catch (_: Exception) {}
         }
 
         val searchRoot = watchContainer ?: rootNode
-        val allocatedNodes = mutableListOf<AccessibilityNodeInfo>()
-        if (watchContainer != null) allocatedNodes.add(watchContainer)
 
         var visited = 0
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
@@ -367,16 +353,11 @@ object YouTubeNodeExtractor {
                     if (visited >= MAX_SCAN_NODES) break
                     val child = try { node.getChild(i) } catch (_: Exception) { null }
                     if (child != null) {
-                        allocatedNodes.add(child)
                         queue.add(child to depth + 1)
                     }
                 }
             }
-        } finally {
-            for (allocated in allocatedNodes) {
-                try { allocated.recycle() } catch (_: Exception) {}
-            }
-        }
+        } catch (_: Exception) {}
         return null
     }
 
@@ -392,9 +373,6 @@ object YouTubeNodeExtractor {
                 val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
                 if (!nodes.isNullOrEmpty()) {
                     watchContainer = nodes.first()
-                    for (i in 1 until nodes.size) {
-                        try { nodes[i].recycle() } catch (_: Exception) {}
-                    }
                     break
                 }
             } catch (_: Exception) {}
@@ -402,8 +380,6 @@ object YouTubeNodeExtractor {
 
         val searchRoot = watchContainer ?: rootNode
         val candidates = mutableListOf<String>()
-        val allocatedNodes = mutableListOf<AccessibilityNodeInfo>()
-        if (watchContainer != null) allocatedNodes.add(watchContainer)
         var found = false
 
         // Manual BFS limited to the watch player subtree
@@ -455,16 +431,11 @@ object YouTubeNodeExtractor {
                     if (visited >= MAX_SCAN_NODES) break
                     val child = try { node.getChild(i) } catch (_: Exception) { null }
                     if (child != null) {
-                        allocatedNodes.add(child)
                         queue.add(child to depth + 1)
                     }
                 }
             }
-        } finally {
-            for (allocated in allocatedNodes) {
-                try { allocated.recycle() } catch (_: Exception) {}
-            }
-        }
+        } catch (_: Exception) {}
 
         for (candidate in candidates) {
             val cleaned = cleanChannelName(candidate)

@@ -54,17 +54,20 @@ object FocusAlertSoundManager {
     private fun playSound(context: Context, label: String) {
         var mediaPlayer: MediaPlayer? = null
         try {
-            mediaPlayer = MediaPlayer.create(context.applicationContext, R.raw.mixkit_correct_answer_tone)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+            mediaPlayer = MediaPlayer.create(
+                context.applicationContext,
+                R.raw.mixkit_correct_answer_tone,
+                audioAttributes,
+                0
+            )
             if (mediaPlayer == null) {
                 Log.w(TAG, "MediaPlayer.create returned null for $label")
                 return
             }
-            mediaPlayer.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .build()
-            )
             mediaPlayer.setOnCompletionListener { mp ->
                 try { mp.release() } catch (_: Exception) {}
             }

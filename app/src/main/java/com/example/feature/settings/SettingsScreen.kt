@@ -327,6 +327,17 @@ fun SettingsScreen(
                         },
                         testTag = "settings_battery_optimization_row"
                     )
+
+                    SettingsNavigationRow(
+                        title = "VPN Service (Website Shield)",
+                        subtitle = if (uiState.isVpnGranted) "24/7 adult & distraction website blocking active across all browsers" else "Required for 24/7 adult website filtering — Tap to grant permission",
+                        icon = if (uiState.isVpnGranted) Icons.Rounded.CheckCircle else Icons.Rounded.Language,
+                        iconTint = if (uiState.isVpnGranted) FocusColors.EmeraldSuccess else FocusColors.Primary,
+                        onClick = {
+                            com.example.core.permission.FocusPermissionManager.requestVpnPermission(context)
+                        },
+                        testTag = "settings_vpn_service_row"
+                    )
                 }
             }
 

@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.example.core.accessibility.AccessibilityHelper.updateState(this)
         com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
-
+        com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance?.syncWithPreferences()
     }
 
     override fun onNewIntent(intent: Intent) {

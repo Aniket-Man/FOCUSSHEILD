@@ -112,7 +112,6 @@ object BrowserUrlDetector {
                             }
                         }
                     }
-                    try { node.recycle() } catch (_: Exception) {}
                 }
             }
             matchedText
@@ -149,7 +148,6 @@ object BrowserUrlDetector {
         for (i in 0 until childCount) {
             val child = node.getChild(i) ?: continue
             val result = searchUrlNodeGeneric(child, maxDepth, currentDepth + 1)
-            try { child.recycle() } catch (_: Exception) {}
             if (!result.isNullOrBlank()) {
                 return result
             }

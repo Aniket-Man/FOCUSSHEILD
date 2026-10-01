@@ -386,7 +386,6 @@ object YouTubeContentInspectionEngine {
         for (miniId in YouTubeDetectionRules.MINIPLAYER_VIEW_IDS) {
             val miniNodes = rootNode.findAccessibilityNodeInfosByViewId(miniId)
             val isNotEmpty = !miniNodes.isNullOrEmpty()
-            miniNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             if (isNotEmpty) {
                 isMiniplayer = true
                 break
@@ -415,7 +414,6 @@ object YouTubeContentInspectionEngine {
                         }
                     }
                 }
-                nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             } catch (_: Exception) {}
             if (isPlayerFound && videoTitle != null) break
         }
@@ -463,7 +461,6 @@ object YouTubeContentInspectionEngine {
                             }
                         }
                     }
-                    nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
                 } catch (_: Exception) {}
                 if (videoTitle != null) break
             }
@@ -541,7 +538,6 @@ object YouTubeContentInspectionEngine {
                         }
                     }
                 }
-                nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             } catch (_: Exception) {}
             if (!channelName.isNullOrBlank()) break
         }
@@ -720,7 +716,6 @@ object YouTubeContentInspectionEngine {
             }
             if (child != null) {
                 scanNodes(child, currentDepth + 1, maxDepth, nodeCount, maxNodes, predicate)
-                try { child.recycle() } catch (_: Exception) {}
             }
         }
     }

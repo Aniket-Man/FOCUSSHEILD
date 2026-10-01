@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.OpenInNew
@@ -233,7 +234,25 @@ fun ProtectionSetupDialog(
                     testTag = "battery_optimization_permission_item"
                 )
 
-                // 4. Exact alarms (optional, but the difference between "starts at 09:00" and
+                // 4. VPN Service (Website Shield 24/7)
+                PermissionItemCard(
+                    title = "VPN Service (Website Shield)",
+                    description = if (permissionStatus.isVpnGranted) {
+                        "24/7 system-wide adult & distraction website blocking active."
+                    } else {
+                        "Enables 24/7 system-wide blocking of adult & NSFW websites. Tap to allow."
+                    },
+                    icon = Icons.Rounded.Language,
+                    isGranted = permissionStatus.isVpnGranted,
+                    isRequired = false,
+                    onClick = {
+                        FocusPermissionManager.requestVpnPermission(context)
+                        onRefreshPermissions()
+                    },
+                    testTag = "vpn_permission_item"
+                )
+
+                // 5. Exact alarms (optional, but the difference between "starts at 09:00" and
                 // "starts some time after 09:00" for automated schedules).
                 PermissionItemCard(
                     title = "Exact alarms",

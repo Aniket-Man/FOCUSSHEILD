@@ -127,6 +127,11 @@ class WebsiteBlockerEngine private constructor(
             preferencesRepository: com.example.data.preferences.FocusPreferencesRepository
         ): WebsiteBlockerEngine {
             return INSTANCE ?: synchronized(this) {
+                com.example.feature.websiteblocker.vpn.AdultFilteringEngine.initialize(
+                    appContext,
+                    preferencesRepository,
+                    websiteRepository
+                )
                 val instance = WebsiteBlockerEngine(appContext, websiteRepository, preferencesRepository)
                 INSTANCE = instance
                 instance
@@ -144,6 +149,16 @@ class WebsiteBlockerEngine private constructor(
         internal fun evaluateAutoAdult(rawUrl: String, domain: String): WebsiteBlockDecision.Blocked? {
             val cleanDomain = domain.trim().lowercase()
             if (cleanDomain.isBlank()) return null
+
+            // 1. Check local VPN / filtering engine matcher if initialized
+            val vpnEngine = com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance
+            if (vpnEngine != null && vpnEngine.shouldBlockDomain(cleanDomain)) {
+                return WebsiteBlockDecision.Blocked(
+                    domain = cleanDomain,
+                    engineType = "ADULT_AUTOMATIC",
+                    reason = "Adult Content Filter (18+ Shield)"
+                )
+            }
 
             // Offline lexical / corpus / TLD classifier (fast path, no network).
             val lexicalResult = AdultLexicalClassifier.isAdultContent(rawUrl, cleanDomain)

@@ -1,7 +1,10 @@
 package com.example.feature.websiteblocker.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -100,7 +103,9 @@ import coil.request.ImageRequest
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.LocalFocusColors
+import com.example.core.permission.FocusPermissionManager
 import com.example.data.local.entity.BlockedWebsiteEntity
+import kotlinx.coroutines.delay
 
 /**
  * Clean dashed border around rounded rectangle matching the YouTube Channel popup theme.
@@ -207,10 +212,60 @@ fun WebsiteBlockerSheetContent(
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Auto Adult Shield, 1: Custom Websites
 
+    val vpnLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val granted = (result.resultCode == Activity.RESULT_OK) || FocusPermissionManager.isVpnPermissionGranted(context)
+        if (granted) {
+            viewModel.onVpnPermissionGranted()
+        } else {
+            viewModel.onVpnPermissionDenied()
+        }
+    }
+
+    LaunchedEffect(state.vpnPrepareIntent) {
+        val intent = state.vpnPrepareIntent ?: return@LaunchedEffect
+        try {
+            vpnLauncher.launch(intent)
+        } catch (_: Exception) {
+            try {
+                val settingsIntent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(settingsIntent)
+            } catch (_: Exception) {
+                FocusPermissionManager.openAppDetailsSettings(context)
+            }
+        }
+        viewModel.consumeVpnPrepareIntent()
+    }
+
+    // Await VPN permission grant if the user is redirected to system settings
+    LaunchedEffect(state.isAwaitingVpnPermission) {
+        if (!state.isAwaitingVpnPermission) return@LaunchedEffect
+        val deadline = System.currentTimeMillis() + 5 * 60 * 1000L
+        while (System.currentTimeMillis() < deadline && state.isAwaitingVpnPermission) {
+            if (FocusPermissionManager.isVpnPermissionGranted(context)) {
+                // Automatically bring app back to front!
+                FocusPermissionManager.bringFocusShieldToFront(context)
+                viewModel.onVpnPermissionGranted()
+                return@LaunchedEffect
+            }
+            delay(350L)
+        }
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.checkPermissions()
+                if (state.isAwaitingVpnPermission) {
+                    if (FocusPermissionManager.isVpnPermissionGranted(context)) {
+                        viewModel.onVpnPermissionGranted()
+                    } else {
+                        viewModel.onVpnPermissionDenied()
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -397,6 +452,147 @@ fun WebsiteBlockerSheetContent(
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = "Browser address bar inspector active & protecting",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color(0xFF10B981),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Permission status card (VPN Service for 24/7 Adult Blocking)
+            item {
+                if (!state.isVpnPermissionGranted) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 18.dp)
+                            .sheetDashedBorder(
+                                color = Color(0xFF6366F1),
+                                cornerRadius = 16.dp
+                            )
+                            .background(
+                                color = if (isDark) Color(0xFF1E1B4B).copy(alpha = 0.5f) else Color(0xFFEEF2FF),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF6366F1).copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Language,
+                                        contentDescription = null,
+                                        tint = Color(0xFF6366F1),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "VPN Service Permission Required",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            color = textPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp
+                                        )
+                                    )
+                                    Text(
+                                        text = "24/7 adult website blocking without focus session",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = textSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "FocusShield runs a local on-device DNS filter to block adult websites across all browsers even outside focus sessions. No traffic leaves your device.",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = textSecondary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                            )
+
+                            Button(
+                                onClick = {
+                                    viewModel.toggleAutoAdultBlocking(true)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = stoneBtnBg,
+                                    contentColor = textPrimary
+                                ),
+                                border = BorderStroke(1.dp, stoneBtnBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("website_blocker_grant_vpn_permission_btn")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Security,
+                                        contentDescription = null,
+                                        tint = Color(0xFF6366F1),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Grant VPN Permission",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 18.dp)
+                            .sheetDashedBorder(
+                                color = Color(0xFF10B981),
+                                cornerRadius = 14.dp
+                            )
+                            .background(
+                                color = if (isDark) Color(0xFF0E2218) else Color(0xFFECFDF5),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "VPN Service active & filtering adult websites 24/7",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = Color(0xFF10B981),
                                     fontWeight = FontWeight.SemiBold,

@@ -254,7 +254,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
                     if (rootNode != null) {
                         val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
-                        try { rootNode.recycle() } catch (_: Exception) {}
                         if (isTamper) {
                             Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
                             performGlobalAction(GLOBAL_ACTION_HOME)
@@ -313,7 +312,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     } else {
                         shortFormDetectionManager.detectShortFormContent(rawPackageName, event, rootNode)
                     }
-                    try { rootNode?.recycle() } catch (_: Exception) {}
 
                     if (shortFormDetected) {
                         val shouldTrigger = if (isYT) {
@@ -381,7 +379,6 @@ class FocusAccessibilityService : AccessibilityService() {
 
                             // 1. Perform safe step-down inside the browser
                             navigateBrowserAwayFromBlockedSite(rawPackageName, rootNode)
-                            try { rootNode?.recycle() } catch (_: Exception) {}
 
                             // 2. Display non-intrusive alert HUD & system notification
                             if (siteDecision.engineType == "ADULT_AUTOMATIC") {
@@ -418,7 +415,6 @@ class FocusAccessibilityService : AccessibilityService() {
                             return
                         }
                     }
-                    try { rootNode?.recycle() } catch (_: Exception) {}
                 }
             }
 
@@ -524,8 +520,6 @@ class FocusAccessibilityService : AccessibilityService() {
                             else -> ProtectionDecision.BLOCK
                         }
 
-                        try { rootNode?.recycle() } catch (_: Exception) {}
-
                         blockerManager.handleBlockedPackage(
                             packageName = rawPackageName,
                             fallbackAppName = null,
@@ -535,7 +529,6 @@ class FocusAccessibilityService : AccessibilityService() {
                         )
                         return
                     }
-                    try { rootNode?.recycle() } catch (_: Exception) {}
                 } else {
                     // Session no longer active while YouTube is open: remove any lingering Study Mode popup
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -625,7 +618,6 @@ class FocusAccessibilityService : AccessibilityService() {
                             if (isYouTubePackage) {
                                 val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                 clickPauseButtonInNodeTree(currentRoot)
-                                try { currentRoot?.recycle() } catch (_: Exception) {}
                             }
                             // Floor the remaining millis themselves (issue #49, C2):
                             // subtracting floored used minutes from the limit rounded the
@@ -651,7 +643,6 @@ class FocusAccessibilityService : AccessibilityService() {
                             if (isYouTubePackage) {
                                 val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                                 clickPauseButtonInNodeTree(currentRoot)
-                                try { currentRoot?.recycle() } catch (_: Exception) {}
                             }
                             appLimitManager.launchOverlay(
                                 packageName = appLimitDecision.packageName,
@@ -688,7 +679,6 @@ class FocusAccessibilityService : AccessibilityService() {
     private fun evaluateGateFromCurrentWindow() {
         val root = try { rootInActiveWindow } catch (e: Exception) { null }
         val foregroundPackage = root?.packageName?.toString()
-        try { root?.recycle() } catch (_: Exception) {}
         if (foregroundPackage.isNullOrBlank()) return
 
         val isOwnApp = foregroundPackage == packageName ||
@@ -754,7 +744,6 @@ class FocusAccessibilityService : AccessibilityService() {
         for (keyword in safeSetupKeywords) {
             val safeNodes = rootNode.findAccessibilityNodeInfosByText(keyword)
             val hasSafe = !safeNodes.isNullOrEmpty()
-            safeNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             if (hasSafe) {
                 return false
             }
@@ -764,8 +753,6 @@ class FocusAccessibilityService : AccessibilityService() {
         val appMatches = rootNode.findAccessibilityNodeInfosByText("FocusShield")
         val packageMatches = rootNode.findAccessibilityNodeInfosByText(packageName)
         val hasAppMatch = (!appMatches.isNullOrEmpty()) || (!packageMatches.isNullOrEmpty())
-        appMatches?.forEach { try { it.recycle() } catch (_: Exception) {} }
-        packageMatches?.forEach { try { it.recycle() } catch (_: Exception) {} }
 
         if (hasAppMatch) {
             // Check specifically for uninstallation or clear data/force stop actions
@@ -774,7 +761,6 @@ class FocusAccessibilityService : AccessibilityService() {
                 for (kw in uninstallKeywords) {
                     val nodes = rootNode.findAccessibilityNodeInfosByText(kw)
                     val hasMatch = !nodes.isNullOrEmpty()
-                    nodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
                     if (hasMatch) {
                         return true
                     }
@@ -784,7 +770,6 @@ class FocusAccessibilityService : AccessibilityService() {
             // In settings or launcher context menus
             val uninstallConfirmNodes = rootNode.findAccessibilityNodeInfosByText("Do you want to uninstall")
             val hasConfirm = !uninstallConfirmNodes.isNullOrEmpty()
-            uninstallConfirmNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             if (hasConfirm) {
                 return true
             }
@@ -910,7 +895,6 @@ class FocusAccessibilityService : AccessibilityService() {
                         val clicked = if (desc.contains("Pause", ignoreCase = true)) {
                             performClickOnNodeOrParent(node)
                         } else false
-                        try { node.recycle() } catch (_: Exception) {}
                         if (clicked) {
                             return
                         }
@@ -930,7 +914,6 @@ class FocusAccessibilityService : AccessibilityService() {
                                 desc.equals("Pause", ignoreCase = true) ||
                                 text.equals("Pause", ignoreCase = true)
                         val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                        try { node.recycle() } catch (_: Exception) {}
                         if (clicked) {
                             return
                         }
@@ -961,7 +944,6 @@ class FocusAccessibilityService : AccessibilityService() {
                 if (!homeNodes.isNullOrEmpty()) {
                     for (node in homeNodes) {
                         val clicked = performClickOnNodeOrParent(node)
-                        try { node.recycle() } catch (_: Exception) {}
                         if (clicked) {
                             return true
                         }
@@ -976,7 +958,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     val txt = node.text?.toString() ?: ""
                     val matches = desc.equals("Home", ignoreCase = true) || txt.equals("Home", ignoreCase = true)
                     val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                    try { node.recycle() } catch (_: Exception) {}
                     if (clicked) {
                         return true
                     }
@@ -1009,9 +990,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 if (!nodes.isNullOrEmpty()) {
                     for (node in nodes) {
                         val clicked = performClickOnNodeOrParent(node)
-                        try { node.recycle() } catch (_: Exception) {}
                         if (clicked) {
-                            try { rootNode.recycle() } catch (_: Exception) {}
                             return
                         }
                     }
@@ -1027,15 +1006,12 @@ class FocusAccessibilityService : AccessibilityService() {
                         val text = node.text?.toString() ?: ""
                         val matches = desc.equals(keyword, ignoreCase = true) || text.equals(keyword, ignoreCase = true)
                         val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                        try { node.recycle() } catch (_: Exception) {}
                         if (clicked) {
-                            try { rootNode.recycle() } catch (_: Exception) {}
                             return
                         }
                     }
                 }
             }
-            try { rootNode.recycle() } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
 
@@ -1047,11 +1023,8 @@ class FocusAccessibilityService : AccessibilityService() {
             }
             val parent = node.parent
             if (parent != null && parent.isClickable) {
-                val res = parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                try { parent.recycle() } catch (_: Exception) {}
-                return res
+                return parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
             }
-            try { parent?.recycle() } catch (_: Exception) {}
         } catch (_: Exception) {}
         return false
     }
@@ -1083,7 +1056,6 @@ class FocusAccessibilityService : AccessibilityService() {
                     if (nodes != null) {
                         for (node in nodes) {
                             val clicked = performClickOnNodeOrParent(node)
-                            try { node.recycle() } catch (_: Exception) {}
                             if (clicked) {
                                 return
                             }
@@ -1102,7 +1074,6 @@ class FocusAccessibilityService : AccessibilityService() {
             try {
                 val currentRoot = try { rootInActiveWindow } catch (e: Exception) { null }
                 val currentUrlInfo = com.example.core.detector.BrowserUrlDetector.extractUrlAndDomain(browserPackage, currentRoot, null)
-                try { currentRoot?.recycle() } catch (_: Exception) {}
                 val siteEngine = try { com.example.feature.websiteblocker.engine.WebsiteBlockerEngine.instance } catch (e: Exception) { null }
                 val stillBlocked = currentUrlInfo?.let { siteEngine?.evaluateDomain(it.rawUrl, it.domain) is com.example.feature.websiteblocker.engine.WebsiteBlockDecision.Blocked } ?: false
 

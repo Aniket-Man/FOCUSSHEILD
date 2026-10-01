@@ -5,9 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.VpnService
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.example.MainActivity
 import com.example.core.accessibility.AccessibilityHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +35,7 @@ data class ProtectionPermissionStatus(
      * minutes late" is explained instead of surprising.
      */
     val isExactAlarmGranted: Boolean = true,
+    val isVpnGranted: Boolean = false,
     val areMandatoryGranted: Boolean = false
 )
 
@@ -227,6 +230,67 @@ object FocusPermissionManager {
     }
 
     /**
+     * Checks if VPN permission has been prepared/granted by the user.
+     * When VpnService.prepare(context) == null, permission is granted.
+     */
+    fun isVpnPermissionGranted(context: Context): Boolean {
+        return try {
+            VpnService.prepare(context) == null
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Prepares VPN or opens the system authorization dialog / settings.
+     */
+    fun requestVpnPermission(context: Context) {
+        try {
+            val intent = VpnService.prepare(context)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            openVpnSettings(context)
+        }
+    }
+
+    /**
+     * Opens Android System VPN Settings.
+     */
+    fun openVpnSettings(context: Context) {
+        try {
+            val intent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            openAppDetailsSettings(context)
+        }
+    }
+
+    /**
+     * Brings the existing FocusShield task back to the foreground without recreating it,
+     * so the app resumes on the same screen after granting permissions in Settings or dialogs.
+     */
+    fun bringFocusShieldToFront(context: Context) {
+        try {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            // Blocked by background-activity-start policy; ON_RESUME refresh remains fallback.
+        }
+    }
+
+    /**
      * Returns a consolidated real-time status object and updates the reactive StateFlow.
      */
     fun getPermissionStatus(context: Context, requiresBlocking: Boolean = true): ProtectionPermissionStatus {
@@ -237,6 +301,7 @@ object FocusPermissionManager {
         val notificationListener = isNotificationListenerGranted(context)
         val batteryIgnored = isBatteryOptimizationIgnored(context)
         val exactAlarms = isExactAlarmGranted(context)
+        val vpn = isVpnPermissionGranted(context)
         val mandatory = if (requiresBlocking) (overlay && accessibility) else true
 
         val status = ProtectionPermissionStatus(
@@ -247,6 +312,7 @@ object FocusPermissionManager {
             isNotificationListenerGranted = notificationListener,
             isBatteryOptimizationIgnored = batteryIgnored,
             isExactAlarmGranted = exactAlarms,
+            isVpnGranted = vpn,
             areMandatoryGranted = mandatory
         )
         _permissionStatusFlow.value = status

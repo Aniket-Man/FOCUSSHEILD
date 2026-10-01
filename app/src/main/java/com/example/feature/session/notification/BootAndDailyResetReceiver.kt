@@ -127,6 +127,15 @@ class BootAndDailyResetReceiver : BroadcastReceiver() {
                     Log.w(TAG, "Widget refresh skipped: ${e.message}")
                 }
 
+                // 7. Restore 18+ website blocking VPN engine if previously enabled
+                if (action == Intent.ACTION_BOOT_COMPLETED) {
+                    try {
+                        com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance?.syncWithPreferences()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Restoring VPN filter skipped: ${e.message}")
+                    }
+                }
+
                 Log.d(
                     TAG,
                     "Daily reset & alarm rescheduling completed. ${todayPlans.size} plans scheduled."

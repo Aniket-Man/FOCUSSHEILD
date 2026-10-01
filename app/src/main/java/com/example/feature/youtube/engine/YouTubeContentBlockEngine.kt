@@ -176,7 +176,6 @@ object YouTubeContentBlockEngine {
                     for (node in nodes) {
                         node.text?.let { builder.append(it).append(" ") }
                         node.contentDescription?.let { builder.append(it).append(" ") }
-                        try { node.recycle() } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {}

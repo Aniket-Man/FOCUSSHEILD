@@ -37,7 +37,7 @@ data class FocusPreferences(
     val dailyGoalMinutes: Int = 240, // 4 hours daily study target
     val minimumStreakThresholdMinutes: Int = 20, // 20 mins minimum to count for streak
     val themeMode: String = "SYSTEM", // "SYSTEM", "LIGHT", "DARK" (Late-Night Eye Care)
-    val isAutoAdultWebsiteBlockingEnabled: Boolean = true,
+    val isAutoAdultWebsiteBlockingEnabled: Boolean = false,
     val isManualWebsiteBlockingEnabled: Boolean = true,
     val isBlockUninstallEnabled: Boolean = false,
     val isBlockSplitScreenEnabled: Boolean = false,
@@ -129,7 +129,7 @@ class FocusPreferencesRepository(private val context: Context) {
             dailyGoalMinutes = preferences[PreferencesKeys.KEY_DAILY_GOAL_MINUTES] ?: 240,
             minimumStreakThresholdMinutes = preferences[PreferencesKeys.KEY_MIN_STREAK_THRESHOLD_MINUTES] ?: 20,
             themeMode = preferences[PreferencesKeys.KEY_THEME_MODE] ?: "SYSTEM",
-            isAutoAdultWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] ?: true,
+            isAutoAdultWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] ?: false,
             isManualWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] ?: true,
             isBlockUninstallEnabled = preferences[PreferencesKeys.KEY_BLOCK_UNINSTALL] ?: false,
             isBlockSplitScreenEnabled = preferences[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] ?: false,
