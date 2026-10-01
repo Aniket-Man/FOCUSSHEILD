@@ -50,7 +50,17 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace -Pksp.use.daemon=false
+        run: |
+          set +e
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee /tmp/gradle-test.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            # Surface the actionable lines as annotations (log CDN access can be blocked).
+            grep -nE "^e: |error: | FAILED$|FAILURE: |Execution failed for task" /tmp/gradle-test.log | head -10 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          fi
+          exit "$STATUS"
 
       - name: Upload test reports
         if: always()
