@@ -50,7 +50,7 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace -Pksp.use.daemon=false
 
       - name: Upload test reports
         if: always()
