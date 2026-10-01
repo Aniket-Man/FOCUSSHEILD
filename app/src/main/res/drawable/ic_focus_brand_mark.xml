@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact, tintable folded-map Focus mark for Android View-based overlays. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M2.5,8.1 L7.5,1.5 L12,8.1 L16.5,1.5 L21.5,8.1 L21.5,22.5 L16.5,16.1 L12,22.5 L7.5,16.1 L2.5,22.5 Z" />
+</vector>

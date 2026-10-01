@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -48,6 +47,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import com.example.core.design.FocusColors
+import com.example.core.ui.FocusBrandMark
 
 private val BlockedBadgeOrange = Color(0xFFF5822B)
 
@@ -119,9 +120,9 @@ fun BlockOverlayScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.HourglassEmpty,
+                    imageVector = FocusBrandMark,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = FocusColors.Primary,
                     modifier = Modifier.size(26.dp)
                 )
                 Text(

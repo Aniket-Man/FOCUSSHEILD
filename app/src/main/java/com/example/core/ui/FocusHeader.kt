@@ -1,5 +1,6 @@
 package com.example.core.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +21,6 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,12 +28,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -41,7 +43,7 @@ import com.example.feature.profile.ui.UserProfileAvatar
 
 /**
  * Top App Header matching the FocusShield Clean Minimalism design.
- * Features brand shield logo badge, title, quick Light/Dark theme switcher, notification bell, and user avatar.
+ * Features the folded-map brand badge, title, quick Light/Dark theme switcher, notification bell, and user avatar.
  */
 @Composable
 fun FocusHeader(
@@ -74,31 +76,21 @@ fun FocusHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left: Shield Icon + Brand Name + Subtitle
+        // Left: folded-map brand mark + name + subtitle
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Shield Logo Badge
+            // Folded-map logo badge
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                FocusColors.PrimaryLight,
-                                FocusColors.Primary
-                            )
-                        )
-                    )
-                    .padding(2.dp),
+                    .clip(RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Shield,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                Image(
+                    painter = painterResource(R.drawable.ic_focus_shield_app_icon),
+                    contentDescription = "FocusShield app logo",
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -125,7 +117,7 @@ fun FocusHeader(
             }
         }
 
-        // Right: Theme Mode Switcher + Notification Bell + Purple Shield Button
+        // Right: theme switcher, notification bell, and profile button
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)

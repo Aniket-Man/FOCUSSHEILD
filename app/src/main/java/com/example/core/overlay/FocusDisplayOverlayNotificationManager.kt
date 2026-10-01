@@ -17,12 +17,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import com.example.R
 
 /**
  * Manages floating display-over-app HUD banners and toast alerts.
- * Displays a compact, sleek floating notification pill at the bottom of the screen with the Focus Shield app logo
+ * Displays a compact floating notification pill with the folded-map FocusShield brand mark
  * when an addictive short, adult website, or unapproved channel is intercepted.
  */
 object FocusDisplayOverlayNotificationManager {
@@ -202,22 +201,15 @@ object FocusDisplayOverlayNotificationManager {
         }
         rootLayout.addView(accentStrip)
 
-        // Main App Logo (App Launcher Icon)
+        // Compact Focus mark, matching the icon used by in-app buttons and full-screen overlays
         val appLogoView = ImageView(context).apply {
             val logoSize = dp(32)
             layoutParams = LinearLayout.LayoutParams(logoSize, logoSize).apply {
                 marginEnd = dp(10)
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
-
-            // Use the main Focus Shield app icon
-            val appIconDrawable = try {
-                context.packageManager.getApplicationIcon(context.packageName)
-            } catch (_: Exception) {
-                ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
-                    ?: ContextCompat.getDrawable(context, R.drawable.ic_focus_shield_logo)
-            }
-            setImageDrawable(appIconDrawable)
+            setImageResource(R.drawable.ic_focus_brand_mark)
+            setColorFilter(Color.parseColor("#7C4DFF"))
         }
         rootLayout.addView(appLogoView)
 
