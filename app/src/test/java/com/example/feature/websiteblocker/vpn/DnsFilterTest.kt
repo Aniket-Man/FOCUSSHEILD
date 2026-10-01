@@ -181,7 +181,7 @@ class DnsFilterTest {
             DnsPacketCodec.writeShort(it, 4, DnsPacketCodec.CLASS_IN)
             DnsPacketCodec.writeInt(it, 6, 300)
             DnsPacketCodec.writeShort(it, 10, 4)
-            it[12] = 93; it[13] = 184; it[14] = 216; it[15] = 34
+            it[12] = 93.toByte(); it[13] = 184.toByte(); it[14] = 216.toByte(); it[15] = 34.toByte()
         }
         return (query + answer).also {
             DnsPacketCodec.writeShort(it, 2, 0x8180) // QR=1, RD=1, RA=1
