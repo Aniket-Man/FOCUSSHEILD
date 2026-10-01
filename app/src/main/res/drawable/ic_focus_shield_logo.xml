@@ -1,20 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Small full-colour folded-map M logo for branded fallback surfaces. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFAFAFC"
-        android:pathData="M2.5,8.1 L7.5,1.5 L7.5,16.1 L2.5,22.5 Z" />
-    <path
-        android:fillColor="#FFB5B7E9"
-        android:pathData="M7.5,1.5 L12,8.1 L12,22.5 L7.5,16.1 Z" />
-    <path
-        android:fillColor="#FFD9D5F2"
-        android:pathData="M12,8.1 L16.5,1.5 L16.5,16.1 L12,22.5 Z" />
-    <path
-        android:fillColor="#FF9B7BE8"
-        android:pathData="M16.5,1.5 L21.5,8.1 L21.5,22.5 L16.5,16.1 Z" />
-</vector>
+<!-- Full-colour supplied logo kept as a reusable fallback for branded surfaces. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/focus_logo_tile" />
+    <item android:drawable="@drawable/focus_logo_facets" />
+</layer-list>

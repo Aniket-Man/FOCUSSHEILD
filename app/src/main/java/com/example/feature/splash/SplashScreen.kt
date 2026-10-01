@@ -157,7 +157,7 @@ fun SplashScreen(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(horizontal = 24.dp)
         ) {
-            // Folded-map app logo with a multi-layer glowing container
+            // Supplied gradient folded-map app logo with a multi-layer glowing container
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -178,7 +178,7 @@ fun SplashScreen(
                 // High-resolution vector emblem
                 Image(
                     painter = painterResource(id = R.drawable.ic_splash_shield),
-                    contentDescription = "FocusShield Logo",
+                    contentDescription = "FocusShield app logo",
                     modifier = Modifier
                         .size(112.dp)
                         .clip(RoundedCornerShape(28.dp))

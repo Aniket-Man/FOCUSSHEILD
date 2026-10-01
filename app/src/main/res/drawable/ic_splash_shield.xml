@@ -1,31 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Large splash treatment of the folded-map M logo. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="192dp"
-    android:height="192dp"
-    android:viewportWidth="192"
-    android:viewportHeight="192">
-    <path
-        android:fillColor="#208B5CF6"
-        android:pathData="M96,8 C144.6,8 184,47.4 184,96 C184,144.6 144.6,184 96,184 C47.4,184 8,144.6 8,96 C8,47.4 47.4,8 96,8 Z" />
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M48,28 L144,28 A20,20 0,0 1,164 48 L164,144 A20,20 0,0 1,144 164 L48,164 A20,20 0,0 1,28 144 L28,48 A20,20 0,0 1,48 28 Z" />
-    <path
-        android:strokeColor="#337C4DFF"
-        android:strokeWidth="1.5"
-        android:fillColor="#00000000"
-        android:pathData="M48,29 L144,29 A19,19 0,0 1,163 48 L163,144 A19,19 0,0 1,144 163 L48,163 A19,19 0,0 1,29 144 L29,48 A19,19 0,0 1,48 29 Z" />
-    <path
-        android:fillColor="#FFFAFAFC"
-        android:pathData="M50,70 L73,43 L73,97 L50,149 Z" />
-    <path
-        android:fillColor="#FFB5B7E9"
-        android:pathData="M73,43 L96,70 L96,149 L73,97 Z" />
-    <path
-        android:fillColor="#FFD9D5F2"
-        android:pathData="M96,70 L119,43 L119,97 L96,149 Z" />
-    <path
-        android:fillColor="#FF9B7BE8"
-        android:pathData="M119,43 L142,70 L142,149 L119,97 Z" />
-</vector>
+<!-- Full-colour supplied logo used by both the Android system splash and Compose splash. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/focus_logo_tile" />
+    <item android:drawable="@drawable/focus_logo_facets_splash" />
+</layer-list>

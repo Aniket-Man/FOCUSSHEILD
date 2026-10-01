@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Four-facet folded-map M from the supplied FocusShield logo artwork. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFAFAFC"
+        android:pathData="M22,38 L38,18 L38,60 L22,92 Z" />
+    <path
+        android:fillColor="#FFB5B7E9"
+        android:pathData="M38,18 L54,38 L54,92 L38,60 Z" />
+    <path
+        android:fillColor="#FFD9D5F2"
+        android:pathData="M54,38 L70,18 L70,60 L54,92 Z" />
+    <path
+        android:fillColor="#FF9B7BE8"
+        android:pathData="M70,18 L86,38 L86,92 L70,60 Z" />
+</vector>
