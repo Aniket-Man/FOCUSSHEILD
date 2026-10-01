@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash-sized version of the supplied four-facet folded-map M. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="192dp"
+    android:height="192dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:fillColor="#FFFAFAFC"
+        android:pathData="M50,70 L73,43 L73,97 L50,149 Z" />
+    <path
+        android:fillColor="#FFB5B7E9"
+        android:pathData="M73,43 L96,70 L96,149 L73,97 Z" />
+    <path
+        android:fillColor="#FFD9D5F2"
+        android:pathData="M96,70 L119,43 L119,97 L96,149 Z" />
+    <path
+        android:fillColor="#FF9B7BE8"
+        android:pathData="M119,43 L142,70 L142,149 L119,97 Z" />
+</vector>
