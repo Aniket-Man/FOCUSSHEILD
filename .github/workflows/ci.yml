@@ -56,8 +56,14 @@ jobs:
           STATUS=${PIPESTATUS[0]}
           if [ "$STATUS" -ne 0 ]; then
             # Surface the actionable lines as annotations (log CDN access can be blocked).
-            grep -nE "^e: |error: | FAILED$|FAILURE: |Execution failed for task" /tmp/gradle-test.log | head -10 | while IFS= read -r line; do
-              echo "::error::${line}"
+            {
+              grep -nE "^e: |error: | FAILED$|FAILURE: |Execution failed for task" /tmp/gradle-test.log | head -12
+              echo "--- failure messages (JUnit XML) ---"
+              find app/build/test-results -name "TEST-*.xml" -print0 2>/dev/null \
+                | xargs -0 -r grep -ho 'message="[^"]*"' 2>/dev/null | head -12
+            } > /tmp/faildigest.txt
+            head -10 /tmp/faildigest.txt | while IFS= read -r line; do
+              echo "::error::$(printf '%s' "$line" | cut -c1-240)"
             done
           fi
           exit "$STATUS"

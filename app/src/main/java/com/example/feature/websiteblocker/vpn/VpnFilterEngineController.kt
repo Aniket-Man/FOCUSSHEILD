@@ -142,10 +142,12 @@ class VpnFilterEngineController internal constructor(
             desiredStateFlow.collect { enabled ->
                 val previous = synchronized(lock) { desiredEnabled }
                 desiredEnabled = enabled
-                evaluate("preference")
-                if (enabled && !previous && !isPermissionGranted()) {
-                    // An explicit OFF→ON flip is a fresh user intent: always surface the system
-                    // consent dialog when it is still missing.
+                val explicitEnableFlip = enabled && !previous
+                // An explicit OFF→ON flip is a fresh user intent: prompting is handled below
+                // (forced, once per flip), so this evaluation must not also consume the
+                // once-per-process prompt — otherwise the dialog is launched twice.
+                evaluate("preference", allowPrompt = !explicitEnableFlip)
+                if (explicitEnableFlip && !isPermissionGranted()) {
                     promptConsent(force = true)
                 }
             }
@@ -172,7 +174,7 @@ class VpnFilterEngineController internal constructor(
         }
     }
 
-    internal fun evaluate(reason: String) {
+    internal fun evaluate(reason: String, allowPrompt: Boolean = true) {
         try {
             synchronized(lock) {
                 val command = VpnEnginePolicy.resolve(
@@ -184,7 +186,9 @@ class VpnFilterEngineController internal constructor(
                 when (command) {
                     VpnEnginePolicy.Command.StartVpn -> commander.startVpnService(appContext)
                     VpnEnginePolicy.Command.StopVpn -> commander.stopVpnService(appContext)
-                    VpnEnginePolicy.Command.RequestVpnPermission -> promptConsent(force = false)
+                    // When the caller prompts explicitly (an OFF→ON flip), skip the prompt here.
+                    VpnEnginePolicy.Command.RequestVpnPermission ->
+                        if (allowPrompt) promptConsent(force = false)
                     VpnEnginePolicy.Command.Noop -> Unit
                 }
                 Log.d(TAG, "evaluate($reason) desired=$desiredEnabled running=$engineRunning -> $command")

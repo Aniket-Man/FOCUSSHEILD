@@ -121,10 +121,10 @@ class DomainBlocklistTest {
     fun `large blocklists stay correct and fast`() {
         // 100k synthetic entries: correctness first, plus a generous time budget so a regression
         // to a linear scan (~10^9 probes for 20k lookups) would fail on any CI runner.
+        // Entries are host0…host99999 so the 10k lookup loop (host0…host9999) matches exactly.
         val big = buildSet {
-            var i = 0
             while (size < 100_000) {
-                i++
+                val i = size
                 add("host$i.domain${i % 997}.category${i % 53}.example")
             }
         }

@@ -191,9 +191,14 @@ object DnsPacketCodec {
     /**
      * Builds a plain query datagram (QDCOUNT=1, RD=1). Used by tests; kept next to the parser so
      * the wire format has exactly one definition.
+     *
+     * The name is only trimmed/lowercased/dedotted — NOT run through [DomainBlocklist.normalize],
+     * which strips `www.`: a wire-format helper must preserve the QNAME it is given, or tests
+     * building `www.example.com` queries would silently ask for `example.com`.
      */
     fun buildQuery(transactionId: Int, domain: String, qtype: Int, qclass: Int = CLASS_IN): ByteArray {
-        val normalized = normalizeQueryDomain(domain)
+        var normalized = domain.trim().lowercase(java.util.Locale.ROOT)
+        while (normalized.endsWith(".")) normalized = normalized.substring(0, normalized.length - 1)
         require(normalized.isNotBlank() && normalized.contains('.')) { "invalid domain: '$domain'" }
         val labels = normalized.split('.')
         val questionSize = labels.sumOf { it.length + 1 } + 1 + 4
@@ -213,9 +218,6 @@ object DnsPacketCodec {
         writeShort(out, p, qclass)
         return out
     }
-
-    private fun normalizeQueryDomain(domain: String): String =
-        DomainBlocklist.normalize(domain)
 
     /** Skips a (possibly compressed) domain name starting at [pos]; returns the new position or null on overrun. */
     private fun skipName(payload: ByteArray, pos: Int, end: Int): Int? {
