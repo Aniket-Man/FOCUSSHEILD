@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). `versionN
 
 ### Added
 
+* DNS-level 18+ website filtering engine (`AdultContentVpnService` + `VpnFilterEngineController`):
+  a local `VpnService` that intercepts DNS system-wide and blocks adult-content domains while the
+  existing 18+ blocking toggle is ON, and stops completely (normal networking restored) when it is
+  OFF. No UI was added or changed — the engine observes the same `auto_adult_website_blocking`
+  preference the existing toggle writes, prompts for VPN consent only through the system dialog,
+  and reuses the `AdultLexicalClassifier` corpus as its blocklist. See
+  `docs/DNS_ADULT_FILTER.md`.
 * `README.md`, `LICENSE` (MIT), `CONTRIBUTING.md` and this changelog (#31).
 * Unix `gradlew` wrapper script, so the build runs on macOS and Linux (#31).
 * GitHub Actions CI: `assembleDebug`, unit tests and Roborazzi verification on every push and

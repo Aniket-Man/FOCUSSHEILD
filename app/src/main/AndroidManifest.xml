@@ -130,6 +130,29 @@
                 android:value="Focus session study timer and background app blocker" />
         </service>
 
+        <!--
+            Local DNS-filtering VPN (18+ website blocking enforcement layer). Started and stopped
+            exclusively by VpnFilterEngineController, which observes the existing
+            auto_adult_website_blocking preference written by the in-app 18+ toggle — the toggle
+            stays the single source of truth. The interface routes ONLY its own fake DNS addresses
+            (IPv4 /32 + IPv6 /128): DNS queries are intercepted and filtered, while all other
+            traffic bypasses the tunnel through the real network, so stopping the service restores
+            completely normal networking. Same foregroundServiceType contract as the session
+            service above (see ForegroundServiceTypes and docs/FOREGROUND_SERVICE.md). No extra
+            permissions are required: VpnService needs no manifest permission and the
+            FOREGROUND_SERVICE_* permissions are already declared above.
+        -->
+        <service
+            android:name=".feature.websiteblocker.vpn.AdultContentVpnService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local DNS filter (VpnService) enforcing the in-app 18+ website blocking toggle system-wide" />
+        </service>
+
         <service
             android:name=".core.accessibility.FocusAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

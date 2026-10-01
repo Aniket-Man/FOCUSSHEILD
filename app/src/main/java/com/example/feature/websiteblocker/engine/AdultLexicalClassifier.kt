@@ -105,6 +105,18 @@ object AdultLexicalClassifier {
     )
 
     /**
+     * The exact adult domain corpus, exposed for the DNS-level VPN filter
+     * ([com.example.feature.websiteblocker.vpn.AdultBlocklistSource]) so both engines share one
+     * list instead of drifting apart. Read-only; no behavioral change to this classifier.
+     */
+    internal val adultDomainCorpus: Set<String>
+        get() = ADULT_DOMAINS_CORPUS
+
+    /** The adult TLD set, exposed for the DNS-level VPN filter (same rationale as [adultDomainCorpus]). */
+    internal val adultTlds: Set<String>
+        get() = ADULT_TLDS
+
+    /**
      * Checks whether the given domain or URL represents adult/18+ content.
      */
     fun isAdultContent(rawUrl: String, domain: String): AdultClassificationResult {

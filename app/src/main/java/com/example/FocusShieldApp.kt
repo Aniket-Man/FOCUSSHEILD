@@ -195,6 +195,20 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             preferencesRepository = preferencesRepository
         )
 
+        // Initialize the DNS-level 18+ filtering engine (local VpnService). It observes the SAME
+        // auto-adult-website-blocking preference the existing toggle writes — the toggle remains
+        // the single source of truth: ON -> VPN filter starts, OFF -> it stops and normal
+        // networking is restored. No UI is created or changed by this engine.
+        try {
+            com.example.feature.websiteblocker.vpn.VpnFilterEngineController.initialize(
+                app = this,
+                scope = applicationScope,
+                preferencesRepository = preferencesRepository
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("FocusShieldApp", "18+ DNS filtering engine failed to initialize: ${e.message}")
+        }
+
         // Initialize Notification Blocker Engine
         com.example.feature.notificationblocker.engine.NotificationBlockerEngine.initialize(
             appContext = this,
