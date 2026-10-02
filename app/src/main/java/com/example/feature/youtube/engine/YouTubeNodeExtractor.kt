@@ -35,7 +35,26 @@ object YouTubeNodeExtractor {
 
     private val WATCH_PAGE_VIEW_IDS = listOf(
         "$YT:id/watch_panel",
-        "$YT:id/watch_player"
+        "$YT:id/watch_player",
+        "$YT:id/watch_header_layout",
+        "$YT:id/watch_swipey_item",
+        "$YT:id/watch_metadata_title",
+        "$YT:id/watch_title_text",
+        "$YT:id/player_view"
+    )
+
+    private val AD_VIEW_IDS = listOf(
+        "$YT:id/skip_ad_button",
+        "$YT:id/skip_ad_button_container",
+        "$YT:id/ad_progress_text",
+        "$YT:id/ad_countdown_text",
+        "$YT:id/ad_countdown"
+    )
+
+    private val SUBSCRIBE_BUTTON_IDS = listOf(
+        "$YT:id/subscribe_button",
+        "$YT:id/subscribe_button_text",
+        "$YT:id/subscription_notification_toggle_button"
     )
 
     private val TITLE_VIEW_IDS = listOf(
@@ -51,6 +70,8 @@ object YouTubeNodeExtractor {
         "$YT:id/owner_text",
         "$YT:id/owner_name",
         "$YT:id/channel_title",
+        "$YT:id/channel_header",
+        "$YT:id/owner_layout",
         "$YT:id/subtitle"
     )
 
@@ -74,7 +95,13 @@ object YouTubeNodeExtractor {
         "video_title",
         "compact_media_item_headline",
         "title_text",
-        "header_title"
+        "header_title",
+        "description_sheet",
+        "expandable_metadata",
+        "video_description",
+        "description",
+        "comment",
+        "reply"
     )
 
     val HANDLE_REGEX = Regex("@[A-Za-z0-9_.\\-]{2,50}")
@@ -82,6 +109,103 @@ object YouTubeNodeExtractor {
     private val HOME_FEED_VIEW_IDS = listOf(
         "$YT:id/home_feed"
     )
+
+    /**
+     * Safely executes [block] with the list of nodes found by [viewId] on [rootNode] using in-memory BFS.
+     * In modern Android, using in-memory traversal avoids Binder IPC prefetch cache corruption
+     * and completely prevents AccessibilityInteractionClient disconnected node errors.
+     */
+    inline fun <T> findNodesByViewId(
+        rootNode: AccessibilityNodeInfo?,
+        viewId: String,
+        block: (List<AccessibilityNodeInfo>) -> T
+    ): T? {
+        if (rootNode == null) return null
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
+        val targetSuffix = if (viewId.contains(":id/")) "/${viewId.substringAfterLast(":id/")}" else viewId
+        while (queue.isNotEmpty() && visited < 120) {
+            val node = queue.removeFirst()
+            visited++
+            val resId = node.viewIdResourceName ?: ""
+            if (resId == viewId || (targetSuffix.isNotEmpty() && resId.endsWith(targetSuffix))) {
+                matches.add(node)
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) queue.add(child)
+            }
+        }
+        return block(matches)
+    }
+
+    /**
+     * Safely executes [block] with the list of nodes found by [text] on [rootNode] using in-memory BFS.
+     */
+    inline fun <T> findNodesByText(
+        rootNode: AccessibilityNodeInfo?,
+        text: String,
+        block: (List<AccessibilityNodeInfo>) -> T
+    ): T? {
+        if (rootNode == null) return null
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 120) {
+            val node = queue.removeFirst()
+            visited++
+            val nodeText = node.text?.toString() ?: ""
+            val desc = node.contentDescription?.toString() ?: ""
+            if (nodeText.contains(text, ignoreCase = true) || desc.contains(text, ignoreCase = true)) {
+                matches.add(node)
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) queue.add(child)
+            }
+        }
+        return block(matches)
+    }
+
+    /**
+     * Finds the first node matching any of [viewIds] in a single BFS pass.
+     */
+    inline fun <T> findFirstMatching(
+        rootNode: AccessibilityNodeInfo?,
+        viewIds: Collection<String>,
+        maxNodes: Int = 120,
+        predicate: (AccessibilityNodeInfo) -> T?
+    ): T? {
+        if (rootNode == null) return null
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < maxNodes) {
+            val node = queue.removeFirst()
+            visited++
+            val resId = node.viewIdResourceName ?: ""
+            if (resId.isNotEmpty()) {
+                val matches = viewIds.any {
+                    resId == it ||
+                    resId == it.substringAfterLast('/') ||
+                    resId.endsWith("/${it.substringAfterLast('/')}") ||
+                    resId.endsWith(":id/${it.substringAfterLast('/')}")
+                }
+                if (matches) {
+                    val result = predicate(node)
+                    if (result != null) return result
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) queue.add(child)
+            }
+        }
+        return null
+    }
 
     private val MAX_SCAN_DEPTH = 12
     private val MAX_SCAN_NODES = 200
@@ -95,10 +219,10 @@ object YouTubeNodeExtractor {
         if (rootNode == null) return false
         return try {
             for (viewId in SHORTS_PLAYER_VIEW_IDS) {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                if (nodes != null && nodes.isNotEmpty()) {
-                    return true
-                }
+                val found = findNodesByViewId(rootNode, viewId) { nodes ->
+                    nodes.isNotEmpty()
+                } ?: false
+                if (found) return true
             }
 
             event?.let { hasShortsEventSignal(it) } ?: false
@@ -133,13 +257,10 @@ object YouTubeNodeExtractor {
         if (rootNode == null) return false
         return try {
             for (viewId in WATCH_PAGE_VIEW_IDS) {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                if (nodes != null && nodes.isNotEmpty()) {
-                    return true
-                }
+                val found = findNodesByViewId(rootNode, viewId) { it.isNotEmpty() } ?: false
+                if (found) return true
             }
-            val titleNodes = rootNode.findAccessibilityNodeInfosByViewId("$YT:id/watch_title_text")
-            titleNodes != null && titleNodes.isNotEmpty()
+            findNodesByViewId(rootNode, "$YT:id/watch_title_text") { it.isNotEmpty() } ?: false
         } catch (_: Exception) {
             false
         }
@@ -152,10 +273,8 @@ object YouTubeNodeExtractor {
         if (rootNode == null) return false
         return try {
             for (viewId in HOME_FEED_VIEW_IDS) {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                if (nodes != null && nodes.isNotEmpty()) {
-                    return true
-                }
+                val found = findNodesByViewId(rootNode, viewId) { it.isNotEmpty() } ?: false
+                if (found) return true
             }
             isTabSelected(rootNode, "pivot_home") || isTabSelected(rootNode, "tab_home")
         } catch (_: Exception) {
@@ -164,18 +283,9 @@ object YouTubeNodeExtractor {
     }
 
     private fun isTabSelected(rootNode: AccessibilityNodeInfo, viewId: String): Boolean {
-        return try {
-            val nodes = rootNode.findAccessibilityNodeInfosByViewId("$YT:id/$viewId")
-            if (nodes != null) {
-                for (node in nodes) {
-                    val selected = node.isSelected
-                    if (selected) return true
-                }
-            }
-            false
-        } catch (_: Exception) {
-            false
-        }
+        return findNodesByViewId(rootNode, "$YT:id/$viewId") { nodes ->
+            nodes.any { it.isSelected || (it.contentDescription?.contains("selected", ignoreCase = true) == true) }
+        } ?: false
     }
 
     /**
@@ -244,18 +354,67 @@ object YouTubeNodeExtractor {
      */
     fun extractVideoTitle(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
-        for (viewId in TITLE_VIEW_IDS) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                if (nodes != null) {
-                    for (node in nodes) {
-                        val text = node.text?.toString()?.trim()
-                        if (!text.isNullOrBlank() && text.length >= 3) return text
-                    }
-                }
-            } catch (_: Exception) {}
+        return findFirstMatching(rootNode, TITLE_VIEW_IDS) { node ->
+            val text = node.text?.toString()?.trim()
+            if (!text.isNullOrBlank() && text.length >= 3) text else null
         }
-        return null
+    }
+
+    /**
+     * Detects whether an in-stream video advertisement is actively playing in the watch player.
+     * When an in-stream ad is playing, blocking decisions and channel tracking are suspended.
+     */
+    fun detectAd(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+
+        // 1. Direct view ID lookup for in-stream player ad controls ONLY
+        val hasAdControl = findFirstMatching(rootNode, AD_VIEW_IDS) { true } ?: false
+        if (hasAdControl) return true
+
+        // 2. Scan watch player area ONLY for explicit in-stream ad countdown/skip text
+        try {
+            var visited = 0
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            while (queue.isNotEmpty() && visited < 80) {
+                val node = queue.removeFirst()
+                visited++
+
+                val resId = node.viewIdResourceName ?: ""
+                // Skip recommendations, comments, and companion promo cards
+                if (YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any { resId.contains(it, ignoreCase = true) }) {
+                    continue
+                }
+
+                val text = node.text?.toString() ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+
+                if (YouTubeDetectionRules.isAdElement(resId, text, desc)) {
+                    return true
+                }
+
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
+     * Extracts channel name directly from the Subscribe button accessibility content description
+     * (e.g. "Subscribe to PW - JEE Wallah." or "Subscribed to Khan Academy").
+     */
+    fun extractChannelFromSubscribeButton(rootNode: AccessibilityNodeInfo?): String? {
+        if (rootNode == null) return null
+        return findFirstMatching(rootNode, SUBSCRIBE_BUTTON_IDS) { node ->
+            val desc = node.contentDescription?.toString()?.trim()
+            val candidate = YouTubeDetectionRules.extractChannelFromSubscribeButton(desc)
+            if (candidate != null) {
+                cleanChannelName(candidate)
+            } else null
+        }
     }
 
     /**
@@ -267,35 +426,32 @@ object YouTubeNodeExtractor {
         if (rootNode == null) return null
 
         // 1. Direct view ID query on dedicated handle and byline containers
-        for (viewId in HANDLE_VIEW_IDS) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                if (nodes != null) {
-                    for (node in nodes) {
-                        val resId = node.viewIdResourceName ?: ""
-                        if (EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
-                            continue
-                        }
-                        val text = node.text?.toString()?.trim() ?: ""
-                        val desc = node.contentDescription?.toString()?.trim() ?: ""
+        val handleFromView = findFirstMatching(rootNode, HANDLE_VIEW_IDS) { node ->
+            val resId = node.viewIdResourceName ?: ""
+            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
+                val text = node.text?.toString()?.trim() ?: ""
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
 
-                        val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
-                        if (handleMatch != null) {
-                            val cleaned = cleanChannelName(handleMatch.value)
-                            if (cleaned != null) return cleaned
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
+                val handleMatch = YouTubeDetectionRules.extractHandle(text)
+                    ?: YouTubeDetectionRules.extractHandle(desc)
+                if (handleMatch != null) {
+                    cleanChannelName(handleMatch)
+                } else null
+            } else null
         }
+        if (handleFromView != null) return handleFromView
 
         // 2. Scan watch player / metadata subtree for @handle text nodes
         return extractHandleFromWatchSubtree(rootNode)
     }
 
     /**
-     * Extracts ONLY the channel handle (@name) of the video currently on the watch page.
-     * Enforces the requirement that only @handles are used for detection.
+     * Extracts the verified channel name or @handle of the video currently on the watch page.
+     * Evaluates in strict order of reliability:
+     * 1. Direct channel @handle under video title (e.g. @PW-JEEWallah)
+     * 2. Subscribe button description ("Subscribe to PW - JEE Wallah.")
+     * 3. Direct channel name view IDs (channel_name, owner_name, owner_text, channel_title)
+     * 4. Bounded watch subtree traversal
      */
     fun extractChannelName(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
@@ -304,24 +460,34 @@ object YouTubeNodeExtractor {
         val handle = extractChannelHandle(rootNode)
         if (handle != null) return handle
 
-        return null
+        // 2. Subscribe button contentDescription
+        val fromSubscribe = extractChannelFromSubscribeButton(rootNode)
+        if (fromSubscribe != null) return fromSubscribe
+
+        // 3. Direct channel view IDs
+        val channelFromView = findFirstMatching(rootNode, CHANNEL_VIEW_IDS) { node ->
+            val resId = node.viewIdResourceName ?: ""
+            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
+                val text = node.text?.toString()?.trim()
+                if (!text.isNullOrBlank()) {
+                    val valid = YouTubeDetectionRules.extractAndValidateChannelName(text)
+                    if (valid != null) {
+                        cleanChannelName(valid)
+                    } else null
+                } else null
+            } else null
+        }
+        if (channelFromView != null) return channelFromView
+
+        // 4. Bounded watch subtree traversal
+        return extractChannelFromWatchPlayer(rootNode)
     }
 
     /**
      * Scans specifically the watch player metadata subtree for @handle nodes.
      */
     private fun extractHandleFromWatchSubtree(rootNode: AccessibilityNodeInfo): String? {
-        var watchContainer: AccessibilityNodeInfo? = null
-        for (id in WATCH_PAGE_VIEW_IDS) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!nodes.isNullOrEmpty()) {
-                    watchContainer = nodes.first()
-                    break
-                }
-            } catch (_: Exception) {}
-        }
-
+        val watchContainer = findFirstMatching(rootNode, WATCH_PAGE_VIEW_IDS) { it }
         val searchRoot = watchContainer ?: rootNode
 
         var visited = 0
@@ -367,16 +533,7 @@ object YouTubeNodeExtractor {
      */
     private fun extractChannelFromWatchPlayer(rootNode: AccessibilityNodeInfo): String? {
         // Find the watch panel container so we only scan the active video area.
-        var watchContainer: AccessibilityNodeInfo? = null
-        for (id in WATCH_PAGE_VIEW_IDS) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!nodes.isNullOrEmpty()) {
-                    watchContainer = nodes.first()
-                    break
-                }
-            } catch (_: Exception) {}
-        }
+        val watchContainer = findFirstMatching(rootNode, WATCH_PAGE_VIEW_IDS) { it }
 
         val searchRoot = watchContainer ?: rootNode
         val candidates = mutableListOf<String>()
@@ -413,6 +570,12 @@ object YouTubeNodeExtractor {
                     val subscribePrefix = "Subscribe to "
                     if (desc.startsWith(subscribePrefix, ignoreCase = true) && desc.length > subscribePrefix.length) {
                         candidates.add(desc.substring(subscribePrefix.length).trim())
+                        found = true
+                        break
+                    }
+                    val subscribedPrefix = "Subscribed to "
+                    if (desc.startsWith(subscribedPrefix, ignoreCase = true) && desc.length > subscribedPrefix.length) {
+                        candidates.add(desc.substring(subscribedPrefix.length).trim())
                         found = true
                         break
                     }
@@ -460,8 +623,15 @@ object YouTubeNodeExtractor {
         } else {
             if (name.startsWith("@")) name = name.removePrefix("@").trim()
             name = name.substringBefore(" • ").substringBefore(" · ").substringBefore(" | ").trim()
-            if (name.startsWith("By ", ignoreCase = true)) name = name.removePrefix("By ").trim()
+            val prefixes = listOf("Subscribe to ", "Subscribed to ", "Unsubscribe from ", "By ", "by ")
+            for (p in prefixes) {
+                if (name.startsWith(p, ignoreCase = true)) {
+                    name = name.substring(p.length).trim()
+                    break
+                }
+            }
         }
+        if (name.endsWith(".")) name = name.dropLast(1).trim()
 
         if (name.length < 2 || name.length > 70) return null
         if (!name.any { it.isLetter() }) return null

@@ -168,7 +168,7 @@ class AdultFilteringEngine private constructor(
     /**
      * Wires socket protector from the active VpnService instance.
      */
-    fun setSocketProtector(protector: (DatagramSocket) -> Boolean) {
+    fun setSocketProtector(protector: ((DatagramSocket) -> Boolean)?) {
         dnsProxy = DnsProxy(socketProtector = protector)
     }
 
@@ -182,8 +182,7 @@ class AdultFilteringEngine private constructor(
         }
 
         try {
-            val intent = Intent(appContext, AdultDnsVpnService::class.java)
-            appContext.startService(intent)
+            AdultDnsVpnService.start(appContext)
             isEngineActive = true
             Log.i(TAG, "Started AdultDnsVpnService for 18+ website blocking")
         } catch (e: Exception) {

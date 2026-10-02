@@ -17,8 +17,10 @@ import com.example.R
 object FocusAlertSoundManager {
 
     private const val TAG = "FocusAlertSound"
-    private var lastBuzzTime: Long = 0L
-    private var lastChimeTime: Long = 0L
+    private const val MIN_SOUND_INTERVAL_MS = 2200L
+    @Volatile private var lastSoundTime: Long = 0L
+    @Volatile private var activeMediaPlayer: MediaPlayer? = null
+    private val lock = Any()
 
     fun getNotificationSoundUri(context: Context): Uri {
         return Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/raw/mixkit_correct_answer_tone")
@@ -32,10 +34,6 @@ object FocusAlertSoundManager {
      * Plays the custom notification chime tone (audio only, no vibration).
      */
     fun playSessionChime(context: Context) {
-        val now = System.currentTimeMillis()
-        if (now - lastChimeTime < 800L) return
-        lastChimeTime = now
-
         playSound(context, "chime")
     }
 
@@ -44,41 +42,70 @@ object FocusAlertSoundManager {
      * Audio only — vibration removed.
      */
     fun playWarningBuzzer(context: Context) {
-        val now = System.currentTimeMillis()
-        if (now - lastBuzzTime < 500L) return
-        lastBuzzTime = now
-
         playSound(context, "buzzer")
     }
 
     private fun playSound(context: Context, label: String) {
-        var mediaPlayer: MediaPlayer? = null
-        try {
-            val audioAttributes = AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .build()
-            mediaPlayer = MediaPlayer.create(
-                context.applicationContext,
-                R.raw.mixkit_correct_answer_tone,
-                audioAttributes,
-                0
-            )
-            if (mediaPlayer == null) {
-                Log.w(TAG, "MediaPlayer.create returned null for $label")
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            if (now - lastSoundTime < MIN_SOUND_INTERVAL_MS) {
+                Log.d(TAG, "Skipping $label sound: throttled (${now - lastSoundTime}ms since last sound)")
                 return
             }
-            mediaPlayer.setOnCompletionListener { mp ->
-                try { mp.release() } catch (_: Exception) {}
+
+            try {
+                if (activeMediaPlayer?.isPlaying == true) {
+                    Log.d(TAG, "Skipping $label sound: previous sound is still playing")
+                    return
+                }
+            } catch (_: Exception) {}
+
+            try {
+                activeMediaPlayer?.release()
+            } catch (_: Exception) {}
+            activeMediaPlayer = null
+
+            lastSoundTime = now
+
+            try {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .build()
+                val mp = MediaPlayer.create(
+                    context.applicationContext,
+                    R.raw.mixkit_correct_answer_tone,
+                    audioAttributes,
+                    0
+                )
+                if (mp == null) {
+                    Log.w(TAG, "MediaPlayer.create returned null for $label")
+                    return
+                }
+                activeMediaPlayer = mp
+                mp.setOnCompletionListener { player ->
+                    synchronized(lock) {
+                        try { player.release() } catch (_: Exception) {}
+                        if (activeMediaPlayer === player) {
+                            activeMediaPlayer = null
+                        }
+                    }
+                }
+                mp.setOnErrorListener { player, _, _ ->
+                    synchronized(lock) {
+                        try { player.release() } catch (_: Exception) {}
+                        if (activeMediaPlayer === player) {
+                            activeMediaPlayer = null
+                        }
+                    }
+                    true
+                }
+                mp.start()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error playing notification $label sound", e)
+                try { activeMediaPlayer?.release() } catch (_: Exception) {}
+                activeMediaPlayer = null
             }
-            mediaPlayer.setOnErrorListener { mp, _, _ ->
-                try { mp.release() } catch (_: Exception) {}
-                true
-            }
-            mediaPlayer.start()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error playing notification $label sound", e)
-            try { mediaPlayer?.release() } catch (_: Exception) {}
         }
     }
 }

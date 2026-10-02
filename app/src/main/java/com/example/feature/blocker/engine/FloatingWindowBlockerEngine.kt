@@ -370,11 +370,6 @@ class FloatingWindowBlockerEngine private constructor() {
         if (!result.isBlocked) return
         Log.w(tag, "Enforcing Floating Window block for ${result.culpritPackage} (block #$blockCount)")
 
-        // Trigger notification sound alert
-        try {
-            com.example.core.sound.FocusAlertSoundManager.playWarningBuzzer(service)
-        } catch (_: Exception) {}
-
         // Show overlay notification
         try {
             com.example.core.overlay.FocusDisplayOverlayNotificationManager.showFloatingWindowBlockedHud(service)

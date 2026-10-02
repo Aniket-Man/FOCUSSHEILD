@@ -97,25 +97,31 @@ object BrowserUrlDetector {
 
     private fun findTextByViewId(rootNode: AccessibilityNodeInfo, viewId: String): String? {
         return try {
-            val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-            var matchedText: String? = null
-            if (!nodes.isNullOrEmpty()) {
-                for (node in nodes) {
-                    if (matchedText == null) {
-                        val text = node.text?.toString()
-                        if (!text.isNullOrBlank()) {
-                            matchedText = text
-                        } else {
-                            val desc = node.contentDescription?.toString()
-                            if (!desc.isNullOrBlank() && isLikelyUrlOrDomain(desc)) {
-                                matchedText = desc
-                            }
-                        }
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            val targetSuffix = if (viewId.contains(":id/")) "/${viewId.substringAfterLast(":id/")}" else viewId
+            while (queue.isNotEmpty() && visited < 80) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName ?: ""
+                if (resId == viewId || (targetSuffix.isNotEmpty() && (resId.endsWith(targetSuffix) || resId.endsWith("/${viewId.substringAfterLast('/')}")))) {
+                    val text = node.text?.toString()
+                    if (!text.isNullOrBlank()) {
+                        return text
+                    }
+                    val desc = node.contentDescription?.toString()
+                    if (!desc.isNullOrBlank() && isLikelyUrlOrDomain(desc)) {
+                        return desc
                     }
                 }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
             }
-            matchedText
-        } catch (e: Exception) {
+            null
+        } catch (_: Exception) {
             null
         }
     }

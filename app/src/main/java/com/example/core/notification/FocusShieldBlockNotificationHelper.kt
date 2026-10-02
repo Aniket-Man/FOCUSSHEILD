@@ -25,7 +25,7 @@ import com.example.core.sound.FocusAlertSoundManager
  */
 object FocusShieldBlockNotificationHelper {
 
-    const val CHANNEL_ID_BLOCKS = "focus_shield_blocks_v3"
+    const val CHANNEL_ID_BLOCKS = "focus_shield_blocks_v4"
     private const val CHANNEL_NAME_BLOCKS = "FocusShield Warning Alerts"
     private const val CHANNEL_DESCRIPTION_BLOCKS = "Haptic alerts and notifications when distraction content, Shorts, Reels, or adult sites are blocked"
 
@@ -42,11 +42,9 @@ object FocusShieldBlockNotificationHelper {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            val soundUri = FocusAlertSoundManager.getNotificationSoundUri(context)
-            val audioAttributes = android.media.AudioAttributes.Builder()
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-                .build()
+            try {
+                notificationManager?.deleteNotificationChannel("focus_shield_blocks_v3")
+            } catch (_: Exception) {}
 
             val channel = NotificationChannel(
                 CHANNEL_ID_BLOCKS,
@@ -56,7 +54,7 @@ object FocusShieldBlockNotificationHelper {
                 description = CHANNEL_DESCRIPTION_BLOCKS
                 enableVibration(false)
                 vibrationPattern = null
-                setSound(soundUri, audioAttributes)
+                setSound(null, null)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(channel)
@@ -235,6 +233,7 @@ object FocusShieldBlockNotificationHelper {
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .build()

@@ -26,11 +26,11 @@ import com.example.feature.session.domain.PomodoroPhase
  */
 object SessionNotificationHelper {
 
-    const val CHANNEL_ID = "focus_session_alerts_v3"
+    const val CHANNEL_ID = "focus_session_alerts_v4"
     private const val CHANNEL_NAME = "Focus Session Alerts"
     private const val CHANNEL_DESCRIPTION = "Sound alerts for Session start/end, Timer completions, and Pomodoro transitions"
 
-    const val CHANNEL_ID_STUDY_PLAN = "study_plan_reminders_v3"
+    const val CHANNEL_ID_STUDY_PLAN = "study_plan_reminders_v4"
     private const val CHANNEL_NAME_STUDY_PLAN = "Study Plan Reminders"
     private const val CHANNEL_DESCRIPTION_STUDY_PLAN = "Sound notifications for scheduled study sessions and subject timing"
 
@@ -45,11 +45,12 @@ object SessionNotificationHelper {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            val soundUri = FocusAlertSoundManager.getNotificationSoundUri(context)
-            val audioAttributes = android.media.AudioAttributes.Builder()
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-                .build()
+            try {
+                notificationManager?.deleteNotificationChannel("focus_session_alerts_v3")
+                notificationManager?.deleteNotificationChannel("study_plan_reminders_v3")
+                notificationManager?.deleteNotificationChannel("focus_shield_session_alerts")
+                notificationManager?.deleteNotificationChannel("focus_shield_study_plan_reminders")
+            } catch (_: Exception) {}
 
             // Session alerts channel
             val sessionChannel = NotificationChannel(
@@ -60,7 +61,7 @@ object SessionNotificationHelper {
                 description = CHANNEL_DESCRIPTION
                 enableVibration(false)
                 vibrationPattern = null
-                setSound(soundUri, audioAttributes)
+                setSound(null, null)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(sessionChannel)
@@ -74,7 +75,7 @@ object SessionNotificationHelper {
                 description = CHANNEL_DESCRIPTION_STUDY_PLAN
                 enableVibration(false)
                 vibrationPattern = null
-                setSound(soundUri, audioAttributes)
+                setSound(null, null)
                 setShowBadge(true)
             }
             notificationManager?.createNotificationChannel(planChannel)

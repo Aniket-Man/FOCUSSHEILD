@@ -96,6 +96,42 @@ object YouTubeDetectionRules {
     // =========================================================================
 
     /**
+     * View IDs indicating an active in-stream video advertisement in the watch player.
+     * Only genuine in-stream video ad controls are included to avoid false positives on static banners.
+     */
+    val ACTIVE_AD_VIEW_IDS: List<String> = listOf(
+        "skip_ad_button",
+        "skip_ad_button_container",
+        "ad_progress_text",
+        "ad_countdown_text",
+        "ad_countdown"
+    )
+
+    /**
+     * Text or description prefixes identifying an active in-stream video ad.
+     */
+    val ACTIVE_AD_TEXT_KEYWORDS: List<String> = listOf(
+        "Skip Ads",
+        "Skip Ad",
+        "Skip in ",
+        "Ad 1 of ",
+        "Ad 2 of ",
+        "Ad · 0:",
+        "Ad • 0:"
+    )
+
+    /**
+     * View IDs for the channel subscribe button, which contains authentic channel names in its contentDescription.
+     */
+    val SUBSCRIBE_BUTTON_VIEW_IDS: List<String> = listOf(
+        "subscribe_button",
+        "subscribe_button_text",
+        "subscription_notification_toggle_button"
+    )
+
+    val HANDLE_REGEX = Regex("@[A-Za-z0-9_.-]{2,50}")
+
+    /**
      * View IDs representing the main full-screen/expanded video watch container or active player subtree.
      * Note: miniplayers and feed layouts are strictly excluded.
      */
@@ -400,6 +436,61 @@ object YouTubeDetectionRules {
 
         val cleaned = trimmed.removePrefix("By ").removePrefix("by ").trim()
         return if (!isInvalidChannelName(cleaned)) cleaned else null
+    }
+
+    /**
+     * Extracts an authentic channel @handle from raw text, such as watch subtitle
+     * or byline strings like "@PW-JEEWallah 1.1K likes 92K views 1d ago".
+     */
+    fun extractHandle(rawText: String?): String? {
+        if (rawText.isNullOrBlank()) return null
+        val match = HANDLE_REGEX.find(rawText) ?: return null
+        return match.value.trim()
+    }
+
+    /**
+     * Extracts an authentic channel name from a subscribe button's accessibility content description,
+     * such as "Subscribe to PW - JEE Wallah." or "Subscribed to Khan Academy".
+     */
+    fun extractChannelFromSubscribeButton(contentDesc: String?): String? {
+        if (contentDesc.isNullOrBlank()) return null
+        val trimmed = contentDesc.trim()
+        val prefixes = listOf(
+            "Subscribe to ",
+            "Subscribed to ",
+            "Unsubscribe from ",
+            "Notification settings for "
+        )
+        for (prefix in prefixes) {
+            if (trimmed.startsWith(prefix, ignoreCase = true)) {
+                var candidate = trimmed.substring(prefix.length).trim()
+                if (candidate.endsWith(".")) {
+                    candidate = candidate.dropLast(1).trim()
+                }
+                if (candidate.isNotBlank() && !isInvalidChannelName(candidate)) {
+                    return candidate
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Checks if the given node resource name or text/description represents an active in-stream ad.
+     */
+    fun isAdElement(viewId: String?, text: String?, desc: String?): Boolean {
+        val vid = viewId ?: ""
+        if (ACTIVE_AD_VIEW_IDS.any { vid.contains(it, ignoreCase = true) }) {
+            return true
+        }
+        val t = text?.trim() ?: ""
+        val d = desc?.trim() ?: ""
+        for (kw in ACTIVE_AD_TEXT_KEYWORDS) {
+            if (t.startsWith(kw, ignoreCase = true) || d.startsWith(kw, ignoreCase = true)) {
+                return true
+            }
+        }
+        return false
     }
 
     /**

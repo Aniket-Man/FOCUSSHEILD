@@ -43,10 +43,12 @@ class AdultDnsVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         Log.i(TAG, "AdultDnsVpnService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        activeInstance = this
         if (intent?.action == ACTION_STOP) {
             stopVpn()
             return START_NOT_STICKY
@@ -247,9 +249,14 @@ class AdultDnsVpnService : VpnService() {
     }
 
     private fun stopVpn() {
+        if (!isRunning && vpnInterface == null && workerJob == null) return
         Log.i(TAG, "Stopping AdultDnsVpnService")
         isRunning = false
+        if (activeInstance == this) {
+            activeInstance = null
+        }
         AdultFilteringEngine.instance?.onVpnServiceStopped()
+        AdultFilteringEngine.instance?.setSocketProtector(null)
 
         workerJob?.cancel()
         workerJob = null
@@ -271,6 +278,9 @@ class AdultDnsVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        if (activeInstance == this) {
+            activeInstance = null
+        }
         stopVpn()
         serviceScope.cancel()
         super.onDestroy()
@@ -301,6 +311,9 @@ class AdultDnsVpnService : VpnService() {
         var isRunning: Boolean = false
             private set
 
+        @Volatile
+        private var activeInstance: AdultDnsVpnService? = null
+
         fun start(context: Context) {
             try {
                 val intent = Intent(context, AdultDnsVpnService::class.java)
@@ -316,10 +329,14 @@ class AdultDnsVpnService : VpnService() {
 
         fun stop(context: Context) {
             try {
-                val intent = Intent(context, AdultDnsVpnService::class.java).apply {
-                    action = ACTION_STOP
+                val instance = activeInstance
+                if (instance != null) {
+                    instance.stopVpn()
+                    activeInstance = null
                 }
-                context.startService(intent)
+                // Stop the service via the platform. stopService is always allowed from the background,
+                // unlike startService which is prohibited by Android background execution limits.
+                context.stopService(Intent(context, AdultDnsVpnService::class.java))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop AdultDnsVpnService: ${e.message}")
             }

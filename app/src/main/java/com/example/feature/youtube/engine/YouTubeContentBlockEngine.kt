@@ -44,6 +44,12 @@ object YouTubeContentBlockEngine {
     @Volatile
     private var lastSeenVideoTitle: String? = null
 
+    @Volatile
+    private var lastApprovedVideoKey: String? = null
+
+    @Volatile
+    private var lastApprovedChannel: String? = null
+
     /**
      * Evaluates the current YouTube screen and returns the block decision.
      * Fully synchronous and in-memory so it completes within milliseconds.
@@ -75,26 +81,23 @@ object YouTubeContentBlockEngine {
                 YouTubeBlockDecision.ALLOW_NAVIGATION
             }
         }
-        
-        // 2.5 Detection is suspended when playback is explicitly paused
-        val isPaused = YouTubeNodeExtractor.isVideoPaused(rootNode)
 
-        if (isPaused) {
-            playbackStartedAt = 0L
+        // 2.1 AD DETECTION & BYPASS:
+        // When an ad is actively playing, never block and do not disturb approved channel state.
+        val isAd = YouTubeNodeExtractor.detectAd(rootNode)
+        if (isAd) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                reason = "Video is explicitly paused"
+                reason = "YouTube Ad is playing"
             )
         }
 
-        // 2.6 Video is actively playing! Record playback start timestamp
+        // 2.2 Record watch page active timestamp
         if (playbackStartedAt == 0L) {
             playbackStartedAt = currentTime
         }
 
-        val withinPlaybackDelay = (currentTime - playbackStartedAt) < PLAYBACK_START_DELAY_MILLIS
-
-        // 3. TITLE + CHANNEL MATCHING PIPELINE (Zenlock Classifier Pattern)
+        // 3. TITLE + CHANNEL MATCHING PIPELINE
         val title = YouTubeNodeExtractor.extractVideoTitle(rootNode)
         val channel = YouTubeNodeExtractor.extractChannelName(rootNode)
             ?: resolveChannelFromText(rootNode)
@@ -102,27 +105,31 @@ object YouTubeContentBlockEngine {
         if (title != null) lastSeenVideoTitle = title
         trackVideo(title, currentTime)
 
+        // 3.1 ACTIVE SESSION LATCH: If this specific video was already verified and approved,
+        // keep it approved while metadata is temporarily occluded.
+        if (lastApprovedVideoKey != null && title != null && currentVideoKey == lastApprovedVideoKey && channel == null) {
+            return YouTubeBlockDecision.approvedChannel(lastApprovedChannel ?: "Approved Channel")
+        }
+
         if (channel != null) lastSeenChannelName = channel
-        val effectiveChannel = channel ?: lastSeenChannelName
+        // Never allow a new or unverified video to inherit an earlier approved channel name
+        val effectiveChannel = channel ?: if (currentVideoKey != null && currentVideoKey == lastApprovedVideoKey) lastSeenChannelName else null
 
         val approved = isContentApproved(title, effectiveChannel, approvedChannelIds, approvedChannelNames)
         if (approved) {
-            return YouTubeBlockDecision.approvedChannel(effectiveChannel ?: title ?: "Approved Channel")
+            lastApprovedVideoKey = currentVideoKey
+            lastApprovedChannel = effectiveChannel ?: "Approved Channel"
+            return YouTubeBlockDecision.approvedChannel(lastApprovedChannel ?: "Approved Channel")
         } else {
-            if (withinPlaybackDelay) {
-                return YouTubeBlockDecision(
-                    verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                    reason = "Playback delay in progress (verifying title + channel match)"
-                )
-            }
-            if (effectiveChannel != null || title != null) {
-                return YouTubeBlockDecision.blockedChannel(effectiveChannel ?: title ?: "Unapproved Content")
+            // Unapproved channel positively identified -> block immediately!
+            if (effectiveChannel != null) {
+                return YouTubeBlockDecision.blockedChannel(effectiveChannel)
             }
         }
 
         // 4. Channel metadata not rendered yet: wait briefly, then treat as unknown.
         val withinGrace = (currentTime - currentVideoFirstSeenAt) < CHANNEL_METADATA_GRACE_MILLIS
-        if (withinGrace || withinPlaybackDelay) {
+        if (withinGrace) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
                 reason = "Waiting for channel handle metadata"
@@ -137,6 +144,10 @@ object YouTubeContentBlockEngine {
             )
         }
         return YouTubeBlockDecision.unknownContent(title, null)
+    }
+
+    private fun effectiveChannelOrFallback(channel: String?): String {
+        return channel ?: lastSeenChannelName ?: "Approved Channel"
     }
 
     /**
@@ -155,30 +166,35 @@ object YouTubeContentBlockEngine {
 
     private fun extractWatchPanelText(rootNode: AccessibilityNodeInfo): String {
         val watchIds = listOf(
-            "com.google.android.youtube:id/channel_handle",
-            "com.google.android.youtube:id/byline",
-            "com.google.android.youtube:id/byline_text",
-            "com.google.android.youtube:id/watch_metadata_byline",
-            "com.google.android.youtube:id/watch_metadata_subtitle",
-            "com.google.android.youtube:id/metadata_line",
-            "com.google.android.youtube:id/watch_header_layout",
-            "com.google.android.youtube:id/owner_layout",
-            "com.google.android.youtube:id/channel_name",
-            "com.google.android.youtube:id/owner_text",
-            "com.google.android.youtube:id/owner_name",
-            "com.google.android.youtube:id/channel_title"
+            "channel_handle",
+            "byline",
+            "byline_text",
+            "watch_metadata_byline",
+            "watch_metadata_subtitle",
+            "metadata_line",
+            "watch_header_layout",
+            "owner_layout",
+            "channel_name",
+            "owner_text",
+            "owner_name",
+            "channel_title"
         )
         val builder = StringBuilder()
-        for (id in watchIds) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (nodes != null) {
-                    for (node in nodes) {
-                        node.text?.let { builder.append(it).append(" ") }
-                        node.contentDescription?.let { builder.append(it).append(" ") }
-                    }
-                }
-            } catch (_: Exception) {}
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 100) {
+            val node = queue.removeFirst()
+            visited++
+            val resId = node.viewIdResourceName ?: ""
+            if (watchIds.any { resId.contains(it, ignoreCase = true) }) {
+                node.text?.let { builder.append(it).append(" ") }
+                node.contentDescription?.let { builder.append(it).append(" ") }
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) queue.add(child)
+            }
         }
         return builder.toString().trim()
     }
@@ -189,11 +205,19 @@ object YouTubeContentBlockEngine {
      * from the previous video is discarded so it can never approve the new one.
      */
     private fun trackVideo(title: String?, currentTime: Long) {
-        val videoKey = title?.trim()?.takeIf { it.isNotEmpty() } ?: return
-        if (videoKey != currentVideoKey) {
-            currentVideoKey = videoKey
-            currentVideoFirstSeenAt = currentTime
-            lastSeenChannelName = null
+        val videoKey = title?.trim()?.takeIf { it.isNotEmpty() }
+        if (videoKey != null) {
+            if (videoKey != currentVideoKey) {
+                currentVideoKey = videoKey
+                currentVideoFirstSeenAt = currentTime
+                lastSeenChannelName = null
+                lastApprovedVideoKey = null
+                lastApprovedChannel = null
+            }
+        } else {
+            if (currentVideoFirstSeenAt == 0L) {
+                currentVideoFirstSeenAt = currentTime
+            }
         }
     }
 
@@ -201,6 +225,8 @@ object YouTubeContentBlockEngine {
         currentVideoKey = null
         currentVideoFirstSeenAt = 0L
         playbackStartedAt = 0L
+        lastApprovedVideoKey = null
+        lastApprovedChannel = null
     }
 
     /**
@@ -210,11 +236,13 @@ object YouTubeContentBlockEngine {
         resetVideoTracking()
         lastSeenChannelName = null
         lastSeenVideoTitle = null
+        lastApprovedVideoKey = null
+        lastApprovedChannel = null
     }
 
     /**
-     * Comprehensive content classifier (title + channel name + keywords) matching logic.
-     * Evaluates whether a video's title or channel matches approved study channels or keywords.
+     * Evaluates whether the detected channel matches the user's approved study channels.
+     * The video title is never used to judge approval — only verified channel handles and names.
      */
     fun isContentApproved(
         detectedTitle: String?,
@@ -223,47 +251,8 @@ object YouTubeContentBlockEngine {
         approvedChannelNames: Set<String>
     ): Boolean {
         if (approvedChannelIds.isEmpty() && approvedChannelNames.isEmpty()) return false
-
-        // 1. Direct channel name/handle match
-        if (detectedChannel != null && isChannelApproved(detectedChannel, approvedChannelIds, approvedChannelNames)) {
-            return true
-        }
-
-        // 2. Combined title + channel text search (Zenlock Classifier pattern)
-        val searchText = buildString {
-            detectedTitle?.let { append(it.lowercase(Locale.ROOT)) }
-            append(" ")
-            detectedChannel?.let { append(it.lowercase(Locale.ROOT)) }
-        }.trim()
-
-        if (searchText.isEmpty()) return false
-
-        // Check matching against approved channel handles and names
-        for (approved in approvedChannelIds + approvedChannelNames) {
-            val approvedNorm = approved.trim().lowercase(Locale.ROOT)
-            if (approvedNorm.isEmpty()) continue
-
-            // Exact or substring match in search text (e.g. "Khan Academy" or "Physics Wallah" in title)
-            if (searchText.contains(approvedNorm)) {
-                return true
-            }
-            
-            if (detectedChannel != null && detectedChannel.isNotBlank()) {
-                val channelNorm = detectedChannel.lowercase(Locale.ROOT)
-                if (approvedNorm.contains(channelNorm) || channelNorm.contains(approvedNorm)) {
-                    return true
-                }
-            }
-
-            // Clean handle match (e.g. "@physicswallah")
-            val cleanHandle = approvedNorm.removePrefix("@").filter { it.isLetterOrDigit() }
-            val cleanSearchText = searchText.filter { it.isLetterOrDigit() }
-            if (cleanHandle.length >= MIN_FUZZY_MATCH_LENGTH && cleanSearchText.contains(cleanHandle)) {
-                return true
-            }
-        }
-
-        return false
+        if (detectedChannel.isNullOrBlank()) return false
+        return isChannelApproved(detectedChannel, approvedChannelIds, approvedChannelNames)
     }
 
     /**

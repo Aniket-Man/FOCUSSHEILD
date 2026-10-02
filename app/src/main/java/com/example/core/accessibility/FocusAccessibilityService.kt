@@ -252,21 +252,23 @@ class FocusAccessibilityService : AccessibilityService() {
                 if (isTamperWindowChange || (now - lastTamperCheckTimestamp) >= 500L) {
                     lastTamperCheckTimestamp = now
                     val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
-                    if (rootNode != null) {
-                        val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
-                        if (isTamper) {
-                            Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
-                            performGlobalAction(GLOBAL_ACTION_HOME)
-                            val toastMsg = "FocusShield Uninstall Protection is active"
-                            android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
-                            blockerManager?.handleBlockedPackage(
-                                packageName = rawPackageName,
-                                fallbackAppName = "Uninstall Protection",
-                                decision = ProtectionDecision.BLOCK_UNINSTALL
-                            )
-                            return
+                    try {
+                        if (rootNode != null) {
+                            val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
+                            if (isTamper) {
+                                Log.w(tag, "[$rawPackageName] Tamper or FocusShield uninstallation attempt detected! Enforcing instant block.")
+                                performGlobalAction(GLOBAL_ACTION_HOME)
+                                val toastMsg = "FocusShield Uninstall Protection is active"
+                                android.widget.Toast.makeText(applicationContext, toastMsg, android.widget.Toast.LENGTH_SHORT).show()
+                                blockerManager?.handleBlockedPackage(
+                                    packageName = rawPackageName,
+                                    fallbackAppName = "Uninstall Protection",
+                                    decision = ProtectionDecision.BLOCK_UNINSTALL
+                                )
+                                return
+                            }
                         }
-                    }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -292,7 +294,14 @@ class FocusAccessibilityService : AccessibilityService() {
             // Active if global toggle is ON or if user is in an active Focus Session.
             // YouTube is excluded here while a Study Mode session is active because the
             // full YouTube Content Block Engine below owns YouTube in that case.
-            val isShortFormTracked = isShortFormBlockingEnabledFor(rawPackageName)
+            val isYouTubeStudyModeActive = YouTubeDetectionRules.isYouTubePackage(rawPackageName) &&
+                    (blockerManager?.getCurrentProtectionState(now)?.let {
+                        (it.sessionState == com.example.feature.session.domain.SessionState.RUNNING ||
+                                it.sessionState == com.example.feature.session.domain.SessionState.PAUSED) &&
+                                it.isYouTubeStudyModeEnabled
+                    } == true)
+
+            val isShortFormTracked = !isYouTubeStudyModeActive && isShortFormBlockingEnabledFor(rawPackageName)
             if (isShortFormTracked) {
                 // Throttle window content inspection to prevent CPU overhead (min 150ms between scans)
                 if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -302,7 +311,8 @@ class FocusAccessibilityService : AccessibilityService() {
                 } else {
                     lastShortFormInspectTimestamp = now
                     val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
-                    val isYT = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+                    try {
+                        val isYT = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
 
                     // YouTube uses the reel-player-container detection which never fires
                     // for Shorts shelves embedded in the Home feed; other apps keep the
@@ -326,9 +336,11 @@ class FocusAccessibilityService : AccessibilityService() {
                             val isFB = rawPackageName.contains("facebook") || rawPackageName.contains("katana")
 
                             if (isYT) {
-                                handleYouTubeShortsBlocked()
-                                com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
-                                com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
+                                val didBlock = handleYouTubeShortsBlocked()
+                                if (didBlock) {
+                                    com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
+                                    com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
+                                }
                             } else {
                                 val backSuccess = performGlobalAction(GLOBAL_ACTION_BACK)
                                 if (!backSuccess) {
@@ -354,8 +366,9 @@ class FocusAccessibilityService : AccessibilityService() {
                             return
                         }
                     }
-                }
+                } catch (_: Exception) {}
             }
+        }
 
             // 1B. BROWSER WEBSITE BLOCKER FLOW (Auto Adult + Custom Distraction List)
             if (com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)) {
@@ -438,97 +451,103 @@ class FocusAccessibilityService : AccessibilityService() {
                     }
                     lastYouTubeInspectTimestamp = now
                     val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
-                    val decision = YouTubeContentBlockEngine.evaluate(
-                        rootNode = rootNode,
-                        event = event,
-                        approvedChannelIds = protectionState.approvedChannelIds,
-                        approvedChannelNames = protectionState.approvedChannelNames,
-                        blockUnknownContent = protectionState.blockUnknownContent,
-                        currentTime = now
-                    )
+                    try {
+                        val decision = YouTubeContentBlockEngine.evaluate(
+                            rootNode = rootNode,
+                            event = event,
+                            approvedChannelIds = protectionState.approvedChannelIds,
+                            approvedChannelNames = protectionState.approvedChannelNames,
+                            blockUnknownContent = protectionState.blockUnknownContent,
+                            currentTime = now
+                        )
 
-                    if (decision.verdict == YouTubeBlockVerdict.HOME_FEED) {
-                        // Home feed detected during an active session with Study Mode ON:
-                        // show the over-the-display Study Mode popup (feed stays visible behind it).
-                        // Do not re-show if the user already dismissed it for this Home visit
-                        // to avoid Home -> Popup -> Home loops.
-                        if (!homeFeedPopupDismissed) {
-                            com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.showHomeFeedStudyModePopup(
-                                context = this,
-                                onSearchClick = {
-                                    mainThreadHandler.postDelayed({ navigateToYouTubeSearch() }, 250L)
-                                },
-                                onDismiss = { homeFeedPopupDismissed = true }
+                        if (decision.verdict == YouTubeBlockVerdict.HOME_FEED) {
+                            // Home feed detected during an active session with Study Mode ON:
+                            // show the over-the-display Study Mode popup (feed stays visible behind it).
+                            // Do not re-show if the user already dismissed it for this Home visit
+                            // to avoid Home -> Popup -> Home loops.
+                            if (!homeFeedPopupDismissed) {
+                                com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.showHomeFeedStudyModePopup(
+                                    context = this,
+                                    onSearchClick = {
+                                        mainThreadHandler.postDelayed({ navigateToYouTubeSearch() }, 250L)
+                                    },
+                                    onDismiss = { homeFeedPopupDismissed = true }
+                                )
+                            }
+                        } else {
+                            com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+                            homeFeedPopupDismissed = false
+                        }
+
+                        // Approved content is the only verdict that earns watch time. Every other verdict
+                        // — navigation surfaces, Home, and all three block verdicts — closes the segment,
+                        // so an approved video that leads into a blocked one is billed only for itself.
+                        if (decision.verdict == YouTubeBlockVerdict.ALLOW) {
+                            dwellTracker()?.onAllowedContent(
+                                channelName = decision.detectedChannel,
+                                videoTitle = decision.detectedTitle
                             )
-                        }
-                    } else {
-                        com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
-                        homeFeedPopupDismissed = false
-                    }
-
-                    // Approved content is the only verdict that earns watch time. Every other verdict
-                    // — navigation surfaces, Home, and all three block verdicts — closes the segment,
-                    // so an approved video that leads into a blocked one is billed only for itself.
-                    if (decision.verdict == YouTubeBlockVerdict.ALLOW) {
-                        dwellTracker()?.onAllowedContent(
-                            channelName = decision.detectedChannel,
-                            videoTitle = decision.detectedTitle
-                        )
-                    } else {
-                        dwellTracker()?.flush("verdict ${decision.verdict}")
-                    }
-
-                    if (decision.isBlocking) {
-                        Log.i(tag, "YouTube violation detected [${decision.verdict}]: ${decision.reason}. Channel: ${decision.detectedChannel}")
-
-                        val youtubeResult = com.example.feature.youtube.domain.YouTubeDetectionResult(
-                            contentType = if (decision.isShorts) {
-                                com.example.feature.youtube.domain.YouTubeContentType.SHORT
-                            } else {
-                                com.example.feature.youtube.domain.YouTubeContentType.VIDEO_PLAYBACK
-                            },
-                            channelName = decision.detectedChannel,
-                            channelId = null,
-                            videoTitle = decision.detectedTitle,
-                            isShort = decision.isShorts,
-                            confidence = com.example.feature.youtube.domain.DetectionConfidence.HIGH,
-                            matchedRule = decision.reason
-                        )
-
-                        when (decision.verdict) {
-                            YouTubeBlockVerdict.BLOCK_SHORTS -> {
-                                handleYouTubeShortsBlocked()
-                                com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
-                                com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
-                            }
-                            YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
-                            YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
-                                val chan = decision.detectedChannel ?: decision.detectedTitle ?: "Unapproved Channel"
-                                handleYouTubeUnapprovedChannelBlocked(rootNode)
-                                com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
-                                com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
-                            }
-                            else -> {
-                                // Block overlay is launched directly over the blocked app by blockerManager
-                            }
+                        } else {
+                            dwellTracker()?.flush("verdict ${decision.verdict}")
                         }
 
-                        val protectionDecision = when (decision.verdict) {
-                            YouTubeBlockVerdict.BLOCK_SHORTS -> ProtectionDecision.BLOCK_SHORTS
-                            YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL -> ProtectionDecision.BLOCK_UNAPPROVED_CHANNEL
-                            YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> ProtectionDecision.BLOCK_UNKNOWN_YOUTUBE_CONTENT
-                            else -> ProtectionDecision.BLOCK
-                        }
+                        if (decision.isBlocking) {
+                            Log.i(tag, "YouTube violation detected [${decision.verdict}]: ${decision.reason}. Channel: ${decision.detectedChannel}")
 
-                        blockerManager.handleBlockedPackage(
-                            packageName = rawPackageName,
-                            fallbackAppName = null,
-                            decision = protectionDecision,
-                            youtubeResult = youtubeResult,
-                            matchedKeyword = decision.matchedKeyword
-                        )
-                        return
-                    }
+                            val youtubeResult = com.example.feature.youtube.domain.YouTubeDetectionResult(
+                                contentType = if (decision.isShorts) {
+                                    com.example.feature.youtube.domain.YouTubeContentType.SHORT
+                                } else {
+                                    com.example.feature.youtube.domain.YouTubeContentType.VIDEO_PLAYBACK
+                                },
+                                channelName = decision.detectedChannel,
+                                channelId = null,
+                                videoTitle = decision.detectedTitle,
+                                isShort = decision.isShorts,
+                                confidence = com.example.feature.youtube.domain.DetectionConfidence.HIGH,
+                                matchedRule = decision.reason
+                            )
+
+                            when (decision.verdict) {
+                                YouTubeBlockVerdict.BLOCK_SHORTS -> {
+                                    val didBlock = handleYouTubeShortsBlocked()
+                                    if (didBlock) {
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
+                                    }
+                                }
+                                YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
+                                YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
+                                    val chan = decision.detectedChannel ?: "Unapproved Channel"
+                                    val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode)
+                                    if (didBlock) {
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
+                                    }
+                                }
+                                else -> {
+                                    // Block overlay is launched directly over the blocked app by blockerManager
+                                }
+                            }
+
+                            val protectionDecision = when (decision.verdict) {
+                                YouTubeBlockVerdict.BLOCK_SHORTS -> ProtectionDecision.BLOCK_SHORTS
+                                YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL -> ProtectionDecision.BLOCK_UNAPPROVED_CHANNEL
+                                YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> ProtectionDecision.BLOCK_UNKNOWN_YOUTUBE_CONTENT
+                                else -> ProtectionDecision.BLOCK
+                            }
+
+                            blockerManager.handleBlockedPackage(
+                                packageName = rawPackageName,
+                                fallbackAppName = null,
+                                decision = protectionDecision,
+                                youtubeResult = youtubeResult,
+                                matchedKeyword = decision.matchedKeyword
+                            )
+                            return
+                        }
+                    } catch (_: Exception) {}
                 } else {
                     // Session no longer active while YouTube is open: remove any lingering Study Mode popup
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -735,42 +754,47 @@ class FocusAccessibilityService : AccessibilityService() {
         if (!currentPreferences.hasCompletedOnboarding) return false
         if (!tamperPackages.contains(rawPackageName)) return false
 
+        if (rootNode == null) return false
+        val allTexts = mutableListOf<String>()
+        val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 100) {
+            val node = queue.removeFirst()
+            visited++
+            node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { allTexts.add(it.lowercase()) }
+            node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { allTexts.add(it.lowercase()) }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) queue.add(child)
+            }
+        }
+        val combinedText = allTexts.joinToString(" ")
+
         // Exclude legitimate permission setup, battery optimization, and accessibility setup screens
         val safeSetupKeywords = listOf(
             "battery", "optimize", "unrestricted", "background", "notification",
             "accessibility", "special app access", "usage", "appear on top",
             "display over", "draw over", "manage app permissions", "allow"
         )
-        for (keyword in safeSetupKeywords) {
-            val safeNodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-            val hasSafe = !safeNodes.isNullOrEmpty()
-            if (hasSafe) {
-                return false
-            }
+        if (safeSetupKeywords.any { combinedText.contains(it) }) {
+            return false
         }
 
         // Search for references to FocusShield or our package in the settings/uninstaller UI
-        val appMatches = rootNode.findAccessibilityNodeInfosByText("FocusShield")
-        val packageMatches = rootNode.findAccessibilityNodeInfosByText(packageName)
-        val hasAppMatch = (!appMatches.isNullOrEmpty()) || (!packageMatches.isNullOrEmpty())
+        val hasAppMatch = combinedText.contains("focusshield") || combinedText.contains(packageName.lowercase())
 
         if (hasAppMatch) {
             // Check specifically for uninstallation or clear data/force stop actions
             if (rawPackageName.contains("packageinstaller") || rawPackageName.contains("settings")) {
                 val uninstallKeywords = listOf("uninstall", "do you want to uninstall", "delete app", "clear storage", "clear data", "force stop", "deactivate")
-                for (kw in uninstallKeywords) {
-                    val nodes = rootNode.findAccessibilityNodeInfosByText(kw)
-                    val hasMatch = !nodes.isNullOrEmpty()
-                    if (hasMatch) {
-                        return true
-                    }
+                if (uninstallKeywords.any { combinedText.contains(it) }) {
+                    return true
                 }
             }
 
             // In settings or launcher context menus
-            val uninstallConfirmNodes = rootNode.findAccessibilityNodeInfosByText("Do you want to uninstall")
-            val hasConfirm = !uninstallConfirmNodes.isNullOrEmpty()
-            if (hasConfirm) {
+            if (combinedText.contains("do you want to uninstall")) {
                 return true
             }
         }
@@ -811,10 +835,10 @@ class FocusAccessibilityService : AccessibilityService() {
      * Handles YouTube Shorts blocking: every Short is blocked instantly with NO pause —
      * a single immediate step back returns the user to the previous feed.
      */
-    private fun handleYouTubeShortsBlocked() {
+    private fun handleYouTubeShortsBlocked(): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastYouTubeBlockTimestamp < 2000L) {
-            return
+            return false
         }
         lastYouTubeBlockTimestamp = now
 
@@ -823,33 +847,33 @@ class FocusAccessibilityService : AccessibilityService() {
         if (!backSuccess) {
             performGlobalAction(GLOBAL_ACTION_HOME)
         }
+        return true
     }
 
     /**
      * Handles YouTube Unapproved Channel blocking: pauses the video first, then steps back once for just one time.
      * When reaching the homepage, clears channel context so no channel name is detected.
      */
-    private fun handleYouTubeUnapprovedChannelBlocked(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
+    private fun handleYouTubeUnapprovedChannelBlocked(rootNode: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastYouTubeBlockTimestamp < 2000L) {
-            return
+            return false
         }
         lastYouTubeBlockTimestamp = now
 
         YouTubeContentBlockEngine.reset()
-        pauseThenNavigateYouTubeBackOnce(rootNode)
+        silenceAndPausePlayback()
+        clickPauseButtonInNodeTree(rootNode)
+        navigateYouTubeBackOnce()
+        return true
     }
 
     /**
-     * Enforces the exact blocked-playback lifecycle: PAUSE -> allow the pause to settle -> one
-     * BACK.  The pending guard prevents an accessibility-event burst from issuing multiple back
-     * actions for one video, and the state check makes a session ending during the short pause
-     * interval immediately return YouTube to normal behavior.
+     * Enforces the exact blocked-playback lifecycle: allow the pause to settle -> one
+     * BACK. The pending guard prevents an accessibility-event burst from issuing multiple back
+     * actions for one video.
      */
-    private fun pauseThenNavigateYouTubeBackOnce(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
-        silenceAndPausePlayback()
-        clickPauseButtonInNodeTree(rootNode)
-
+    private fun navigateYouTubeBackOnce() {
         if (youtubeBackNavigationPending) return
         youtubeBackNavigationPending = true
         mainThreadHandler.postDelayed({
@@ -868,6 +892,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 if (shouldStillEnforce) {
                     performGlobalAction(GLOBAL_ACTION_BACK)
                 }
+            } catch (_: Exception) {
             } finally {
                 youtubeBackNavigationPending = false
             }
@@ -875,49 +900,31 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Finds and clicks any active "Pause" or "Pause video" buttons in the accessibility tree.
+     * Finds and clicks any active "Pause" or "Pause video" buttons in the accessibility tree using BFS.
      */
     private fun clickPauseButtonInNodeTree(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
         if (rootNode == null) return
         try {
-            // Check view IDs containing pause
-            val pauseViewIds = listOf(
-                "com.google.android.youtube:id/player_control_play_pause_replay_button",
-                "com.google.android.youtube:id/play_pause_button",
-                "com.google.android.youtube:id/pause_button",
-                "com.google.android.youtube:id/player_pause_button"
-            )
-            for (id in pauseViewIds) {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (nodes != null) {
-                    for (node in nodes) {
-                        val desc = node.contentDescription?.toString() ?: ""
-                        val clicked = if (desc.contains("Pause", ignoreCase = true)) {
-                            performClickOnNodeOrParent(node)
-                        } else false
-                        if (clicked) {
-                            return
-                        }
+            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 80) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName?.lowercase() ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+                val text = node.text?.toString() ?: ""
+                val isPause = resId.contains("pause") ||
+                        desc.contains("Pause", ignoreCase = true) ||
+                        text.contains("Pause", ignoreCase = true)
+                if (isPause) {
+                    if (performClickOnNodeOrParent(node)) {
+                        return
                     }
                 }
-            }
-
-            // Check descriptions containing "Pause video" or "Pause"
-            val descKeywords = listOf("Pause video", "Pause")
-            for (keyword in descKeywords) {
-                val nodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-                if (nodes != null) {
-                    for (node in nodes) {
-                        val desc = node.contentDescription?.toString() ?: ""
-                        val text = node.text?.toString() ?: ""
-                        val matches = desc.equals("Pause video", ignoreCase = true) ||
-                                desc.equals("Pause", ignoreCase = true) ||
-                                text.equals("Pause", ignoreCase = true)
-                        val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                        if (clicked) {
-                            return
-                        }
-                    }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
                 }
             }
         } catch (_: Exception) {}
@@ -933,34 +940,26 @@ class FocusAccessibilityService : AccessibilityService() {
     private fun switchYouTubeToHomeTab(rootNode: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
         if (rootNode == null) return false
         try {
-            val homeIds = listOf(
-                "com.google.android.youtube:id/pivot_home",
-                "com.google.android.youtube:id/tab_home",
-                "com.google.android.youtube:id/home_tab",
-                "com.google.android.youtube:id/navigation_home"
-            )
-            for (id in homeIds) {
-                val homeNodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!homeNodes.isNullOrEmpty()) {
-                    for (node in homeNodes) {
-                        val clicked = performClickOnNodeOrParent(node)
-                        if (clicked) {
-                            return true
-                        }
-                    }
-                }
-            }
-
-            val textNodes = rootNode.findAccessibilityNodeInfosByText("Home")
-            if (!textNodes.isNullOrEmpty()) {
-                for (node in textNodes) {
-                    val desc = node.contentDescription?.toString() ?: ""
-                    val txt = node.text?.toString() ?: ""
-                    val matches = desc.equals("Home", ignoreCase = true) || txt.equals("Home", ignoreCase = true)
-                    val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                    if (clicked) {
+            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 80) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName?.lowercase() ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+                val text = node.text?.toString() ?: ""
+                val isHome = resId.contains("pivot_home") || resId.contains("tab_home") ||
+                        resId.contains("home_tab") || resId.contains("navigation_home") ||
+                        desc.equals("Home", ignoreCase = true) || text.equals("Home", ignoreCase = true)
+                if (isHome) {
+                    if (performClickOnNodeOrParent(node)) {
                         return true
                     }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
                 }
             }
         } catch (_: Exception) {}
@@ -975,41 +974,26 @@ class FocusAccessibilityService : AccessibilityService() {
     private fun navigateToYouTubeSearch() {
         try {
             val rootNode = try { rootInActiveWindow } catch (e: Exception) { null } ?: return
-
-            // 1. Direct search bar / search icon view IDs on the YouTube Home screen
-            val searchViewIds = listOf(
-                "com.google.android.youtube:id/search_anchor",
-                "com.google.android.youtube:id/search_icon",
-                "com.google.android.youtube:id/search_button",
-                "com.google.android.youtube:id/menu_item_search",
-                "com.google.android.youtube:id/action_search",
-                "com.google.android.youtube:id/search_input_text"
-            )
-            for (id in searchViewIds) {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!nodes.isNullOrEmpty()) {
-                    for (node in nodes) {
-                        val clicked = performClickOnNodeOrParent(node)
-                        if (clicked) {
-                            return
-                        }
+            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 80) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName?.lowercase() ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+                val text = node.text?.toString() ?: ""
+                val isSearch = resId.contains("search") ||
+                        desc.contains("Search", ignoreCase = true) ||
+                        text.contains("Search", ignoreCase = true)
+                if (isSearch) {
+                    if (performClickOnNodeOrParent(node)) {
+                        return
                     }
                 }
-            }
-
-            // 2. Fallback: nodes labeled "Search YouTube" / "Search"
-            for (keyword in listOf("Search YouTube", "Search")) {
-                val nodes = rootNode.findAccessibilityNodeInfosByText(keyword)
-                if (!nodes.isNullOrEmpty()) {
-                    for (node in nodes) {
-                        val desc = node.contentDescription?.toString() ?: ""
-                        val text = node.text?.toString() ?: ""
-                        val matches = desc.equals(keyword, ignoreCase = true) || text.equals(keyword, ignoreCase = true)
-                        val clicked = if (matches) performClickOnNodeOrParent(node) else false
-                        if (clicked) {
-                            return
-                        }
-                    }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
                 }
             }
         } catch (_: Exception) {}
@@ -1044,25 +1028,27 @@ class FocusAccessibilityService : AccessibilityService() {
 
         // 1. Try closing tab if a close tab button is found
         if (rootNode != null) {
-            val closeTabIds = listOf(
-                "com.android.chrome:id/close_button",
-                "com.android.chrome:id/tab_close_button",
-                "org.mozilla.firefox:id/mozac_browser_toolbar_close",
-                "com.sec.android.app.sbrowser:id/close_btn"
-            )
-            for (viewId in closeTabIds) {
-                try {
-                    val nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId)
-                    if (nodes != null) {
-                        for (node in nodes) {
-                            val clicked = performClickOnNodeOrParent(node)
-                            if (clicked) {
-                                return
-                            }
+            try {
+                val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+                queue.add(rootNode)
+                var visited = 0
+                while (queue.isNotEmpty() && visited < 60) {
+                    val node = queue.removeFirst()
+                    visited++
+                    val resId = node.viewIdResourceName?.lowercase() ?: ""
+                    if (resId.contains("close_button") || resId.contains("tab_close_button") ||
+                        resId.contains("toolbar_close") || resId.contains("close_btn")
+                    ) {
+                        if (performClickOnNodeOrParent(node)) {
+                            return
                         }
                     }
-                } catch (_: Exception) {}
-            }
+                    for (i in 0 until node.childCount) {
+                        val child = try { node.getChild(i) } catch (_: Exception) { null }
+                        if (child != null) queue.add(child)
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         // 2. Perform a single Back action to step back to the search page or previous tab

@@ -479,4 +479,35 @@ class YouTubeDualEngineTest {
             assertEquals("Failed extracting from '$input'", expected, extracted)
         }
     }
+
+    @Test
+    fun testExtractHandleFromMetadataLine() {
+        val rawMetadataLine = "@PW-JEEWallah 1.1K likes 92K views 1d ago #Perm...more"
+        val handle = YouTubeDetectionRules.extractHandle(rawMetadataLine)
+        assertEquals("@PW-JEEWallah", handle)
+
+        val cleaned = com.example.feature.youtube.engine.YouTubeNodeExtractor.cleanChannelName(handle)
+        assertEquals("PW-JEEWallah", cleaned)
+    }
+
+    @Test
+    fun testExtractChannelFromSubscribeButton() {
+        val descNotSubscribed = "Subscribe to PW - JEE Wallah."
+        val descSubscribed = "Subscribed to Khan Academy."
+        val descUnsubscribe = "Unsubscribe from Veritasium."
+
+        assertEquals("PW - JEE Wallah", YouTubeDetectionRules.extractChannelFromSubscribeButton(descNotSubscribed))
+        assertEquals("Khan Academy", YouTubeDetectionRules.extractChannelFromSubscribeButton(descSubscribed))
+        assertEquals("Veritasium", YouTubeDetectionRules.extractChannelFromSubscribeButton(descUnsubscribe))
+    }
+
+    @Test
+    fun testAdElementDetection() {
+        assertTrue(YouTubeDetectionRules.isAdElement("com.google.android.youtube:id/ad_progress_text", null, null))
+        assertTrue(YouTubeDetectionRules.isAdElement(null, "Skip Ads", null))
+        assertTrue(YouTubeDetectionRules.isAdElement(null, "Ad · 0:15", null))
+        // Static sponsored recommendation cards should NOT trigger in-stream ad bypass
+        assertFalse(YouTubeDetectionRules.isAdElement(null, null, "Sponsored"))
+        assertFalse(YouTubeDetectionRules.isAdElement("com.google.android.youtube:id/channel_name", "Khan Academy", null))
+    }
 }

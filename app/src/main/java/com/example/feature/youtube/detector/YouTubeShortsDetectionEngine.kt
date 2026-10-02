@@ -110,24 +110,24 @@ object YouTubeShortsDetectionEngine {
             "com.google.android.youtube:id/reel_player_page_view",
             "com.google.android.youtube:id/reel_player_fragment"
         )
-        for (id in reelIds) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                val isFound = !nodes.isNullOrEmpty()
-                if (isFound) {
-                    hasActiveReelPlayer = true
-                    matchedSignals.add("fast_view_id:$id")
-                    score += 4
-                    break
-                }
-            } catch (_: Exception) {}
-        }
 
         scanNodes(rootNode, maxDepth = 6, maxNodes = 45) { node ->
             val viewId = node.viewIdResourceName ?: ""
             val text = node.text?.toString()?.trim() ?: ""
             val desc = node.contentDescription?.toString()?.trim() ?: ""
             val className = node.className?.toString() ?: ""
+
+            // Signal A0: Active reel containers by ID
+            if (!hasActiveReelPlayer) {
+                for (id in reelIds) {
+                    if (viewId == id || viewId.endsWith("/${id.substringAfterLast('/')}") || viewId.endsWith(":id/${id.substringAfterLast('/')}")) {
+                        hasActiveReelPlayer = true
+                        matchedSignals.add("fast_view_id:$id")
+                        score += 4
+                        break
+                    }
+                }
+            }
 
             // Signal A: Active reel/shorts player containers
             for (keyword in YouTubeDetectionRules.ACTIVE_SHORTS_PLAYER_VIEW_IDS) {

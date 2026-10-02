@@ -155,6 +155,20 @@ object YouTubeContentInspectionEngine {
         // be allowed to hide a confirmed playing video.
         val activePlayer = detectActiveWatchPlayer(rootNode)
         if (activePlayer != null && !activePlayer.isMiniplayer) {
+            val isAd = com.example.feature.youtube.engine.YouTubeNodeExtractor.detectAd(rootNode)
+            if (isAd) {
+                signals.add("active_watch_player")
+                signals.add("ad_playback_in_progress")
+                return ContentInspectionResult(
+                    contentType = YouTubeContentType.VIDEO_PLAYBACK,
+                    activeVideo = activePlayer,
+                    channelInfo = ChannelIdentityInfo(channelName = "Ad", channelHandle = null, channelId = null),
+                    approvalStatus = ChannelApprovalStatus.APPROVED,
+                    confidence = DetectionConfidence.HIGH,
+                    matchedSignals = signals
+                )
+            }
+
             val extractedChannel = extractChannelFromActivePlayer(rootNode)
             val isApproved = extractedChannel.isIdentifiable &&
                 isChannelApproved(extractedChannel, approvedIds, approvedNames)
@@ -382,17 +396,7 @@ object YouTubeContentInspectionEngine {
         var isMiniplayer = false
         var videoTitle: String? = null
 
-        // Check if in-app miniplayer / floaty bar is active
-        for (miniId in YouTubeDetectionRules.MINIPLAYER_VIEW_IDS) {
-            val miniNodes = rootNode.findAccessibilityNodeInfosByViewId(miniId)
-            val isNotEmpty = !miniNodes.isNullOrEmpty()
-            if (isNotEmpty) {
-                isMiniplayer = true
-                break
-            }
-        }
-
-        // Fast direct view ID search for true watch player containers
+        // Check if in-app miniplayer / floaty bar is active or true watch player containers exist
         val watchPlayerIds = listOf(
             "com.google.android.youtube:id/watch_panel",
             "com.google.android.youtube:id/watch_player",
@@ -401,21 +405,28 @@ object YouTubeContentInspectionEngine {
             "com.google.android.youtube:id/watch_header_layout"
         )
 
-        for (id in watchPlayerIds) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!nodes.isNullOrEmpty()) {
-                    isPlayerFound = true
-                    for (node in nodes) {
-                        val text = node.text?.toString()?.trim()
-                        if (!text.isNullOrBlank() && text.length > 3) {
-                            videoTitle = text
-                            break
-                        }
+        scanNodes(rootNode, maxDepth = 8, maxNodes = 60) { node ->
+            val viewId = node.viewIdResourceName ?: ""
+            if (!isMiniplayer) {
+                for (miniId in YouTubeDetectionRules.MINIPLAYER_VIEW_IDS) {
+                    if (viewId == miniId || viewId.endsWith("/${miniId.substringAfterLast('/')}") || viewId.endsWith(":id/${miniId.substringAfterLast('/')}")) {
+                        isMiniplayer = true
+                        break
                     }
                 }
-            } catch (_: Exception) {}
-            if (isPlayerFound && videoTitle != null) break
+            }
+
+            for (wId in watchPlayerIds) {
+                if (viewId == wId || viewId.endsWith("/${wId.substringAfterLast('/')}") || viewId.endsWith(":id/${wId.substringAfterLast('/')}")) {
+                    isPlayerFound = true
+                    val text = node.text?.toString()?.trim()
+                    if (!text.isNullOrBlank() && text.length > 3 && videoTitle == null) {
+                        videoTitle = text
+                    }
+                    break
+                }
+            }
+            false
         }
 
         if (!isPlayerFound) {
@@ -449,20 +460,18 @@ object YouTubeContentInspectionEngine {
                 "com.google.android.youtube:id/watch_title_text",
                 "com.google.android.youtube:id/watch_metadata_title"
             )
-            for (id in titleIds) {
-                try {
-                    val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                    if (!nodes.isNullOrEmpty()) {
-                        for (node in nodes) {
-                            val text = node.text?.toString()?.trim()
-                            if (!text.isNullOrBlank() && text.length > 3) {
-                                videoTitle = text
-                                break
-                            }
+            scanNodes(rootNode, maxDepth = 8, maxNodes = 60) { node ->
+                val viewId = node.viewIdResourceName ?: ""
+                for (id in titleIds) {
+                    if (viewId == id || viewId.endsWith("/${id.substringAfterLast('/')}") || viewId.endsWith(":id/${id.substringAfterLast('/')}")) {
+                        val text = node.text?.toString()?.trim()
+                        if (!text.isNullOrBlank() && text.length > 3) {
+                            videoTitle = text
+                            return@scanNodes true
                         }
                     }
-                } catch (_: Exception) {}
-                if (videoTitle != null) break
+                }
+                false
             }
         }
 
@@ -523,23 +532,21 @@ object YouTubeContentInspectionEngine {
             "com.google.android.youtube:id/owner_text",
             "com.google.android.youtube:id/channel_title"
         )
-        for (id in fastChannelIds) {
-            try {
-                val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                if (!nodes.isNullOrEmpty()) {
-                    for (node in nodes) {
-                        val text = node.text?.toString()?.trim()
-                        if (!text.isNullOrBlank()) {
-                            val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
-                            if (validName != null) {
-                                channelName = validName
-                                break
-                            }
+        scanNodes(rootNode, maxDepth = 12, maxNodes = 60) { node ->
+            val viewId = node.viewIdResourceName ?: ""
+            for (id in fastChannelIds) {
+                if (viewId == id || viewId.endsWith("/${id.substringAfterLast('/')}") || viewId.endsWith(":id/${id.substringAfterLast('/')}")) {
+                    val text = node.text?.toString()?.trim()
+                    if (!text.isNullOrBlank()) {
+                        val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
+                        if (validName != null) {
+                            channelName = validName
+                            return@scanNodes true
                         }
                     }
                 }
-            } catch (_: Exception) {}
-            if (!channelName.isNullOrBlank()) break
+            }
+            false
         }
 
         scanNodes(rootNode, maxDepth = 15, maxNodes = 120) { node ->
