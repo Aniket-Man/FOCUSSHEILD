@@ -864,16 +864,16 @@ class FocusAccessibilityService : AccessibilityService() {
         YouTubeContentBlockEngine.reset()
         silenceAndPausePlayback()
         clickPauseButtonInNodeTree(rootNode)
-        navigateYouTubeBackOnce()
+        navigateYouTubeBackOnce(rootNode)
         return true
     }
 
     /**
      * Enforces the exact blocked-playback lifecycle: allow the pause to settle -> one
-     * BACK. The pending guard prevents an accessibility-event burst from issuing multiple back
+     * BACK / collapse inside YouTube. The pending guard prevents an accessibility-event burst from issuing multiple back
      * actions for one video.
      */
-    private fun navigateYouTubeBackOnce() {
+    private fun navigateYouTubeBackOnce(rootNode: android.view.accessibility.AccessibilityNodeInfo? = null) {
         if (youtubeBackNavigationPending) return
         youtubeBackNavigationPending = true
         mainThreadHandler.postDelayed({
@@ -890,13 +890,48 @@ class FocusAccessibilityService : AccessibilityService() {
                             it.isYouTubeStudyModeEnabled
                 } == true
                 if (shouldStillEnforce) {
-                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    val activeRoot = try { rootInActiveWindow } catch (e: Exception) { rootNode }
+                    collapseYouTubePlayerOrBack(activeRoot)
                 }
             } catch (_: Exception) {
             } finally {
                 youtubeBackNavigationPending = false
             }
         }, 150L)
+    }
+
+    private fun collapseYouTubePlayerOrBack(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
+        if (rootNode != null) {
+            val collapseIds = listOf(
+                "com.google.android.youtube:id/watch_collapse_button",
+                "com.google.android.youtube:id/collapse_button",
+                "com.google.android.youtube:id/action_bar_back",
+                "com.google.android.youtube:id/up_button"
+            )
+            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 100) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+                val isCollapse = collapseIds.any { resId.contains(it, ignoreCase = true) } ||
+                        desc.equals("Collapse", ignoreCase = true) ||
+                        desc.equals("Navigate up", ignoreCase = true) ||
+                        desc.equals("Close", ignoreCase = true)
+                if (isCollapse) {
+                    if (performClickOnNodeOrParent(node)) {
+                        return
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        }
+        performGlobalAction(GLOBAL_ACTION_BACK)
     }
 
     /**

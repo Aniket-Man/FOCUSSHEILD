@@ -16,6 +16,7 @@ import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.AppLimitRepository
 import com.example.data.repository.BlockedAttemptRepository
 import com.example.feature.applimits.ui.AppLimitOverlayActivity
+import com.example.feature.applimits.ui.AppLimitFloatingOverlayManager
 import com.example.feature.session.engine.FocusSessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -989,22 +990,66 @@ class AppLimitManager private constructor(
 
         // The user is already looking at this app's blocker — a second instance would finish the
         // first one and risk being dropped in the handshake. Keep the one on screen.
-        if (AppLimitOverlayActivity.isVisibleFor(packageName)) {
+        if (AppLimitFloatingOverlayManager.isShowingFor(packageName) || AppLimitOverlayActivity.isVisibleFor(packageName)) {
             Log.d(tag, "Blocker already on screen for $packageName; not launching another instance")
             return
         }
 
         MediaPauseHelper.pauseMedia(appContext)
 
+        // Try floating window overlay directly over the limited app first
+        val accessibilityService = com.example.core.accessibility.FocusAccessibilityService.instance
+        if (accessibilityService != null || android.provider.Settings.canDrawOverlays(appContext)) {
+            AppLimitFloatingOverlayManager.showOverlay(
+                context = accessibilityService ?: appContext,
+                packageName = packageName,
+                appName = appName,
+                mode = mode,
+                usedMinutes = usedMinutes,
+                remainingDailyMinutes = remainingDailyMinutes,
+                dailyLimitMinutes = dailyLimitMinutes,
+                emergencyUsesCount = emergencyUsesCount,
+                emergencyUsesAllowed = emergencyUsesAllowed,
+                isStrict = isStrict,
+                streakDays = streakDays,
+                onResult = { success ->
+                    if (!success) {
+                        launchActivityOverlay(
+                            packageName, appName, mode, selectedMinutes, usedMinutes,
+                            remainingDailyMinutes, dailyLimitMinutes, emergencyUsesCount,
+                            emergencyUsesAllowed, isStrict, streakDays
+                        )
+                    }
+                }
+            )
+            return
+        }
+
+        launchActivityOverlay(
+            packageName, appName, mode, selectedMinutes, usedMinutes,
+            remainingDailyMinutes, dailyLimitMinutes, emergencyUsesCount,
+            emergencyUsesAllowed, isStrict, streakDays
+        )
+    }
+
+    private fun launchActivityOverlay(
+        packageName: String,
+        appName: String,
+        mode: AppLimitOverlayMode,
+        selectedMinutes: Int,
+        usedMinutes: Int,
+        remainingDailyMinutes: Int,
+        dailyLimitMinutes: Int,
+        emergencyUsesCount: Int,
+        emergencyUsesAllowed: Int,
+        isStrict: Boolean,
+        streakDays: Int
+    ) {
         // A fresh request supersedes any previous failure notice; the loop below clears it again
         // once a launch is actually confirmed on screen.
         _overlayLaunchWarning.value = null
 
         val intent = Intent(appContext, AppLimitOverlayActivity::class.java).apply {
-            // NEW_TASK only. CLEAR_TOP/SINGLE_TOP used to hand the intent back to the previous
-            // overlay's (singleInstance, noHistory) activity record while it was finishing, and
-            // Android dropped the launch without throwing — the popup then never reappeared after
-            // the user's allowance expired. Each launch must get a fresh instance.
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
             putExtra(AppLimitOverlayActivity.EXTRA_PACKAGE_NAME, packageName)
             putExtra(AppLimitOverlayActivity.EXTRA_APP_NAME, appName)

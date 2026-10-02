@@ -104,8 +104,7 @@ class FocusBlockerManager private constructor(
         // session can block immediately without waiting for Room/Flow propagation. Permanent
         // blocks and active usage limits remain additive.
         val allBlocked = session?.blockedAppPackages.orEmpty() +
-                enabledBlockedPackages.toSet() +
-                appLimitPackages.toSet()
+                enabledBlockedPackages.toSet()
 
         return FocusProtectionState(
             sessionId = session?.id,

@@ -138,7 +138,7 @@ fun AppLimitOverlayScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xEE090A0D))
+            .background(Color(0xC0090A0D))
             .testTag("app_limit_overlay_screen"),
         contentAlignment = Alignment.BottomCenter
     ) {

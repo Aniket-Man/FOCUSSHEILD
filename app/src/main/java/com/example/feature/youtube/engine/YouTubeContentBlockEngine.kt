@@ -22,12 +22,12 @@ import java.util.Locale
 object YouTubeContentBlockEngine {
 
     /** Total budget for channel metadata to render before the video is treated as unknown. */
-    private const val CHANNEL_METADATA_GRACE_MILLIS = 1000L
+    private const val CHANNEL_METADATA_GRACE_MILLIS = 5000L
 
     /** Time gap delay (in millis) after video playback starts before enforcing any blocking decision. */
-    private const val PLAYBACK_START_DELAY_MILLIS = 1500L
+    private const val PLAYBACK_START_DELAY_MILLIS = 3000L
 
-    private const val MIN_FUZZY_MATCH_LENGTH = 4
+    private const val MIN_FUZZY_MATCH_LENGTH = 3
 
     @Volatile
     private var currentVideoKey: String? = null
@@ -258,12 +258,6 @@ object YouTubeContentBlockEngine {
     /**
      * Checks whether the detected channel is whitelisted against the user's
      * approved study channels (handles and names).
-     *
-     * Matching rules:
-     *  - Exact normalized match always applies.
-     *  - Bidirectional containment only applies when the shorter side has at
-     *    least [MIN_FUZZY_MATCH_LENGTH] characters, preventing short approved
-     *    names (e.g. "MIT") from approving unrelated channels ("Smith Labs").
      */
     fun isChannelApproved(
         detectedChannel: String,
@@ -275,28 +269,68 @@ object YouTubeContentBlockEngine {
         val detected = detectedChannel.trim()
         val detectedHandle = normalizeHandle(detected)
         val detectedName = normalizeName(detected)
+        val detectedWords = extractSignificantWords(detected)
 
         for (approved in approvedChannelIds) {
             val approvedHandle = normalizeHandle(approved)
             if (approvedHandle.isNotEmpty() && approvedHandle == detectedHandle) return true
             if (isFuzzyMatch(detectedHandle, approvedHandle)) return true
             if (isFuzzyMatch(detectedName, approvedHandle)) return true
+            if (matchWords(detectedWords, extractSignificantWords(approved))) return true
         }
 
         for (approved in approvedChannelNames) {
             val approvedName = normalizeName(approved)
             if (approvedName.isNotEmpty() && approvedName == detectedName) return true
             if (isFuzzyMatch(detectedName, approvedName)) return true
+            if (isFuzzyMatch(detectedHandle, approvedName)) return true
+            if (matchWords(detectedWords, extractSignificantWords(approved))) return true
+        }
+
+        // Sub-channel / Brand alias matching:
+        // E.g. PW-JEEWallah, PW-NEETWallah, PW Foundation belong to Physics Wallah
+        val isPwDetected = detectedHandle.contains("pw") || detectedName.contains("pw") ||
+                detectedHandle.contains("physicswallah") || detectedName.contains("physicswallah")
+        if (isPwDetected) {
+            val isPwApproved = approvedChannelIds.any {
+                val h = normalizeHandle(it)
+                h.contains("pw") || h.contains("physicswallah")
+            } || approvedChannelNames.any {
+                val n = normalizeName(it)
+                n.contains("pw") || n.contains("physicswallah")
+            }
+            if (isPwApproved) return true
         }
 
         return false
+    }
+
+    private fun extractSignificantWords(text: String): List<String> {
+        return text.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]"), " ")
+            .split(" ")
+            .filter { it.length >= 3 && it !in listOf("the", "and", "official", "channel", "video", "hindi", "english") }
+    }
+
+    private fun matchWords(wordsA: List<String>, wordsB: List<String>): Boolean {
+        if (wordsA.isEmpty() || wordsB.isEmpty()) return false
+        val overlap = wordsA.intersect(wordsB.toSet())
+        // If the shorter list has all its words inside the other list, or at least 2 significant words match
+        return (overlap.isNotEmpty() && overlap.size == minOf(wordsA.size, wordsB.size)) || overlap.size >= 2
     }
 
     private fun isFuzzyMatch(a: String, b: String): Boolean {
         if (a.isEmpty() || b.isEmpty()) return false
         val shorter = minOf(a.length, b.length)
         if (shorter < MIN_FUZZY_MATCH_LENGTH) return false
-        return a.contains(b) || b.contains(a)
+        if (a.contains(b) || b.contains(a)) return true
+        
+        // Brand acronym expansion (e.g. pw -> physicswallah)
+        val expandedA = a.replace("pw", "physicswallah")
+        val expandedB = b.replace("pw", "physicswallah")
+        if (expandedA.contains(expandedB) || expandedB.contains(expandedA)) return true
+        
+        return false
     }
 
     private fun normalizeHandle(value: String): String {

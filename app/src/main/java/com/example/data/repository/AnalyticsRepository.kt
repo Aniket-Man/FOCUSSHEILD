@@ -59,6 +59,15 @@ class AnalyticsRepository(
     private val dayOfWeekFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
     private val monthDayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
+    @Volatile
+    private var cachedScreenTimeMillis: Long = 0L
+    @Volatile
+    private var lastScreenTimeQueryTime: Long = 0L
+    @Volatile
+    private var cachedHasUsagePermission: Boolean? = null
+    @Volatile
+    private var lastPermissionCheckTime: Long = 0L
+
     val preferencesFlow: Flow<FocusPreferences> = preferencesRepository.preferencesFlow
 
     /**
@@ -104,9 +113,27 @@ class AnalyticsRepository(
                 allSessions.map { StudyStamp(it.startTime, it.actualDurationMillis) }
             )
 
-            val hasUsagePermission = context?.let { DeviceUsageStatsHelper.hasUsageStatsPermission(it) } ?: false
+            val now = System.currentTimeMillis()
+            val hasUsagePermission = if (context != null) {
+                if (now - lastPermissionCheckTime > 15_000L || cachedHasUsagePermission == null) {
+                    lastPermissionCheckTime = now
+                    val perm = DeviceUsageStatsHelper.hasUsageStatsPermission(context)
+                    cachedHasUsagePermission = perm
+                    perm
+                } else {
+                    cachedHasUsagePermission ?: false
+                }
+            } else false
+
             val screenTimeMillis = if (hasUsagePermission && context != null) {
-                DeviceUsageStatsHelper.getTodayTotalScreenTimeMillis(context)
+                if (now - lastScreenTimeQueryTime > 15_000L) {
+                    lastScreenTimeQueryTime = now
+                    val queried = DeviceUsageStatsHelper.getTodayTotalScreenTimeMillis(context)
+                    cachedScreenTimeMillis = queried
+                    queried
+                } else {
+                    cachedScreenTimeMillis
+                }
             } else 0L
 
             val effectiveScreenOrStudy = maxOf(screenTimeMillis, totalStudyMillis)

@@ -93,6 +93,7 @@
             android:exported="false"
             android:taskAffinity=""
             android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.TransparentOverlay" />

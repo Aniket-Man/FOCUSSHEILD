@@ -367,7 +367,12 @@ object YouTubeDetectionRules {
         if (candidate.isNullOrBlank()) return true
         val trimmed = candidate.trim()
         if (trimmed.length < 2 || trimmed.length > 70) return true
-        if (trimmed.startsWith("@")) return true // Handles are processed separately
+        
+        // If it is an @handle with letters/digits, it is valid!
+        if (trimmed.startsWith("@")) {
+            val handleToken = trimmed.substringBefore(" ").trim()
+            return handleToken.length < 2 || !handleToken.any { it.isLetter() }
+        }
 
         val lower = trimmed.lowercase(Locale.ROOT)
 
@@ -410,7 +415,16 @@ object YouTubeDetectionRules {
         if (rawText.isNullOrBlank()) return null
         val trimmed = rawText.trim()
         if (trimmed.length < 2 || trimmed.length > 100) return null
-        if (trimmed.startsWith("@")) return null
+        if (trimmed.startsWith("@")) {
+            val handleMatch = extractHandle(trimmed)
+            if (handleMatch != null) return handleMatch
+        }
+
+        // If the string contains an @handle anywhere (e.g. "@PW-JEEWallah 1.2K likes 10K views"), extract it directly
+        val embeddedHandle = extractHandle(trimmed)
+        if (embeddedHandle != null) {
+            return embeddedHandle
+        }
 
         // Check if string contains separator delimiters (•, ·, |, -)
         val delimiters = listOf("•", "·", "|", " - ")
@@ -459,7 +473,9 @@ object YouTubeDetectionRules {
             "Subscribe to ",
             "Subscribed to ",
             "Unsubscribe from ",
-            "Notification settings for "
+            "Notification settings for ",
+            "Go to channel ",
+            "Visit channel "
         )
         for (prefix in prefixes) {
             if (trimmed.startsWith(prefix, ignoreCase = true)) {
@@ -467,11 +483,15 @@ object YouTubeDetectionRules {
                 if (candidate.endsWith(".")) {
                     candidate = candidate.dropLast(1).trim()
                 }
+                val handleInCandidate = extractHandle(candidate)
+                if (handleInCandidate != null) return handleInCandidate
                 if (candidate.isNotBlank() && !isInvalidChannelName(candidate)) {
                     return candidate
                 }
             }
         }
+        val directHandle = extractHandle(trimmed)
+        if (directHandle != null) return directHandle
         return null
     }
 
