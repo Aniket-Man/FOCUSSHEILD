@@ -46,6 +46,21 @@ object AppLimitFloatingOverlayManager {
     fun isShowingFor(packageName: String): Boolean =
         overlayView != null && showingPackageName == packageName
 
+    /**
+     * Called from [AppLimitManager.onForegroundPackageChanged]. The overlay has no activity
+     * lifecycle, so this is the only thing that dismisses it when the limited app it belongs
+     * to leaves the foreground (Home, app switch, SystemUI, IME) instead of letting the
+     * full-screen scrim sit on top of whatever comes next. Returning to the limited app
+     * re-raises it through the accessibility gate.
+     */
+    fun onForegroundPackageChanged(packageName: String) {
+        val showing = showingPackageName ?: return
+        if (packageName != showing) {
+            Log.i(TAG, "Foreground is now $packageName; dismissing floating blocker for $showing")
+            hideOverlay()
+        }
+    }
+
     fun showOverlay(
         context: Context,
         packageName: String,
@@ -66,8 +81,11 @@ object AppLimitFloatingOverlayManager {
                 onResult?.invoke(true)
                 return@post
             }
-            // If showing for another package, remove previous first
-            hideOverlay()
+            // If showing for another package, remove previous first. This must be the
+            // synchronous removal, NOT hideOverlay(): that posts its removal to this very
+            // queue, so it would run after the new view below is added and tear it down
+            // again — the blocker flashed for one frame and then vanished on every launch.
+            removeCurrentView()
 
             try {
                 val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -87,6 +105,15 @@ object AppLimitFloatingOverlayManager {
                     streakDays = streakDays
                 )
 
+                // The system can take the window away without us asking (service rebind,
+                // token invalidation). Without this resync isShowingFor() would stay true
+                // forever and AppLimitManager's "blocker already on screen" guard would refuse
+                // to raise any blocker again until the process dies.
+                view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) = Unit
+                    override fun onViewDetachedFromWindow(v: View) = handleUnexpectedDetach(v)
+                })
+
                 if (addViewSafely(wm, view, context)) {
                     overlayView = view
                     showingPackageName = packageName
@@ -103,20 +130,42 @@ object AppLimitFloatingOverlayManager {
     }
 
     fun hideOverlay() {
-        mainHandler.post {
-            val view = overlayView ?: return@post
-            val wm = windowManager
-            try {
-                wm?.removeView(view)
-                Log.i(TAG, "Floating App Limit overlay removed for $showingPackageName")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to remove floating App Limit overlay", e)
-            } finally {
-                overlayView = null
-                windowManager = null
-                showingPackageName = null
-            }
+        mainHandler.post { removeCurrentView() }
+    }
+
+    /**
+     * Removes whatever is showing. Must run on the main thread; callers that are already
+     * inside a main-handler runnable (like [showOverlay]) invoke this directly so the
+     * removal cannot land in the queue behind the very add it is meant to precede.
+     */
+    private fun removeCurrentView() {
+        val view = overlayView ?: return
+        val wm = windowManager
+        val pkg = showingPackageName
+        // Clear the state before removeView: removal fires the detach listener
+        // synchronously, and handleUnexpectedDetach must be able to tell an intentional
+        // hide (state already cleared) from a system-initiated removal (state still set).
+        overlayView = null
+        windowManager = null
+        showingPackageName = null
+        try {
+            wm?.removeView(view)
+            Log.i(TAG, "Floating App Limit overlay removed for $pkg")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to remove floating App Limit overlay", e)
         }
+    }
+
+    /**
+     * Clears the showing state when [view] leaves the window without [hideOverlay] having run.
+     * Intentional hides clear the state first, so this is a no-op for them.
+     */
+    internal fun handleUnexpectedDetach(view: View) {
+        if (overlayView !== view) return
+        Log.w(TAG, "Floating App Limit overlay for $showingPackageName was removed by the system; resyncing state")
+        overlayView = null
+        windowManager = null
+        showingPackageName = null
     }
 
     private fun addViewSafely(wm: WindowManager, view: View, context: Context): Boolean {
@@ -154,7 +203,11 @@ object AppLimitFloatingOverlayManager {
             WindowManager.LayoutParams.MATCH_PARENT,
             windowType,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    // Never take key focus: BACK must keep flowing to the app beneath, and a
+                    // focusable overlay window can perturb foreground-window reporting. Same
+                    // combination YouTubeHomeFeedOverlayManager has always used.
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER

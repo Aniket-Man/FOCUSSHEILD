@@ -465,6 +465,16 @@ class AppLimitManager private constructor(
      * Called by Accessibility Service whenever the foreground window package changes.
      */
     fun onForegroundPackageChanged(packageName: String) {
+        // The floating blocker has no activity lifecycle of its own: dismissing it when the
+        // limited app it belongs to leaves the foreground is the only thing that stops the
+        // full-screen scrim from sitting on top of the launcher or another app. The service
+        // filters FocusShield's own package out before this is reached, so the overlay's own
+        // window events can never hide it. Checked before the tracking filter below so
+        // launchers, SystemUI and IMEs also dismiss it — leaving to Home is the common case.
+        if (packageName.isNotBlank()) {
+            AppLimitFloatingOverlayManager.onForegroundPackageChanged(packageName)
+        }
+
         if (!AppLimitPackageFilter.shouldTrackForeground(packageName)) {
             return
         }
@@ -1013,7 +1023,13 @@ class AppLimitManager private constructor(
                 isStrict = isStrict,
                 streakDays = streakDays,
                 onResult = { success ->
-                    if (!success) {
+                    if (success) {
+                        // The floating path returns before launchActivityOverlay, which is
+                        // where the warning is normally cleared; clear it here so a stale
+                        // "blocker could not be shown" notice cannot outlive a launch that
+                        // did land.
+                        _overlayLaunchWarning.value = null
+                    } else {
                         launchActivityOverlay(
                             packageName, appName, mode, selectedMinutes, usedMinutes,
                             remainingDailyMinutes, dailyLimitMinutes, emergencyUsesCount,
