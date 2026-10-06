@@ -262,10 +262,13 @@ object AppLimitFloatingOverlayManager {
         }
 
         val brandIcon = ImageView(context).apply {
-            setImageResource(R.drawable.ic_focus_brand_mark)
-            setColorFilter(Color.parseColor("#8B5CF6"))
+            setImageResource(R.drawable.focus_shield_wordmark)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
+            adjustViewBounds = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(20)
+            )
         }
         topRow.addView(brandIcon)
 
