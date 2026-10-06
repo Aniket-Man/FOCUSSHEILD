@@ -610,7 +610,9 @@ class FocusAccessibilityService : AccessibilityService() {
         // disappear for good; the storm also re-sent the media-pause key and re-scanned the
         // node tree five times a second while the user was trying to read the popup.
         val isBlockerOnScreen = com.example.feature.applimits.ui.AppLimitOverlayActivity
-            .isVisibleFor(rawPackageName)
+            .isVisibleFor(rawPackageName) ||
+            com.example.feature.applimits.ui.AppLimitFloatingOverlayManager
+                .isShowingFor(rawPackageName)
 
         if (AppLimitPackageFilter.shouldEvaluateForLimits(rawPackageName) &&
             !isBlockerOnScreen &&
@@ -1128,6 +1130,7 @@ class FocusAccessibilityService : AccessibilityService() {
         // ever report the end of this one once it is gone.
         dwellTracker()?.flush("service unbound")
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+        com.example.feature.applimits.ui.AppLimitFloatingOverlayManager.hideOverlay()
         Log.d(tag, "FocusAccessibilityService unbound.")
         return super.onUnbind(intent)
     }
@@ -1143,6 +1146,7 @@ class FocusAccessibilityService : AccessibilityService() {
         com.example.core.tracking.ScreenStateTracker.unregister(this)
         dwellTracker()?.flush("service destroyed")
         com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+        com.example.feature.applimits.ui.AppLimitFloatingOverlayManager.hideOverlay()
         super.onDestroy()
         Log.d(tag, "FocusAccessibilityService destroyed.")
     }
