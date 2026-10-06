@@ -7,6 +7,8 @@ import android.util.Log
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.BlockedWebsiteRepository
 import com.example.feature.websiteblocker.engine.AdultClassificationResult
+import com.example.feature.websiteblocker.engine.AdultDnsClassifier
+import com.example.feature.websiteblocker.engine.AdultDnsVerdict
 import com.example.feature.websiteblocker.engine.AdultLexicalClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -101,8 +103,12 @@ class AdultFilteringEngine private constructor(
 
     /**
      * Determines whether a domain matches 18+ content or active block rules.
+     *
+     * @param includeDynamicVerdict when false, step 5 (the live family-DNS lookup) is
+     * skipped so callers that run their own verdict step (e.g. `WebsiteBlockerEngine`)
+     * keep their own block-reason attribution; static steps 1–4 always apply.
      */
-    fun shouldBlockDomain(rawDomain: String): Boolean {
+    fun shouldBlockDomain(rawDomain: String, includeDynamicVerdict: Boolean = true): Boolean {
         val cleanDomain = DomainMatcher.normalize(rawDomain) ?: return false
 
         // 1. Allowlist precedence
@@ -126,6 +132,16 @@ class AdultFilteringEngine private constructor(
         val lexicalResult = AdultLexicalClassifier.isAdultContent("", cleanDomain)
         if (lexicalResult is AdultClassificationResult.Adult) {
             Log.d(TAG, "[Blocked] Domain matched adult lexical rules: $cleanDomain (${lexicalResult.matchedRule})")
+            return true
+        }
+
+        // 5. Dynamic family-DNS verdict (issue #63): catch novel adult sites that are not
+        // on any preloaded list. Cache-first with a bounded first-lookup wait; only
+        // genuinely unknown domains pay it. SAFE/UNKNOWN fail open by contract.
+        if (includeDynamicVerdict &&
+            AdultDnsClassifier.verdict(cleanDomain) == AdultDnsVerdict.ADULT
+        ) {
+            Log.d(TAG, "[Blocked] Family DNS classified domain as adult: $cleanDomain")
             return true
         }
 
@@ -206,6 +222,17 @@ class AdultFilteringEngine private constructor(
 
     fun onVpnServiceStarted() {
         isEngineActive = true
+        // Pre-warm the family-DNS classifier off the packet loop (issue #63). The DoH
+        // fallback resolves its own hostname through the system DNS — which is this VPN —
+        // so prime the transport and caches now, while the TUN loop is still free to
+        // carry that bootstrap query, instead of during a classification wait.
+        engineScope.launch {
+            try {
+                AdultDnsClassifier.verdict("example.com")
+            } catch (e: Exception) {
+                Log.w(TAG, "Family-DNS classifier pre-warm failed: ${e.message}")
+            }
+        }
     }
 
     fun onVpnServiceStopped() {
