@@ -150,9 +150,11 @@ class WebsiteBlockerEngine private constructor(
             val cleanDomain = domain.trim().lowercase()
             if (cleanDomain.isBlank()) return null
 
-            // 1. Check local VPN / filtering engine matcher if initialized
+            // 1. Check local VPN / filtering engine matcher if initialized. Static rules
+            // only: the dynamic family-DNS verdict has its own step below so a first-visit
+            // sinkhole block is attributed to "Family DNS Filter", not the VPN matcher.
             val vpnEngine = com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance
-            if (vpnEngine != null && vpnEngine.shouldBlockDomain(cleanDomain)) {
+            if (vpnEngine != null && vpnEngine.shouldBlockDomain(cleanDomain, includeDynamicVerdict = false)) {
                 return WebsiteBlockDecision.Blocked(
                     domain = cleanDomain,
                     engineType = "ADULT_AUTOMATIC",

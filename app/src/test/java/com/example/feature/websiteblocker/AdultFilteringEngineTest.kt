@@ -5,6 +5,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.FocusShieldApp
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.BlockedWebsiteRepository
+import com.example.feature.websiteblocker.engine.AdultDnsClassifier
+import com.example.feature.websiteblocker.engine.DnsQueryResult
+import com.example.feature.websiteblocker.engine.DnsTransport
 import com.example.feature.websiteblocker.vpn.AdultDnsVpnService
 import com.example.feature.websiteblocker.vpn.AdultFilteringEngine
 import com.example.feature.websiteblocker.vpn.DnsConstants
@@ -38,8 +41,26 @@ class AdultFilteringEngineTest {
     private lateinit var websiteRepository: BlockedWebsiteRepository
     private lateinit var engine: AdultFilteringEngine
 
+    private val safeTransport = object : DnsTransport {
+        override fun queryUdp(domain: String, server: String): DnsQueryResult =
+            DnsQueryResult.Resolved(listOf("203.0.113.10"))
+
+        override fun queryDoh(domain: String, endpoint: String): DnsQueryResult =
+            DnsQueryResult.Resolved(listOf("203.0.113.10"))
+    }
+
+    private val sinkholeTransport = object : DnsTransport {
+        override fun queryUdp(domain: String, server: String): DnsQueryResult =
+            DnsQueryResult.Resolved(listOf("0.0.0.0"))
+
+        override fun queryDoh(domain: String, endpoint: String): DnsQueryResult =
+            DnsQueryResult.Resolved(listOf("0.0.0.0"))
+    }
+
     @Before
     fun setUp() {
+        AdultDnsClassifier.resetForTest()
+        AdultDnsClassifier.transport = safeTransport
         context = ApplicationProvider.getApplicationContext()
         val app = context as FocusShieldApp
         preferencesRepository = app.preferencesRepository
@@ -55,6 +76,7 @@ class AdultFilteringEngineTest {
     @After
     fun tearDown() {
         engine.stopVpn()
+        AdultDnsClassifier.resetForTest()
     }
 
     @Test
@@ -95,6 +117,38 @@ class AdultFilteringEngineTest {
         assertFalse("Tech news site must not be blocked", engine.shouldBlockDomain("theverge.com"))
         assertFalse("Online shop must not be blocked", engine.shouldBlockDomain("amazon.com"))
         assertFalse("Empty input must not be blocked", engine.shouldBlockDomain(""))
+    }
+
+    @Test
+    fun `novel domain is blocked when family DNS returns a sinkhole`() {
+        AdultDnsClassifier.transport = sinkholeTransport
+        assertTrue(
+            "Domain absent from every preloaded list must be blocked by the family-DNS verdict",
+            engine.shouldBlockDomain("novel-zx9q.example")
+        )
+    }
+
+    @Test
+    fun `novel domain is allowed when family DNS returns a real IP`() {
+        AdultDnsClassifier.transport = safeTransport
+        assertFalse(
+            "Same domain as the sinkhole test: with a SAFE verdict no static rule may block it",
+            engine.shouldBlockDomain("novel-zx9q.example")
+        )
+    }
+
+    @Test
+    fun `allowlisted domain never queries the family DNS transport`() {
+        AdultDnsClassifier.transport = object : DnsTransport {
+            override fun queryUdp(domain: String, server: String): DnsQueryResult {
+                throw AssertionError("Family DNS must not be queried for allowlisted domain")
+            }
+
+            override fun queryDoh(domain: String, endpoint: String): DnsQueryResult {
+                throw AssertionError("Family DNS must not be queried for allowlisted domain")
+            }
+        }
+        assertFalse("Allowlist wins before any dynamic verdict", engine.shouldBlockDomain("wikipedia.org"))
     }
 
     @Test
