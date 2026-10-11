@@ -1,5 +1,9 @@
 # FocusShield
 
+[![CI](https://github.com/Aniket-Man/FOCUSSHEILD/actions/workflows/ci.yml/badge.svg)](https://github.com/Aniket-Man/FOCUSSHEILD/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Aniket-Man/FOCUSSHEILD)](https://github.com/Aniket-Man/FOCUSSHEILD/releases)
+[![License: MIT](https://img.shields.io/github/license/Aniket-Man/FOCUSSHEILD)](LICENSE)
+
 **FocusShield** is an offline-first Android study companion. It runs timed focus sessions,
 enforces them by blocking distracting apps, websites and notifications, and turns the result
 into streaks, analytics and rewards — with optional end-to-end cloud sync.
