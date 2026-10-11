@@ -1,19 +1,23 @@
 package com.example.cloud.auth
 
 /**
- * High-level authentication state for this device, independent of sync progress.
+ * High-level authentication state for FocusShield.
  *
- * - [LocalOnly]  – no account session; the app is fully usable offline from Room.
- * - [ConfirmEmail] – a sign-up was accepted but the project has email confirmation enabled;
- *   the user must click the emailed link before the first sign-in succeeds.
- * - [Authenticated] – a session is active for [email] / [userId].
+ * - [LocalOnly] – no cloud account; the app runs seamlessly offline using Room.
+ * - [ConfirmEmail] – legacy stub retained for backward compatibility.
+ * - [Authenticated] – active Google account session with Firebase Auth.
  */
 sealed interface AuthState {
     data object LocalOnly : AuthState
     data object ConfirmEmail : AuthState
-    data class Authenticated(val userId: String, val email: String) : AuthState
+    data class Authenticated(
+        val userId: String,
+        val email: String,
+        val displayName: String = "",
+        val photoUrl: String? = null
+    ) : AuthState
 
-    /** True when a session exists; convenience for repository/sync gate checks. */
+    /** True when an authenticated session exists. */
     val isAuthenticated: Boolean
         get() = this is Authenticated
 }

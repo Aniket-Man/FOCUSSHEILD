@@ -2,7 +2,7 @@ package com.example.cloud.sync
 
 /**
  * Canonical identifiers for the tables this app syncs. For mirrored tables the value equals both
- * the Room table name and the Supabase table name. Values are stored in `sync_outbox.tableName`
+ * the Room table name and the cloud collection name. Values are stored in `sync_outbox.tableName`
  * and are therefore treated as stable identifiers — do not rename without a migration of pending
  * outbox rows.
  */
@@ -26,7 +26,7 @@ object SyncTables {
     //   daily_app_usage    — per-app foreground time, i.e. Android UsageStats-derived data.
     //   daily_unlocks      — per-day phone unlock counts, equally general device usage statistics.
     // Every one of these stays in Room, read by the enforcement engine, the app-limit UI and the
-    // widget. None is handed to the sync engine, so none can reach Supabase by any path.
+    // widget. None is handed to the sync engine, so none can reach the cloud backend by any path.
     //
     // Note the contrast with BLOCKED_APPS above: that table is the *study-session* block list the
     // student picks in Start Study Session, and it does follow the account. Both reference the same

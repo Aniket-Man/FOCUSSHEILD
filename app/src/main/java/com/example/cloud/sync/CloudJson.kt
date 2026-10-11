@@ -27,7 +27,7 @@ import org.json.JSONObject
 /**
  * Entity <-> cloud-JSON conversion for the Room-backed sync tables.
  *
- * Design: the Supabase tables mirror the Room column names and stored values 1:1 (booleans stored
+ * Design: the Firestore collections mirror the Room column names and stored values 1:1 (booleans stored
  * as booleans, enums stored as their `name`), so conversions are mechanical and there is no
  * snake_case translation layer to drift. Server-only columns (`user_id`, `synced_at`) are added
  * and stripped by the engine, never by these functions.

@@ -81,7 +81,7 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         com.example.data.repository.ScratchCardRepository(database.scratchCardDao(), applicationScope)
     }
 
-    // Optional Supabase cloud account layer. AuthRepository is cheap to construct (it does no
+    // Optional Firebase cloud account layer. AuthRepository is cheap to construct (it does no
     // network I/O until restoreOnStart()); connectivityMonitor powers sync retry gating.
     val authRepository by lazy { AuthRepository(this) }
     val connectivityMonitor by lazy { ConnectivityMonitor(this) }

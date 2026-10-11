@@ -16,7 +16,7 @@ import kotlinx.coroutines.sync.withLock
  *
  * FocusShield is Room-first: every syncable repository performs its local Room mutation first, then
  * calls one of the `enqueue*` functions here to record the change for later replay against
- * Supabase. Ops sit in `sync_outbox` while the user is signed out or offline and are drained in
+ * Firebase. Ops sit in `sync_outbox` while the user is signed out or offline and are drained in
  * `seq` order by [SyncEngine] once a session is available.
  *
  * Coalescing = "latest local intent wins": before inserting a new op for a (table, row) we delete

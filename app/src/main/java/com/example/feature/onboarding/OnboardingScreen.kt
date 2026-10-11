@@ -101,6 +101,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import android.app.Activity
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import coil.compose.AsyncImage
 import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.LocalFocusColors
@@ -109,8 +118,14 @@ import com.example.core.permission.AwaitPermissionGrantEffect
 import com.example.core.permission.OnboardingPermission
 import com.example.core.ui.FocusBrandMark
 import com.example.core.ui.FocusLottieAnimation
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 /**
  * Modern Onboarding Experience (Inspired by Opal, One Sec & Modern Focus Utilities).
@@ -127,8 +142,8 @@ fun OnboardingScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    // 0 aurora hero · 1 distraction shield · 2 permissions · 3 commitment
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    // 0 aurora hero · 1 google sign in · 2 distraction shield · 3 permissions · 4 commitment
+    val pagerState = rememberPagerState(pageCount = { 5 })
 
     // Live grant state for every permission in the onboarding flow.
     var grantedStates by remember {
@@ -168,7 +183,7 @@ fun OnboardingScreen(
 
     // Polling ticker on the permissions page so Settings toggles show up without a Back press.
     LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage == 2) {
+        if (pagerState.currentPage == 3) {
             while (true) {
                 delay(500)
                 refreshPermissions()
@@ -181,11 +196,9 @@ fun OnboardingScreen(
         .filter { it.isMandatory }
         .all { grantedStates[it] == true }
 
-    // Page roles. Pages 0 (aurora hero) and 3 (commitment) are immersive and own their full
-    // layout including action buttons; the permissions page (2) likewise owns its chrome. Only the
-    // distraction-shield page (1) uses the shared top bar + dots + Next bar below.
+    // Page roles.
     val page = pagerState.currentPage
-    val usesSharedChrome = page == 1
+    val usesSharedChrome = page == 2
 
     fun goToPage(target: Int) {
         coroutineScope.launch { pagerState.animateScrollToPage(target) }
@@ -238,7 +251,7 @@ fun OnboardingScreen(
                     }
 
                     TextButton(
-                        onClick = { goToPage(2) },
+                        onClick = { goToPage(3) },
                         modifier = Modifier.testTag("onboarding_skip_to_perms_button")
                     ) {
                         Text(
@@ -261,8 +274,9 @@ fun OnboardingScreen(
             ) { pageIndex ->
                 when (pageIndex) {
                     0 -> OnboardingWelcomePage(onGetStarted = { goToPage(1) })
-                    1 -> OnboardingDistractionShieldPage()
-                    2 -> OnboardingPermissionsPage(
+                    1 -> OnboardingGoogleSignInPage(onContinue = { goToPage(2) }, onSkip = { goToPage(2) })
+                    2 -> OnboardingDistractionShieldPage()
+                    3 -> OnboardingPermissionsPage(
                         grantedStates = grantedStates,
                         activePermission = activePermission,
                         allMandatoryGranted = allMandatoryGranted,
@@ -270,10 +284,10 @@ fun OnboardingScreen(
                             awaitingPermission = permission
                             permission.request(context)
                         },
-                        onContinue = { goToPage(3) },
-                        onSkip = { goToPage(3) }
+                        onContinue = { goToPage(4) },
+                        onSkip = { goToPage(4) }
                     )
-                    3 -> OnboardingCommitmentPage(onCommitted = onCompleteOnboarding)
+                    4 -> OnboardingCommitmentPage(onCommitted = onCompleteOnboarding)
                 }
             }
 
@@ -287,7 +301,7 @@ fun OnboardingScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Button(
-                        onClick = { goToPage(2) },
+                        onClick = { goToPage(3) },
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = FocusColors.Primary,
@@ -589,7 +603,7 @@ private fun OnboardingWelcomePage(onGetStarted: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                repeat(4) { index ->
+                repeat(5) { index ->
                     Box(
                         modifier = Modifier
                             .height(7.dp)
@@ -1444,3 +1458,387 @@ private fun PermissionFlowRow(
         }
     }
 }
+
+@Composable
+private fun OnboardingGoogleSignInPage(
+    onContinue: () -> Unit,
+    onSkip: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+
+    var currentUser by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    fun launchGoogleSignIn() {
+        val clientId = try {
+            context.getString(R.string.default_web_client_id)
+        } catch (e: Exception) {
+            errorMessage = "Google Sign-In configuration missing"
+            return
+        }
+
+        val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+        val request = GetCredentialRequest.Builder().addCredentialOption(signInOption).build()
+
+        isLoading = true
+        errorMessage = null
+
+        coroutineScope.launch {
+            try {
+                val activity = context as? Activity
+                if (activity == null) {
+                    isLoading = false
+                    errorMessage = "Activity unavailable"
+                    return@launch
+                }
+
+                val result = credentialManager.getCredential(activity, request)
+                val credential = result.credential
+                if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = FirebaseAuth.getInstance().signInWithCredential(authCredential).await()
+                    currentUser = authResult.user
+                    isLoading = false
+                    onContinue()
+                } else {
+                    isLoading = false
+                    errorMessage = "Unexpected credential format"
+                }
+            } catch (e: GetCredentialCancellationException) {
+                isLoading = false
+            } catch (e: Exception) {
+                isLoading = false
+                errorMessage = e.localizedMessage ?: "Sign in failed. Please try again."
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0F0E1E),
+                        Color(0xFF0B0914),
+                        Color(0xFF05040A)
+                    )
+                )
+            )
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Header Section
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 20.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF8B5CF6).copy(alpha = 0.45f),
+                                    Color.Transparent
+                                )
+                            ),
+                            shape = CircleShape
+                        )
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_focus_shield_app_icon),
+                        contentDescription = "FocusShield Logo",
+                        modifier = Modifier.size(56.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Cloud Sync & Backup",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    ),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Sign in with Google to sync your study data, schedules, and profile image across devices.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.White.copy(alpha = 0.7f),
+                        lineHeight = 20.sp
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                )
+            }
+
+            // Signed In User Card or Benefits List
+            val user = currentUser
+            if (user != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF8B5CF6)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!user.photoUrl?.toString().isNullOrBlank()) {
+                                AsyncImage(
+                                    model = user.photoUrl?.toString(),
+                                    contentDescription = "Profile Photo",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                )
+                            } else {
+                                Text(
+                                    text = (user.displayName?.firstOrNull() ?: user.email?.firstOrNull() ?: 'U').uppercase(),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = user.displayName ?: "FocusShield User",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Signed In",
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Text(
+                                text = user.email ?: "",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            )
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    OnboardingFeatureRow(
+                        icon = Icons.Rounded.CloudDone,
+                        title = "Cross-Device Sync",
+                        subtitle = "Sync schedules, blocklists & study stats automatically"
+                    )
+                    OnboardingFeatureRow(
+                        icon = Icons.Rounded.Person,
+                        title = "Profile Image Backup",
+                        subtitle = "Uploaded custom avatars restore instantly on new devices"
+                    )
+                    OnboardingFeatureRow(
+                        icon = Icons.Rounded.Security,
+                        title = "Secure Firebase Storage",
+                        subtitle = "Encrypted cloud persistence with zero-trust security"
+                    )
+                }
+            }
+
+            // Bottom Actions
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFEF4444)),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+
+                if (user != null) {
+                    Button(
+                        onClick = onContinue,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF8B5CF6),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("onboarding_google_continue_button")
+                    ) {
+                        Text(
+                            text = "Continue Setup",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = { launchGoogleSignIn() },
+                        enabled = !isLoading,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color(0xFF1F2937)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("onboarding_google_sign_in_button")
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = Color(0xFF8B5CF6),
+                                strokeWidth = 2.5.dp
+                            )
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF4285F4)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "G",
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Sign in with Google",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    TextButton(
+                        onClick = onSkip,
+                        modifier = Modifier.testTag("onboarding_google_skip_button")
+                    ) {
+                        Text(
+                            text = "Skip for now / Continue as Guest",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingFeatureRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF8B5CF6).copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color(0xFFA78BFA),
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp
+                )
+            )
+        }
+    }
+}
+

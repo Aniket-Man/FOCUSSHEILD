@@ -591,10 +591,16 @@ class FocusAccessibilityService : AccessibilityService() {
      * captured from the caller so both entry points behave identically.
      */
     private fun evaluateAppLimitGate(rawPackageName: String, eventType: Int, now: Long) {
+        val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
         val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
         if (appLimitManager == null) return
 
         val isYouTubePackage = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+        val isBrowserPackage = com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
+        val protectionState = blockerManager?.getCurrentProtectionState(now)
+        val isSessionRunningOrPaused = protectionState?.let { it.sessionState.name == "RUNNING" || it.sessionState.name == "PAUSED" } ?: false
+        val sessionActiveWithYouTubeStudyMode = isSessionRunningOrPaused && (protectionState?.isYouTubeStudyModeEnabled == true)
+        val sessionActiveWithBrowserStudyMode = isSessionRunningOrPaused && (protectionState?.isBrowserStudyModeEnabled == true)
 
         // The blocker for this app is already on screen: nothing to decide, and nothing to
         // launch. Without this the gate re-raised the popup on every event the limited app
@@ -608,14 +614,10 @@ class FocusAccessibilityService : AccessibilityService() {
             com.example.feature.applimits.ui.AppLimitFloatingOverlayManager
                 .isShowingFor(rawPackageName)
 
-        // Study Mode no longer exempts app limits (issue #71). During a study session this
-        // gate used to skip YouTube (and browsers) entirely, so the YouTube daily limit was
-        // never evaluated and its watch time was freely billed to the study session. Study
-        // Mode still owns what YouTube *shows* (Shorts, unapproved channels, home feed) via
-        // the content engine — the app limit independently decides whether the app may be
-        // used at all, session or not.
-        if (com.example.feature.applimits.engine.AppLimitGatePolicy
-                .shouldEvaluate(rawPackageName, isBlockerOnScreen)
+        if (AppLimitPackageFilter.shouldEvaluateForLimits(rawPackageName) &&
+            !isBlockerOnScreen &&
+            !(isYouTubePackage && sessionActiveWithYouTubeStudyMode) &&
+            !(isBrowserPackage && sessionActiveWithBrowserStudyMode)
         ) {
             val isLimited = appLimitManager.isPackageLimited(rawPackageName)
             val isSessionActive = appLimitManager.isSessionActiveFor(rawPackageName)

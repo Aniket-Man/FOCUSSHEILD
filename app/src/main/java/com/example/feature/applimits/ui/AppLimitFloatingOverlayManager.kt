@@ -340,9 +340,9 @@ object AppLimitFloatingOverlayManager {
                 for (mins in row) {
                     durationRow.addView(
                         durationButton(context, packageName, appName, mins),
-                        LinearLayout.LayoutParams(0, dp(52), 1f).apply {
-                            leftMargin = dp(4)
-                            rightMargin = dp(4)
+                        LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                            leftMargin = dp(6)
+                            rightMargin = dp(6)
                         }
                     )
                 }
@@ -387,22 +387,21 @@ object AppLimitFloatingOverlayManager {
             }
         }
 
-        // --- Close button (green, full width; returns the user to the launcher Home) ---
+        // --- Close button (dark forest green, full width pill, vivid lime text) ---
         val closeBtn = TextView(context).apply {
             text = "Close $appName"
-            textSize = 15f
-            setTextColor(Color.parseColor("#4ADE80"))
+            textSize = 16f
+            setTextColor(Color.parseColor("#22E550"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(dp(20), dp(14), dp(20), dp(14))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#123524"))
-                cornerRadius = dp(16).toFloat()
+                setColor(Color.parseColor("#073E16"))
+                cornerRadius = dp(28).toFloat()
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(52)
-            ).apply { topMargin = dp(14) }
+                dp(56)
+            ).apply { topMargin = dp(18) }
             setOnClickListener {
                 hideOverlay()
                 AppLimitManager.instance.onBlockerDismissedByUser(packageName)
@@ -575,77 +574,87 @@ object AppLimitFloatingOverlayManager {
         })
         card.addView(row1)
 
-        // Progress bar: red fill for the used share of the daily limit.
+        // Progress bar: thick vivid hot pink red fill matching reference image.
         val total = dailyLimitMinutes.coerceAtLeast(1)
-        val usedFraction = (usedMinutes.toFloat() / total.toFloat()).coerceIn(0.001f, 1f)
+        val usedFraction = (usedMinutes.toFloat() / total.toFloat()).coerceIn(0.04f, 1f)
         val track = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#262A36"))
-                cornerRadius = dp(context, 4).toFloat()
+                setColor(Color.parseColor("#242630"))
+                cornerRadius = dp(context, 14).toFloat()
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(context, 8)
-            ).apply { topMargin = dp(context, 12) }
+                dp(context, 28)
+            ).apply { topMargin = dp(context, 16) }
         }
         track.addView(
             View(context).apply {
                 background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#EF4444"))
-                    cornerRadius = dp(context, 4).toFloat()
+                    setColor(Color.parseColor("#FF0055")) // Vivid Hot Pink Red from image
+                    cornerRadius = dp(context, 14).toFloat()
                 }
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, usedFraction)
         )
-        track.addView(
-            View(context),
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f - usedFraction)
-        )
+        if (usedFraction < 1f) {
+            track.addView(
+                View(context),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f - usedFraction)
+            )
+        }
         card.addView(track)
 
+        // Bottom stats: Left stacked (Spent today) vs Right stacked (Limit left)
         val row3 = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(context, 10) }
+            ).apply { topMargin = dp(context, 16) }
         }
-        row3.addView(TextView(context).apply {
-            text = formatMinutes(usedMinutes)
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        })
-        row3.addView(TextView(context).apply {
-            text = "Spent today"
-            textSize = 11f
-            setTextColor(Color.parseColor("#94A3B8"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { leftMargin = dp(context, 5) }
-        })
+
+        val leftCol = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(context).apply {
+                text = formatMinutes(usedMinutes)
+                textSize = 20f
+                setTextColor(Color.WHITE)
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            })
+            addView(TextView(context).apply {
+                text = "Spent today"
+                textSize = 12f
+                setTextColor(Color.parseColor("#8E8E93"))
+            })
+        }
+        row3.addView(leftCol)
+
         row3.addView(
             View(context),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         )
-        row3.addView(TextView(context).apply {
-            text = formatMinutes(remainingDailyMinutes)
-            textSize = 16f
-            setTextColor(if (isExhausted) Color.parseColor("#F87171") else Color.WHITE)
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        })
-        row3.addView(TextView(context).apply {
-            text = "Limit left"
-            textSize = 11f
-            setTextColor(Color.parseColor("#94A3B8"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { leftMargin = dp(context, 5) }
-        })
+
+        val rightCol = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(TextView(context).apply {
+                text = formatMinutes(remainingDailyMinutes)
+                textSize = 20f
+                setTextColor(Color.WHITE)
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                gravity = Gravity.END
+            })
+            addView(TextView(context).apply {
+                text = "Limit left"
+                textSize = 12f
+                setTextColor(Color.parseColor("#8E8E93"))
+                gravity = Gravity.END
+            })
+        }
+        row3.addView(rightCol)
+
         card.addView(row3)
         return card
     }
@@ -659,14 +668,14 @@ object AppLimitFloatingOverlayManager {
     ): View {
         return TextView(context).apply {
             text = "$minutes mins"
-            textSize = 14f
+            textSize = 15f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#272A36"))
-                cornerRadius = dp(context, 14).toFloat()
-                setStroke(dp(context, 1), Color.parseColor("#3B4052"))
+                setColor(Color.parseColor("#26272D"))
+                cornerRadius = dp(context, 28).toFloat()
+                setStroke(dp(context, 1), Color.parseColor("#333642"))
             }
             isClickable = true
             isFocusable = true

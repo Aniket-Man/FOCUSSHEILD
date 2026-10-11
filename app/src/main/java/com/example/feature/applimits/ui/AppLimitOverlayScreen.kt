@@ -348,12 +348,12 @@ fun AppLimitOverlayScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFF15161A))
-                    .border(1.dp, Color(0xFF24262E), RoundedCornerShape(24.dp))
+                    .background(Color(0xFF16171C))
+                    .border(1.dp, Color(0xFF282A33), RoundedCornerShape(24.dp))
                     .padding(20.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // Top: App Icon + "Xm limit" on Left, Flame Streak "🔥 X days" on Right
+                    // Top: App Icon + "X limit" on Left, Flame Streak "🔥 X days" on Right
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -387,27 +387,27 @@ fun AppLimitOverlayScreen(
                                 text = "${formatMinutesLabel(totalDailyLimit)} limit",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Medium,
-                                    color = FocusColors.TextSecondary,
+                                    color = Color(0xFF9E9E9E),
                                     fontSize = 14.sp
                                 )
                             )
                         }
 
-                // Lottie Fire Animation for Streak
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    FocusLottieAnimation(
-                        rawRes = R.raw.fire_animation,
-                        modifier = Modifier.size(24.dp),
-                        iterations = com.airbnb.lottie.compose.LottieConstants.IterateForever
-                    )
-                    Text(
-                        text = "$streakDays days",
+                        // Lottie Fire Animation / Flame Streak
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            FocusLottieAnimation(
+                                rawRes = R.raw.fire_animation,
+                                modifier = Modifier.size(22.dp),
+                                iterations = com.airbnb.lottie.compose.LottieConstants.IterateForever
+                            )
+                            Text(
+                                text = "$streakDays days",
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFFFBA834),
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF9E9E9E),
                                     fontSize = 14.sp
                                 )
                             )
@@ -416,30 +416,28 @@ fun AppLimitOverlayScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Progress Bar
+                    // Progress Bar - Thick Vivid Magenta/Red Capsule matching image
                     val progress = (actualUsedMinutes.toFloat() / totalDailyLimit.toFloat()).coerceIn(0f, 1f)
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(26.dp)
-                            .clip(RoundedCornerShape(13.dp))
-                            .background(Color(0xFF22242B))
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF242630))
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(fraction = progress)
-                                .height(26.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .background(
-                                    if (progress >= 1f) FocusColors.CoralWarning else FocusColors.Primary
-                                )
+                                .fillMaxWidth(fraction = progress.coerceAtLeast(0.04f))
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFFFF0055)) // Vivid Hot Pink Red from image
                         )
                     }
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // Bottom Stats: Spent today vs Limit left
+                    // Bottom Stats: Left stacked (4h 30m / Spent today) vs Right stacked (5m / Limit left)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -451,14 +449,15 @@ fun AppLimitOverlayScreen(
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    fontSize = 20.sp
+                                    fontSize = 22.sp
                                 )
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Spent today",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Normal,
-                                    color = FocusColors.TextMuted,
+                                    color = Color(0xFF8E8E93),
                                     fontSize = 12.sp
                                 )
                             )
@@ -470,14 +469,15 @@ fun AppLimitOverlayScreen(
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    fontSize = 20.sp
+                                    fontSize = 22.sp
                                 )
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Limit left",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Normal,
-                                    color = FocusColors.TextMuted,
+                                    color = Color(0xFF8E8E93),
                                     fontSize = 12.sp
                                 )
                             )
@@ -497,16 +497,16 @@ fun AppLimitOverlayScreen(
                         "How long do you want to use?"
                     },
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        fontSize = 16.sp
+                        fontSize = 18.sp
                     ),
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                // Dynamic options based on actual remaining daily minutes
+                // Dynamic options based on actual remaining daily minutes (2 / 5 / 10 / 20 mins)
                 val durationOptions = remember(actualRemainingDailyMinutes) {
                     if (actualRemainingDailyMinutes <= 1) {
                         listOf(1)
@@ -524,11 +524,11 @@ fun AppLimitOverlayScreen(
                 if (durationOptions.size == 4) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             DurationPillButton(
                                 label = "${durationOptions[0]} mins",
@@ -544,7 +544,7 @@ fun AppLimitOverlayScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             DurationPillButton(
                                 label = "${durationOptions[2]} mins",
@@ -565,7 +565,7 @@ fun AppLimitOverlayScreen(
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         durationOptions.forEach { opt ->
                             DurationPillButton(
@@ -639,27 +639,27 @@ fun AppLimitOverlayScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // Primary Bottom Button: "Close <AppName>" (Dark Green Pill from Image)
+            // Primary Bottom Button: "Close <AppName>" (Dark Forest Green Pill with Vivid Lime Green Text)
             Button(
                 onClick = onGoToHome,
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF0F4D1F),
-                    contentColor = Color(0xFF4ADE80)
+                    containerColor = Color(0xFF073E16),
+                    contentColor = Color(0xFF22E550)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .height(56.dp)
                     .testTag("close_app_button")
             ) {
                 Text(
                     text = "Close $appName",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 16.sp
+                        color = Color(0xFF22E550), // Vivid Emerald Lime Green from image
+                        fontSize = 17.sp
                     )
                 )
             }
@@ -756,10 +756,10 @@ private fun DurationPillButton(
 ) {
     Box(
         modifier = modifier
-            .height(52.dp)
+            .height(56.dp)
             .clip(CircleShape)
-            .background(Color(0xFF22242B))
-            .border(1.dp, Color(0xFF2F323C), CircleShape)
+            .background(Color(0xFF26272D))
+            .border(1.dp, Color(0xFF333642), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -768,7 +768,7 @@ private fun DurationPillButton(
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                fontSize = 15.sp
+                fontSize = 16.sp
             )
         )
     }

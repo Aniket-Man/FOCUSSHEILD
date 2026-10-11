@@ -20,8 +20,6 @@ fun optionalProperty(key: String): String {
     val value = envProperties.getProperty(key) ?: System.getenv(key) ?: ""
     return value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
-val supabaseUrl = optionalProperty("SUPABASE_URL")
-val supabaseAnonKey = optionalProperty("SUPABASE_ANON_KEY")
 // Release-feed configuration for the in-app updater. Both are optional and compile-time only:
 //   UPDATE_FEED_URL   — a backend/static URL serving the release JSON (GitHub-shaped or normalised).
 //                       This is how the updater works while the GitHub repository is private, since
@@ -44,8 +42,6 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
-    buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeedUrl\"")
     buildConfigField("String", "UPDATE_REPO_SLUG", "\"$updateRepoSlug\"")
   }
@@ -128,8 +124,6 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
-  ignoreList.add("SUPABASE_URL")
-  ignoreList.add("SUPABASE_ANON_KEY")
   ignoreList.add("UPDATE_FEED_URL")
   ignoreList.add("UPDATE_REPO_SLUG")
 }
@@ -188,15 +182,11 @@ dependencies {
   }
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
-
-  // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
-  // Sign-In via Credential Manager:
-  // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
+  implementation(libs.firebase.firestore)
+  implementation(libs.firebase.auth)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
@@ -230,6 +220,8 @@ dependencies {
   implementation(libs.hilt.work)
   "ksp"(libs.hilt.work.compiler)
 }
+
+tasks.withType<Test> { failFast = true }
 
 // Room schema export (FocusShieldDatabase.exportSchema = true): KSP writes the versioned JSON
 // schemas here so future migrations can be validated against them instead of relying on

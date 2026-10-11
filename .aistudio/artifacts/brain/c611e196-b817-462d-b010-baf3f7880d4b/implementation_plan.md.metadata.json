@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for replacing Supabase with Firebase Authentication (Google Sign-In) and Cloud Firestore, adding a dedicated modern sign-in screen with optional skip, and syncing user profile photos and study data across devices.",
+  "updatedAt":  "2026-10-11T07:47:03.458578944Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

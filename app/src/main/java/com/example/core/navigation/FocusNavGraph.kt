@@ -149,7 +149,7 @@ fun FocusNavGraph(
     }
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 
-    val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
+    val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.GoogleSignIn.route
 
     NavHost(
         navController = navController,
@@ -403,6 +403,26 @@ fun FocusNavGraph(
                 onSplashFinished = {
                     navController.navigate(nextDestinationAfterSplash) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        // GOOGLE SIGN IN FLOW
+        composable(Screen.GoogleSignIn.route) {
+            com.example.feature.auth.GoogleSignInScreen(
+                onSignInSuccess = {
+                    val nextRoute = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
+                    navController.navigate(nextRoute) {
+                        popUpTo(Screen.GoogleSignIn.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onSkip = {
+                    val nextRoute = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
+                    navController.navigate(nextRoute) {
+                        popUpTo(Screen.GoogleSignIn.route) { inclusive = true }
                         launchSingleTop = true
                     }
                 }

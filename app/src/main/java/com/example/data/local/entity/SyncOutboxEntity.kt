@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
  * A pending, not-yet-uploaded change to one cloud-synced row.
  *
  * FocusShield is Room-first: every user mutation of a synced table first writes Room,
- * then enqueues a row here describing the change to replay against Supabase later.
+ * then enqueues a row here describing the change to replay against Firebase later.
  * Ops stay pending while the user is signed out or offline, and are drained in
  * `seq` order once a session is available.
  *

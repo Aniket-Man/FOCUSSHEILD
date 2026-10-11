@@ -141,62 +141,25 @@ fun ProfileScreen(
     LaunchedEffect(authUserId, uiState.preferences.userPhotoUri) {
         cloudAvatarFileUri = null
         if (authUserId == null || uiState.preferences.userPhotoUri != null) return@LaunchedEffect
-        val cloudPath = try {
-            FocusShieldApp.instance.preferencesRepository.cloudAvatarPath()
+        cloudAvatarFileUri = try {
+            cloudUploader.downloadOwnAvatarToCache(authUserId)?.let { "file://$it" }
         } catch (_: Throwable) {
             null
-        }
-        if (cloudPath != null) {
-            cloudAvatarFileUri = try {
-                cloudUploader.downloadOwnAvatarToCache(authUserId)?.let { "file://$it" }
-            } catch (_: Throwable) {
-                null
-            }
         }
     }
 
     // After an authenticated profile save: wait for the local write, upload a new image (or delete a
     // cleared one), and only then mark the profiles row dirty + request a sync.
-    //
-    // Two ordering bugs used to live here (issue #29):
-    //  1. a failed `uploadOwnImage` skipped `setCloudAvatarPath` but still marked the row dirty and
-    //     requested a sync, so the edited text fields reached the cloud while the stored avatar path
-    //     still pointed at the *old* image — a reinstall/restore then silently reverted the photo;
-    //  2. `updateUserProfile` was fire-and-forget, so the sync could snapshot the profile before the
-    //     local DataStore write had landed and upload the pre-edit values.
-    //
-    // Now the local write is awaited, and a failed avatar step aborts the push entirely: the edit
-    // stays local and fully consistent, the user is told, and the next successful save (or sync)
-    // sends the complete profile.
     val pushEditedProfileToCloud: (Job, String?, String?) -> Unit = { localWrite, photoBefore, photoAfter ->
         val uid = (accountState.auth as? AuthState.Authenticated)?.userId
         if (uid != null) {
             cloudScope.launch {
-                // (2) The sync reads local state; it must not start before the edit has been written.
                 localWrite.join()
 
-                val repo = FocusShieldApp.instance.preferencesRepository
-                val installState = FocusShieldApp.instance.cloudInstallState
-
                 val avatarConsistent: Boolean = when {
-                    photoAfter != null -> {
-                        val uploaded = cloudUploader.uploadOwnImage(photoAfter)
-                        uploaded && runCatching {
-                            repo.setCloudAvatarPath(ProfileImageUploader.objectPath(uid))
-                        }.isSuccess
-                    }
-
-                    photoBefore != null -> {
-                        val cloudPathBefore = runCatching { repo.cloudAvatarPath() }.getOrNull()
-                        if (cloudPathBefore == null) {
-                            true // nothing stored in the cloud, so nothing can go out of step
-                        } else {
-                            cloudUploader.deleteOwnImage() &&
-                                runCatching { repo.setCloudAvatarPath(null) }.isSuccess
-                        }
-                    }
-
-                    else -> true // the photo did not change
+                    photoAfter != null -> cloudUploader.uploadOwnImage(photoAfter)
+                    photoBefore != null -> cloudUploader.deleteOwnImage()
+                    else -> true
                 }
 
                 if (!avatarConsistent) {
@@ -214,7 +177,7 @@ fun ProfileScreen(
                     return@launch
                 }
 
-                runCatching { installState.setProfileDirty(true) }
+                runCatching { FocusShieldApp.instance.cloudInstallState.setProfileDirty(true) }
                 FocusShieldApp.instance.syncGateway.requestSync()
             }
         }

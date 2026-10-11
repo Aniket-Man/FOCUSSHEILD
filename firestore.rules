@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val <= request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 200
+        && (!('photoBase64' in data) || data.photoBase64 == null || (data.photoBase64 is string && data.photoBase64.size() <= 200000))
+        && (!('dailyStudyGoalMinutes' in data) || data.dailyStudyGoalMinutes is int)
+        && (!('currentStreak' in data) || data.currentStreak is int)
+        && isValidTimestamp(data.createdAt)
+        && isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidSessionRecord(data) {
+      return data.id is string && data.id.size() > 0
+        && data.userId is string && data.userId == request.auth.uid
+        && data.mode is string && data.mode.size() > 0
+        && data.durationMinutes is int && data.durationMinutes >= 0
+        && isValidTimestamp(data.completedAt)
+        && isValidTimestamp(data.createdAt);
+    }
+
+    function isValidStudyPlanRecord(data) {
+      return data.id is string && data.id.size() > 0
+        && data.userId is string && data.userId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.targetSubject is string && data.targetSubject.size() <= 100
+        && data.durationMinutes is int && data.durationMinutes >= 0
+        && data.activeDays is list
+        && isValidTimestamp(data.createdAt)
+        && isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAppLimitRecord(data) {
+      return data.id is string && data.id.size() > 0
+        && data.userId is string && data.userId == request.auth.uid
+        && data.packageName is string && data.packageName.size() > 0
+        && data.appName is string && data.appName.size() > 0
+        && data.dailyLimitMinutes is int && data.dailyLimitMinutes >= 0
+        && data.isStrict is bool
+        && isValidTimestamp(data.createdAt)
+        && isValidTimestamp(data.updatedAt);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfile(request.resource.data)
+                    && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+
+      match /sessions/{sessionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidSessionRecord(request.resource.data);
+        allow update: if isOwner(userId) && isValidSessionRecord(request.resource.data)
+                      && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /study_plans/{planId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidStudyPlanRecord(request.resource.data);
+        allow update: if isOwner(userId) && isValidStudyPlanRecord(request.resource.data)
+                      && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /app_limits/{limitId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidAppLimitRecord(request.resource.data);
+        allow update: if isOwner(userId) && isValidAppLimitRecord(request.resource.data)
+                      && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

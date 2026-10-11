@@ -36,8 +36,6 @@
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
 
-# Supabase
--keep class io.github.jan-tennert.supabase.** { *; }
 
 # Coroutines
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
