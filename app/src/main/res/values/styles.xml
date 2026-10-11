@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window animation for the app-limit blocker sheet: slides up from the bottom edge. -->
+    <style name="AppLimitBlockerSheetAnimation">
+        <item name="android:windowEnterAnimation">@anim/applimit_sheet_enter</item>
+    </style>
+</resources>

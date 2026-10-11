@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -17,10 +18,15 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import com.example.R
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
 import com.example.feature.applimits.engine.AppLimitStrictModeEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Native floating WindowManager overlay that appears directly on top of limited applications
@@ -30,6 +36,7 @@ object AppLimitFloatingOverlayManager {
 
     private const val TAG = "AppLimitFloatingOverlay"
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     @Volatile
     private var overlayView: View? = null
@@ -210,9 +217,14 @@ object AppLimitFloatingOverlayManager {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
+            gravity = Gravity.BOTTOM
+            windowAnimations = R.style.AppLimitBlockerSheetAnimation
         }
     }
+
+    // ---------------------------------------------------------------------------------------
+    // Bottom-sheet layout (issue #68)
+    // ---------------------------------------------------------------------------------------
 
     private fun buildOverlayView(
         context: Context,
@@ -230,28 +242,32 @@ object AppLimitFloatingOverlayManager {
         val density = context.resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
 
-        // Root container: Full screen translucent scrim directly over the limited app
+        val isExhausted = mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED
+
+        // Root: full-screen translucent scrim; the sheet itself is anchored to the bottom edge.
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(20), dp(24), dp(20), dp(24))
+            gravity = Gravity.BOTTOM
             setBackgroundColor(Color.parseColor("#CC08090C"))
         }
 
-        // Floating Card
-        val card = LinearLayout(context).apply {
+        // Sheet: full-width, rounded top corners, slides up from the bottom edge.
+        val sheet = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(22), dp(22), dp(20))
+            setPadding(dp(20), dp(16), dp(20), dp(20))
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#17181F"))
-                cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.parseColor("#2E313D"))
+                val radius = dp(28).toFloat()
+                // top-left, top-right, bottom-right, bottom-left (x,y pairs)
+                cornerRadii = floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f)
             }
-            elevation = dp(16).toFloat()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
 
-        // Top Row: Brand Mark + Strict badge (if strict)
+        // --- Top row: brand mark (left) + "Turn off" pill (right) ---
         val topRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -271,117 +287,75 @@ object AppLimitFloatingOverlayManager {
             )
         }
         topRow.addView(brandIcon)
+        topRow.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        )
+        topRow.addView(turnOffPill(context, packageName, appName))
+        sheet.addView(topRow)
 
-        if (isStrict) {
-            val strictBadge = TextView(context).apply {
-                text = "🔒 Strict Mode"
-                textSize = 11f
-                setTextColor(Color.parseColor("#F87171"))
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                setPadding(dp(10), dp(4), dp(10), dp(4))
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#2A171A"))
-                    cornerRadius = dp(12).toFloat()
-                    setStroke(dp(1), Color.parseColor("#4A2024"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    leftMargin = dp(8)
-                }
-            }
-            topRow.addView(strictBadge)
+        // --- Strict-mode upsell banner (only when strict mode is off for this app) ---
+        if (!isStrict) {
+            sheet.addView(strictModeBanner(context))
         }
 
-        // Header Title
-        val titleText = TextView(context).apply {
-            text = appName
-            textSize = 20f
-            setTextColor(Color.WHITE)
+        // --- Usage stats card ---
+        sheet.addView(
+            statsCard(
+                context = context,
+                packageName = packageName,
+                usedMinutes = usedMinutes,
+                remainingDailyMinutes = remainingDailyMinutes,
+                dailyLimitMinutes = dailyLimitMinutes,
+                streakDays = streakDays,
+                isExhausted = isExhausted
+            )
+        )
+
+        // --- Prompt ---
+        val promptText = TextView(context).apply {
+            text = "How long do you want to use?"
+            textSize = 14f
+            setTextColor(Color.parseColor("#E2E8F0"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(12))
         }
+        sheet.addView(promptText)
 
-        // Subtitle / Usage stat
-        val isExhausted = mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED
-        val statusText = TextView(context).apply {
-            text = if (isExhausted) {
-                "Daily limit of ${dailyLimitMinutes}m reached for today"
-            } else {
-                "${remainingDailyMinutes}m remaining today • Used ${usedMinutes}m"
-            }
-            textSize = 13f
-            setTextColor(if (isExhausted) Color.parseColor("#F87171") else Color.parseColor("#94A3B8"))
-            gravity = Gravity.CENTER
-            setPadding(0, dp(4), 0, dp(16))
-        }
-
-        card.addView(topRow)
-        card.addView(titleText)
-        card.addView(statusText)
-
-        // If awaiting selection: show choice buttons
         if (!isExhausted) {
-            val promptText = TextView(context).apply {
-                text = "How long do you want to use $appName?"
-                textSize = 14f
-                setTextColor(Color.parseColor("#E2E8F0"))
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                gravity = Gravity.CENTER
-                setPadding(0, 0, 0, dp(12))
-            }
-            card.addView(promptText)
-
-            // Duration options row
-            val durationRow = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = dp(16) }
-            }
-
-            val options = listOf(5, 10, 15, 30).filter { it <= remainingDailyMinutes.coerceAtLeast(5) }
+            // --- Duration options in a 2-column grid (2 / 5 / 10 / 20 mins) ---
+            val options = listOf(2, 5, 10, 20)
+                .filter { it <= remainingDailyMinutes.coerceAtLeast(2) }
                 .ifEmpty { listOf(remainingDailyMinutes.coerceAtLeast(1)) }
 
-            for (mins in options) {
-                val btn = TextView(context).apply {
-                    text = "${mins}m"
-                    textSize = 14f
-                    setTextColor(Color.WHITE)
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    gravity = Gravity.CENTER
-                    setPadding(dp(16), dp(10), dp(16), dp(10))
-                    background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#272A36"))
-                        cornerRadius = dp(14).toFloat()
-                        setStroke(dp(1), Color.parseColor("#3B4052"))
-                    }
+            options.chunked(2).forEachIndexed { index, row ->
+                val durationRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                    ).apply {
-                        leftMargin = dp(4)
-                        rightMargin = dp(4)
-                    }
-                    setOnClickListener {
-                        hideOverlay()
-                        AppLimitManager.instance.startTemporarySession(
-                            packageName = packageName,
-                            appName = appName,
-                            durationMinutes = mins
-                        )
-                        // User remains right here in the limited app!
-                    }
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { if (index > 0) topMargin = dp(10) }
                 }
-                durationRow.addView(btn)
+                for (mins in row) {
+                    durationRow.addView(
+                        durationButton(context, packageName, appName, mins),
+                        LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+                            leftMargin = dp(4)
+                            rightMargin = dp(4)
+                        }
+                    )
+                }
+                if (row.size == 1) {
+                    durationRow.addView(
+                        View(context),
+                        LinearLayout.LayoutParams(0, 0, 1f)
+                    )
+                }
+                sheet.addView(durationRow)
             }
-            card.addView(durationRow)
         } else {
-            // Daily limit reached: Emergency option if permitted
+            // Daily limit reached: emergency pass if permitted
             val remainingEmergencies = (emergencyUsesAllowed - emergencyUsesCount).coerceAtLeast(0)
             if (remainingEmergencies > 0 && !isStrict) {
                 val emergencyBtn = TextView(context).apply {
@@ -390,7 +364,7 @@ object AppLimitFloatingOverlayManager {
                     setTextColor(Color.parseColor("#FBBF24"))
                     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     gravity = Gravity.CENTER
-                    setPadding(dp(16), dp(12), dp(16), dp(12))
+                    setPadding(dp(16), dp(14), dp(16), dp(14))
                     background = GradientDrawable().apply {
                         setColor(Color.parseColor("#261F12"))
                         cornerRadius = dp(16).toFloat()
@@ -399,58 +373,379 @@ object AppLimitFloatingOverlayManager {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { bottomMargin = dp(12) }
+                    ).apply { topMargin = dp(12) }
                     setOnClickListener {
                         hideOverlay()
                         AppLimitManager.instance.startEmergencySession(packageName, appName) { started ->
                             if (!started) {
-                                android.widget.Toast.makeText(context, "No emergency passes left", android.widget.Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "No emergency passes left", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                 }
-                card.addView(emergencyBtn)
+                sheet.addView(emergencyBtn)
             }
         }
 
-        // Close App Button (Returns user to launcher Home without opening FocusShield)
+        // --- Close button (green, full width; returns the user to the launcher Home) ---
         val closeBtn = TextView(context).apply {
             text = "Close $appName"
-            textSize = 14f
-            setTextColor(Color.WHITE)
+            textSize = 15f
+            setTextColor(Color.parseColor("#4ADE80"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(dp(20), dp(12), dp(20), dp(12))
+            setPadding(dp(20), dp(14), dp(20), dp(14))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#8B5CF6"))
+                setColor(Color.parseColor("#123524"))
                 cornerRadius = dp(16).toFloat()
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+                dp(52)
+            ).apply { topMargin = dp(14) }
             setOnClickListener {
                 hideOverlay()
                 AppLimitManager.instance.onBlockerDismissedByUser(packageName)
-                val service = com.example.core.accessibility.FocusAccessibilityService.instance
-                if (service != null) {
-                    service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
-                } else {
-                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                        addCategory(Intent.CATEGORY_HOME)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    context.startActivity(homeIntent)
-                }
+                goHome(context)
             }
         }
-        card.addView(closeBtn)
+        sheet.addView(closeBtn)
 
-        root.addView(card, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
-
+        root.addView(sheet)
         return root
+    }
+
+    /** "Turn off" pill: power glyph + label; strict mode refuses with a toast (issue #68). */
+    private fun turnOffPill(context: Context, packageName: String, appName: String): View {
+        val pill = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(context, 12), dp(context, 7), dp(context, 14), dp(context, 7))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#272A36"))
+                cornerRadius = dp(context, 20).toFloat()
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onTurnOffClicked(context, packageName, appName) }
+        }
+        pill.addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_power_settings)
+            layoutParams = LinearLayout.LayoutParams(dp(context, 15), dp(context, 15))
+        })
+        pill.addView(TextView(context).apply {
+            text = "Turn off"
+            textSize = 12f
+            setTextColor(Color.parseColor("#E2E8F0"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(context, 6) }
+        })
+        return pill
+    }
+
+    /**
+     * Turns the limited app's block off for today — unless strict mode forbids it, in which
+     * case the pill does nothing but explain why. Then it leaves to Home so the now-allowed
+     * app is not sitting behind the blocker.
+     */
+    private fun onTurnOffClicked(context: Context, packageName: String, appName: String) {
+        overlayScope.launch {
+            val allowed = try {
+                AppLimitStrictModeEngine.instance.canTurnOffLimit(packageName)
+            } catch (_: Exception) {
+                false
+            }
+            if (!allowed) {
+                Toast.makeText(
+                    context,
+                    "Strict Mode is on: $appName's limit can't be turned off",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            hideOverlay()
+            AppLimitManager.instance.leaveBlockForToday(packageName)
+            Log.i(TAG, "Limit for $appName ($packageName) turned off for today by the user")
+            goHome(context)
+        }
+    }
+
+    /** Amber upsell banner; tapping anywhere on it opens FocusShield. */
+    private fun strictModeBanner(context: Context): View {
+        val banner = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(context, 14), dp(context, 12), dp(context, 14), dp(context, 12))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#2E2610"))
+                cornerRadius = dp(context, 16).toFloat()
+                setStroke(dp(context, 1), Color.parseColor("#5C4A1A"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(context, 4) }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { openFocusShield(context) }
+        }
+        banner.addView(TextView(context).apply {
+            text = "🔒"
+            textSize = 14f
+        })
+        banner.addView(TextView(context).apply {
+            text = "Introducing Strict Mode"
+            textSize = 13f
+            setTextColor(Color.parseColor("#FBBF24"))
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(context, 8) }
+        })
+        banner.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        )
+        banner.addView(TextView(context).apply {
+            text = "Try now ›"
+            textSize = 13f
+            setTextColor(Color.parseColor("#FBBF24"))
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        })
+        return banner
+    }
+
+    /**
+     * Stats card: app icon + daily limit, streak, a usage progress bar, and the
+     * "Spent today" / "Limit left" pair.
+     */
+    private fun statsCard(
+        context: Context,
+        packageName: String,
+        usedMinutes: Int,
+        remainingDailyMinutes: Int,
+        dailyLimitMinutes: Int,
+        streakDays: Int,
+        isExhausted: Boolean
+    ): View {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(context, 16), dp(context, 14), dp(context, 16), dp(context, 14))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1F2027"))
+                cornerRadius = dp(context, 18).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(context, 12) }
+        }
+
+        val row1 = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val appIcon = loadAppIcon(context, packageName)
+        if (appIcon != null) {
+            row1.addView(ImageView(context).apply {
+                setImageDrawable(appIcon)
+                layoutParams = LinearLayout.LayoutParams(dp(context, 24), dp(context, 24))
+            })
+        }
+        row1.addView(TextView(context).apply {
+            text = "${formatMinutes(dailyLimitMinutes)} limit"
+            textSize = 13f
+            setTextColor(Color.parseColor("#E2E8F0"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(context, 8) }
+        })
+        row1.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        )
+        row1.addView(TextView(context).apply {
+            text = "🔥 $streakDays days"
+            textSize = 12f
+            setTextColor(Color.parseColor("#F59E0B"))
+        })
+        card.addView(row1)
+
+        // Progress bar: red fill for the used share of the daily limit.
+        val total = dailyLimitMinutes.coerceAtLeast(1)
+        val usedFraction = (usedMinutes.toFloat() / total.toFloat()).coerceIn(0.001f, 1f)
+        val track = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#262A36"))
+                cornerRadius = dp(context, 4).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(context, 8)
+            ).apply { topMargin = dp(context, 12) }
+        }
+        track.addView(
+            View(context).apply {
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#EF4444"))
+                    cornerRadius = dp(context, 4).toFloat()
+                }
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, usedFraction)
+        )
+        track.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f - usedFraction)
+        )
+        card.addView(track)
+
+        val row3 = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(context, 10) }
+        }
+        row3.addView(TextView(context).apply {
+            text = formatMinutes(usedMinutes)
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        })
+        row3.addView(TextView(context).apply {
+            text = "Spent today"
+            textSize = 11f
+            setTextColor(Color.parseColor("#94A3B8"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(context, 5) }
+        })
+        row3.addView(
+            View(context),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        )
+        row3.addView(TextView(context).apply {
+            text = formatMinutes(remainingDailyMinutes)
+            textSize = 16f
+            setTextColor(if (isExhausted) Color.parseColor("#F87171") else Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        })
+        row3.addView(TextView(context).apply {
+            text = "Limit left"
+            textSize = 11f
+            setTextColor(Color.parseColor("#94A3B8"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(context, 5) }
+        })
+        card.addView(row3)
+        return card
+    }
+
+    /** One duration pill; starts the chosen usage session and keeps the user in the app. */
+    private fun durationButton(
+        context: Context,
+        packageName: String,
+        appName: String,
+        minutes: Int
+    ): View {
+        return TextView(context).apply {
+            text = "$minutes mins"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#272A36"))
+                cornerRadius = dp(context, 14).toFloat()
+                setStroke(dp(context, 1), Color.parseColor("#3B4052"))
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                hideOverlay()
+                AppLimitManager.instance.startTemporarySession(
+                    packageName = packageName,
+                    appName = appName,
+                    durationMinutes = minutes
+                )
+                // User remains right here in the limited app!
+            }
+        }
+    }
+
+    private fun loadAppIcon(context: Context, packageName: String): Drawable? =
+        try {
+            context.packageManager.getApplicationIcon(packageName)
+        } catch (_: Exception) {
+            null
+        }
+
+    /** "95m", "4h", "4h 35m" — the reference sheet's minute/hour format. */
+    private fun formatMinutes(minutes: Int): String {
+        val safeMinutes = minutes.coerceAtLeast(0)
+        return if (safeMinutes >= 60) {
+            val hours = safeMinutes / 60
+            val mins = safeMinutes % 60
+            if (mins == 0) "${hours}h" else "${hours}h ${mins}m"
+        } else {
+            "${safeMinutes}m"
+        }
+    }
+
+    private fun dp(context: Context, value: Int): Int =
+        (value * context.resources.displayMetrics.density).toInt()
+
+    /** Leaves to the launcher, preferring the accessibility service's global HOME action. */
+    private fun goHome(context: Context) {
+        val service = com.example.core.accessibility.FocusAccessibilityService.instance
+        if (service != null) {
+            try {
+                service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+                return
+            } catch (_: Exception) {
+                // fall through to the intent
+            }
+        }
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(homeIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to return home: ${e.message}")
+        }
+    }
+
+    /** Opens the FocusShield app itself (strict-mode upsell, "Try now"). */
+    private fun openFocusShield(context: Context) {
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            if (intent == null) {
+                Log.w(TAG, "No launch intent for FocusShield; cannot open the app")
+                return
+            }
+            val service = com.example.core.accessibility.FocusAccessibilityService.instance
+            if (service != null) {
+                try {
+                    service.startActivity(intent)
+                    return
+                } catch (_: Exception) {
+                    // fall through to the plain context
+                }
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open FocusShield: ${e.message}")
+        }
     }
 }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bottom-sheet window animation for the floating app-limit blocker (issue #68). -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:anim/decelerate_interpolator">
+    <translate
+        android:duration="260"
+        android:fromYDelta="100%p"
+        android:toYDelta="0" />
+    <alpha
+        android:duration="160"
+        android:fromAlpha="0.0"
+        android:toAlpha="1.0" />
+</set>
