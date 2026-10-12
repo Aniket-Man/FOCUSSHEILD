@@ -62,6 +62,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,15 +106,24 @@ import com.example.feature.session.ui.BreakRequestDialog
 fun ActiveSessionScreen(
     viewModel: SessionViewModel,
     onNavigateBack: () -> Unit,
+    onNavigateToSummary: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.activeSessionState.collectAsStateWithLifecycle()
+    val pendingSummary by viewModel.pendingSessionSummary.collectAsStateWithLifecycle()
     val pendingScratchCard by viewModel.pendingScratchCard.collectAsStateWithLifecycle()
     var showEndSessionDialog by remember { mutableStateOf(false) }
     var showStrictPauseDialog by remember { mutableStateOf(false) }
     var showStrictLockDialog by remember { mutableStateOf(false) }
     var showBreakDialog by remember { mutableStateOf(false) }
     var showProtectionSetupDialog by remember { mutableStateOf(false) }
+
+    // When session summary is prepared (upon ending or completing), navigate to summary screen
+    LaunchedEffect(pendingSummary) {
+        if (pendingSummary != null) {
+            onNavigateToSummary()
+        }
+    }
 
     val hasOpenDialog = showProtectionSetupDialog || showBreakDialog || showStrictPauseDialog || showStrictLockDialog || showEndSessionDialog
 
@@ -290,7 +300,7 @@ fun ActiveSessionScreen(
                 },
                 text = {
                     Text(
-                        text = "Are you sure you want to end this study session? Your focus time will be saved.",
+                        text = "Are you sure you want to end this study session? You will be able to review all recorded data before saving.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
@@ -298,7 +308,10 @@ fun ActiveSessionScreen(
                     TextButton(
                         onClick = {
                             showEndSessionDialog = false
-                            viewModel.endSession()
+                            val ended = viewModel.endSession()
+                            if (ended != null) {
+                                onNavigateToSummary()
+                            }
                         },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = FocusColors.CoralWarning

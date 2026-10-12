@@ -42,6 +42,7 @@ import com.example.feature.session.ModeSelectionScreen
 import com.example.feature.session.SessionSetupScreen
 import com.example.feature.session.SessionViewModel
 import com.example.feature.session.StartSessionScreen
+import com.example.feature.session.ui.FocusSessionSummaryScreen
 import com.example.feature.session.notification.PlanLaunchPayload
 import com.example.feature.settings.SettingsScreen
 import com.example.feature.settings.SettingsViewModel
@@ -328,8 +329,38 @@ fun FocusNavGraph(
                 viewModel = sessionViewModel,
                 onNavigateBack = {
                     navController.popBackStack(Screen.Home.route, inclusive = false)
+                },
+                onNavigateToSummary = {
+                    navController.navigate(Screen.SessionSummary.route) {
+                        popUpTo(Screen.Home.route)
+                    }
                 }
             )
+        }
+
+        // SUB-SCREEN: SESSION SUMMARY (POST-SESSION METRICS & SAVE / DON'T SAVE DECISION)
+        composable(Screen.SessionSummary.route) {
+            val pendingSummary by sessionViewModel.pendingSessionSummary.collectAsStateWithLifecycle()
+            if (pendingSummary != null) {
+                FocusSessionSummaryScreen(
+                    summaryData = pendingSummary!!,
+                    onSaveSession = {
+                        sessionViewModel.savePendingSession {
+                            navController.popBackStack(Screen.Home.route, inclusive = false)
+                        }
+                    },
+                    onDiscardSession = {
+                        sessionViewModel.discardPendingSession {
+                            navController.popBackStack(Screen.Home.route, inclusive = false)
+                        }
+                    }
+                )
+            } else {
+                // If summary is null (e.g. back navigation or cleared), return to Home
+                LaunchedEffect(Unit) {
+                    navController.popBackStack(Screen.Home.route, inclusive = false)
+                }
+            }
         }
 
         // SUB-SCREEN: BLOCKED APPS

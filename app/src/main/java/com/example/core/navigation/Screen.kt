@@ -14,6 +14,7 @@ sealed class Screen(val route: String) {
     object ModeSelection : Screen("mode_selection")
     object SessionSetup : Screen("session_setup")
     object ActiveSession : Screen("active_session")
+    object SessionSummary : Screen("session_summary")
 
     // Sub-screens
     object Account : Screen("account")

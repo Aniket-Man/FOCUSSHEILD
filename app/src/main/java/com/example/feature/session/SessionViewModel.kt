@@ -12,6 +12,7 @@ import com.example.feature.session.domain.ManualBreakInfo
 import com.example.feature.session.domain.PomodoroConfig
 import com.example.feature.session.domain.PomodoroPhase
 import com.example.feature.session.domain.SessionState
+import com.example.feature.session.domain.SessionSummaryData
 import com.example.feature.session.domain.StrictModeConfig
 import com.example.feature.session.engine.FocusSessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,6 +106,13 @@ class SessionViewModel(
     private val _setupState = MutableStateFlow(SessionSetupState())
     val setupState: StateFlow<SessionSetupState> = _setupState
 
+    private val _pendingSessionSummary = MutableStateFlow<SessionSummaryData?>(null)
+    /**
+     * Session summary data shown on the post-session summary screen.
+     * Contains all metrics taken during the session, allowing the user to Save or Discard.
+     */
+    val pendingSessionSummary: StateFlow<SessionSummaryData?> = _pendingSessionSummary.asStateFlow()
+
     init {
         // Observe global preferences to keep setup state in sync
         viewModelScope.launch {
@@ -135,11 +143,15 @@ class SessionViewModel(
             }
         }
 
-        // Automatically persist sessions when natural completion occurs (e.g. Timer 0 reached)
+        // When natural completion occurs (e.g. Timer 0 reached, Pomodoro cycles complete),
+        // prepare session summary data for the post-session review screen so the user can review
+        // and choose to Save or Don't Save.
         viewModelScope.launch {
             sessionManager.activeSession.collectLatest { session ->
                 if (session != null && session.state == SessionState.COMPLETED) {
-                    persistSessionRecord(session, isCompleted = true, isCancelled = false)
+                    val summary = buildSummaryData(session, isCompleted = true, isCancelled = false)
+                    _pendingSessionSummary.value = summary
+                    fetchDistractionsBlockedCountAsync(session.id)
                     try {
                         val context = FocusShieldApp.instance
                         sessionManager.clearActiveSessionFromDisk(context)
@@ -700,7 +712,10 @@ class SessionViewModel(
             com.example.feature.session.service.FocusSessionForegroundService.stop(context)
         } catch (e: Exception) { }
         if (current != null) {
-            persistSessionRecord(current, isCompleted = true, isCancelled = false)
+            // Build summary data for user review and explicit Save/Don't Save decision
+            val summary = buildSummaryData(current, isCompleted = true, isCancelled = false)
+            _pendingSessionSummary.value = summary
+            fetchDistractionsBlockedCountAsync(current.id)
         }
         return current
     }
@@ -720,12 +735,103 @@ class SessionViewModel(
             com.example.feature.session.service.FocusSessionForegroundService.stop(context)
         } catch (e: Exception) { }
         if (current != null) {
-            persistSessionRecord(current, isCompleted = false, isCancelled = true)
+            // Build summary data for user review and explicit Save/Don't Save decision
+            val summary = buildSummaryData(current, isCompleted = false, isCancelled = true)
+            _pendingSessionSummary.value = summary
+            fetchDistractionsBlockedCountAsync(current.id)
         }
         return current
     }
 
+    /**
+     * Builds complete telemetry and metrics summary from a finished FocusSession.
+     */
+    fun buildSummaryData(
+        session: FocusSession,
+        isCompleted: Boolean,
+        isCancelled: Boolean
+    ): SessionSummaryData {
+        val actualStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
+            session = session,
+            isCompleted = isCompleted
+        )
+        val now = System.currentTimeMillis()
+        val completedCycles = if (session.mode == SessionMode.POMODORO) {
+            if (isCompleted) session.totalCycles else (session.currentCycle - 1).coerceAtLeast(0)
+        } else 0
+
+        val isYouTubeStudyMode = _setupState.value.isYouTubeStudyModeEnabled || session.isStudyChannelsEnabled
+
+        return SessionSummaryData(
+            sessionId = session.id,
+            mode = session.mode,
+            subject = session.subject,
+            topic = session.topic,
+            goal = session.goal,
+            startedAt = session.startedAt,
+            endedAt = now,
+            plannedDurationMillis = session.plannedDurationMillis,
+            pureStudyDurationMillis = actualStudyTime,
+            totalBreakDurationMillis = session.totalBreakDurationMillis,
+            isCompleted = isCompleted,
+            isCancelled = isCancelled,
+            isStrictModeEnabled = session.isStrictModeEnabled,
+            isAppBlockingEnabled = session.isAppBlockingEnabled,
+            isStudyChannelsEnabled = session.isStudyChannelsEnabled,
+            isYouTubeStudyModeEnabled = isYouTubeStudyMode,
+            isBrowserStudyModeEnabled = session.isBrowserStudyModeEnabled,
+            blockedAppsCount = session.blockedAppPackages.size,
+            distractionsBlockedCount = 0,
+            completedPomodoroCycles = completedCycles,
+            totalPomodoroCycles = session.totalCycles,
+            lapsCount = session.laps.size,
+            rawSession = session
+        )
+    }
+
+    private fun fetchDistractionsBlockedCountAsync(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                val db = FocusShieldApp.instance.database
+                val count = db.blockedAttemptDao().getAttemptCountForSession(sessionId)
+                _pendingSessionSummary.update { current ->
+                    current?.copy(distractionsBlockedCount = count)
+                }
+            } catch (e: Exception) {
+                // Ignore in isolated unit test environments
+            }
+        }
+    }
+
+    /**
+     * User clicked "Save Session": stores the session data into local Room database and cloud sync.
+     */
+    fun savePendingSession(onComplete: () -> Unit = {}) {
+        val summary = _pendingSessionSummary.value
+        val session = summary?.rawSession ?: sessionManager.activeSession.value
+        if (session != null) {
+            persistSessionRecord(
+                session = session,
+                isCompleted = summary?.isCompleted ?: true,
+                isCancelled = summary?.isCancelled ?: false
+            )
+        }
+        _pendingSessionSummary.value = null
+        resetToIdle()
+        onComplete()
+    }
+
+    /**
+     * User clicked "Don't Save": discards session data without writing to database.
+     */
+    fun discardPendingSession(onComplete: () -> Unit = {}) {
+        _pendingSessionSummary.value = null
+        resetToIdle()
+        onComplete()
+    }
+
     fun resetToIdle() {
+        _pendingSessionSummary.value = null
         sessionManager.resetToIdle()
         try {
             val context = FocusShieldApp.instance
