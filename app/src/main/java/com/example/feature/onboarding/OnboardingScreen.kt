@@ -111,6 +111,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.cloud.auth.GoogleWebClientId
 import com.example.core.design.FocusColors
 import com.example.core.design.LocalFocusColors
 import com.example.core.design.FocusSpacing
@@ -1473,9 +1474,8 @@ private fun OnboardingGoogleSignInPage(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     fun launchGoogleSignIn() {
-        val clientId = try {
-            context.getString(R.string.default_web_client_id)
-        } catch (e: Exception) {
+        val clientId = GoogleWebClientId.resolve(context)
+        if (clientId == null) {
             errorMessage = "Google Sign-In configuration missing"
             return
         }

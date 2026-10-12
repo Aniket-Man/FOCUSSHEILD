@@ -9,11 +9,15 @@ import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.MemoryCacheSettings
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assume
 import org.junit.Before
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -67,7 +71,34 @@ abstract class FirestoreEmulatorTestBase {
     auth.signOut()
   }
 
+  /** True when both emulator ports accept a TCP connection on this machine. */
+  private fun emulatorsReachable(): Boolean {
+    for (port in listOf(FIRESTORE_PORT, AUTH_PORT)) {
+      try {
+        Socket().use { socket ->
+          socket.connect(InetSocketAddress(EMULATOR_HOST, port), EMULATOR_PROBE_TIMEOUT_MS)
+        }
+      } catch (_: IOException) {
+        return false
+      }
+    }
+    return true
+  }
+
   protected suspend fun signInTestUser(email: String): String = withContext(Dispatchers.IO) {
+    // These tests exercise the Firestore/Auth emulators directly. CI (and any machine
+    // without them) must skip rather than fail: an unreachable emulator is an unmet
+    // precondition, not a rule violation (issue #31's "fresh clone builds and tests pass"
+    // contract). The guard lives in the first call every test makes — deliberately NOT in
+    // setUpFirebase: under Robolectric's INSTRUMENTATION_TEST looper mode an assumption
+    // violated in @Before is delivered asynchronously, so the test body still runs against
+    // the un-initialised fields ("Test could not be skipped"). Propagated from here it is a
+    // plain synchronous AssumptionViolatedException the test method throws, which JUnit
+    // turns into a skip.
+    Assume.assumeTrue(
+        "Firestore/Auth emulators are not running on $EMULATOR_HOST; skipping",
+        emulatorsReachable()
+    )
     withTimeout(AUTH_TIMEOUT_MS) {
       val result = try {
         auth.signInWithEmailAndPassword(email, DEFAULT_PASSWORD).await()
@@ -85,5 +116,6 @@ abstract class FirestoreEmulatorTestBase {
     const val PROJECT_ID = "demo-no-project"
     const val DEFAULT_PASSWORD = "password123"
     const val AUTH_TIMEOUT_MS = 5000L
+    const val EMULATOR_PROBE_TIMEOUT_MS = 500
   }
 }

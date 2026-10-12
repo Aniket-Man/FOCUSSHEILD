@@ -17,7 +17,7 @@ import com.example.data.repository.AppLimitRepository
 import com.example.data.repository.BlockedAttemptRepository
 import com.example.feature.applimits.ui.AppLimitOverlayActivity
 import com.example.feature.applimits.ui.AppLimitFloatingOverlayManager
-import com.example.feature.session.engine.FocusSessionManager
+import com.example.feature.blocker.FocusBlockerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,8 +78,7 @@ class AppLimitManager private constructor(
     private val appContext: Context,
     private val appLimitRepository: AppLimitRepository,
     private val preferencesRepository: FocusPreferencesRepository,
-    private val blockedAttemptRepository: BlockedAttemptRepository,
-    private val sessionManager: FocusSessionManager = FocusSessionManager.instance
+    private val blockedAttemptRepository: BlockedAttemptRepository
 ) {
     private val tag = "AppLimitManager"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -326,18 +325,19 @@ class AppLimitManager private constructor(
     /**
      * Checks whether the given package is allowed or requires App Limit intervention.
      * Evaluates:
-     * 1. If Focus Session is RUNNING and app is blocked by session -> Focus Session has absolute priority (return false).
+     * 1. If a running Focus Session itself blocks this package -> the session owns the
+     *    decision and this engine yields (its blocker was already raised upstream).
      * 2. If app is not limited -> Allowed.
      * 3. If app is bypassed for today -> Allowed.
      * 4. If active temporary session is running -> Allowed.
      * 5. Otherwise -> Requires App Limit intervention (Prompt selection or Show blocker).
      */
     suspend fun checkAppLimitDecision(packageName: String): AppLimitDecision {
-        // Priority 1: Focus Session has absolute priority
-        val focusSession = sessionManager.activeSession.value
-        val isFocusRunning = sessionManager.sessionState.value == com.example.feature.session.domain.SessionState.RUNNING
-        if (isFocusRunning && focusSession != null) {
-            // Focus session takes full priority; App Limit engine yields to Focus Block Engine
+        // A running session only owns the packages it blocks itself (issue #73). Before this
+        // was scoped, ANY running session returned early for EVERY package, so while a
+        // session ran no app limit fired at all — the blocker never appeared for the
+        // limited app, which is the bug this closes.
+        if (isBlockedByRunningFocusSession(packageName)) {
             return AppLimitDecision.ALLOW_FOCUS_SESSION_RULES
         }
 
@@ -1243,14 +1243,15 @@ class AppLimitManager private constructor(
      * PERMISSION_DENIED/QUERY_FAILED mid-retry flipped the verdict to "not blocked" and
      * silently cancelled a block that was valid when the loop started (issue #49, O2).
      * So the usage numbers are never re-read here — only the cheap, structural state that can
-     * genuinely retire a pending block: Focus Session taking over, a started session, the
-     * limit turned off or deleted, today's bypass.
+     * genuinely retire a pending block: a session that itself blocks this package taking over,
+     * a started session, the limit turned off or deleted, today's bypass.
      */
     private suspend fun shouldStillShowOverlay(packageName: String): Boolean {
-        // Same answers checkAppLimitDecision gives for these cases, minus the usage query.
-        val focusSession = sessionManager.activeSession.value
-        val isFocusRunning = sessionManager.sessionState.value == com.example.feature.session.domain.SessionState.RUNNING
-        if (isFocusRunning && focusSession != null) return false // Focus Session owns the screen now
+        // Only a session that itself blocks this package retires the pending block — its own
+        // blocker is the one on screen then. A session that does NOT block the app leaves the
+        // app limit in force (issue #73); previously any running session stopped the retry
+        // loop outright, so the block never confirmed.
+        if (isBlockedByRunningFocusSession(packageName)) return false
 
         // The user picked a duration: the selection prompt has been answered.
         if (isSessionActiveFor(packageName)) return false
@@ -1276,6 +1277,26 @@ class AppLimitManager private constructor(
         if (usage?.isBypassedForToday == true) return false
 
         return true
+    }
+
+    /**
+     * True when a RUNNING Focus Session itself blocks [packageName] — the only case in which
+     * the session, not this engine, is the blocking authority for it (issue #73).
+     *
+     * Reads the live protection state. Any failure degrades to "the session does not block
+     * it", so the app limit stays in force instead of silently vanishing.
+     */
+    private fun isBlockedByRunningFocusSession(packageName: String): Boolean {
+        return try {
+            val state = FocusBlockerManager.instance.getCurrentProtectionState(System.currentTimeMillis())
+            FocusSessionAppLimitPolicy.sessionOwnsPackage(
+                sessionState = state.sessionState,
+                blockedPackages = state.blockedPackages,
+                packageName = packageName
+            )
+        } catch (_: Exception) {
+            false
+        }
     }
 
     companion object {
