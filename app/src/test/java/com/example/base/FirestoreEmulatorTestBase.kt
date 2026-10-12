@@ -35,15 +35,6 @@ abstract class FirestoreEmulatorTestBase {
 
   @Before
   open fun setUpFirebase() {
-    // These tests exercise the Firestore/Auth emulators directly. CI (and any machine
-    // without them) must skip rather than fail: an unreachable emulator is an unmet
-    // precondition, not a rule violation (issue #31's "fresh clone builds and tests pass"
-    // contract).
-    Assume.assumeTrue(
-        "Firestore/Auth emulators are not running on $EMULATOR_HOST; skipping",
-        emulatorsReachable()
-    )
-
     val context = ApplicationProvider.getApplicationContext<Context>()
     val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
     databaseId = if (resId != 0) context.getString(resId) else "demo-database"
@@ -95,6 +86,19 @@ abstract class FirestoreEmulatorTestBase {
   }
 
   protected suspend fun signInTestUser(email: String): String = withContext(Dispatchers.IO) {
+    // These tests exercise the Firestore/Auth emulators directly. CI (and any machine
+    // without them) must skip rather than fail: an unreachable emulator is an unmet
+    // precondition, not a rule violation (issue #31's "fresh clone builds and tests pass"
+    // contract). The guard lives in the first call every test makes — deliberately NOT in
+    // setUpFirebase: under Robolectric's INSTRUMENTATION_TEST looper mode an assumption
+    // violated in @Before is delivered asynchronously, so the test body still runs against
+    // the un-initialised fields ("Test could not be skipped"). Propagated from here it is a
+    // plain synchronous AssumptionViolatedException the test method throws, which JUnit
+    // turns into a skip.
+    Assume.assumeTrue(
+        "Firestore/Auth emulators are not running on $EMULATOR_HOST; skipping",
+        emulatorsReachable()
+    )
     withTimeout(AUTH_TIMEOUT_MS) {
       val result = try {
         auth.signInWithEmailAndPassword(email, DEFAULT_PASSWORD).await()
