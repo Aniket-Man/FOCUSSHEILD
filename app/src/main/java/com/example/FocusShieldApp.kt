@@ -10,6 +10,8 @@ import com.example.cloud.net.ConnectivityMonitor
 import com.example.cloud.sync.CloudInstallState
 import com.example.cloud.sync.SyncEngine
 import com.example.cloud.sync.SyncGateway
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.example.cloud.sync.SyncTracker
 import com.example.cloud.sync.SyncedPreferencesObserver
 import com.example.core.util.ChannelLogoStorageManager
@@ -137,6 +139,26 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        // The cloud layer is optional: a fresh clone (and CI) has no google-services.json,
+        // so the FirebaseInitProvider never runs and wiring sync below would throw from
+        // FirebaseApp.getInstance(). Register a placeholder app in that case — cloud
+        // features then construct cleanly and their absent network calls fail gracefully
+        // (issue #31: a fresh clone must boot and test green). With a real
+        // google-services.json the provider has already initialized Firebase before this
+        // runs, so this is a no-op on developer/user builds.
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            runCatching {
+                FirebaseApp.initializeApp(
+                    this,
+                    FirebaseOptions.Builder()
+                        .setApplicationId("com.example.app")
+                        .setProjectId("focusshield-offline")
+                        .setApiKey("offline-placeholder-key")
+                        .build()
+                )
+            }
+        }
 
         // Initialize AccessibilityHelper reactive state & system observers
         com.example.core.accessibility.AccessibilityHelper.init(this)

@@ -70,7 +70,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.example.R
+import com.example.cloud.auth.GoogleWebClientId
 import com.example.cloud.auth.AuthState
 import com.example.cloud.sync.SyncCycleOutcome
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -106,9 +106,8 @@ fun AccountScreen(
     }
 
     fun launchGoogleSignIn() {
-        val clientId = try {
-            context.getString(R.string.default_web_client_id)
-        } catch (e: Exception) {
+        val clientId = GoogleWebClientId.resolve(context)
+        if (clientId == null) {
             coroutineScope.launch { snackbarHostState.showSnackbar("Configuration missing: web client ID") }
             return
         }
