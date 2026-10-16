@@ -79,11 +79,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.pointerInput
@@ -102,8 +103,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import android.app.Activity
-import androidx.compose.material.icons.rounded.CloudDone
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -1532,6 +1531,90 @@ private fun OnboardingGoogleSignInPage(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
+        // Slow-drifting aurora behind the whole page. Two blobs on independent, prime-ish periods
+        // so the loop never visibly repeats, plus a soft vignette that keeps the headline legible
+        // wherever a blob happens to be bright.
+        val drift = rememberInfiniteTransition(label = "signInAurora")
+        val blobOneX by drift.animateFloat(
+            initialValue = -140f,
+            targetValue = -40f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(9000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "blobOneX"
+        )
+        val blobOneY by drift.animateFloat(
+            initialValue = 40f,
+            targetValue = 180f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(11000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "blobOneY"
+        )
+        val blobOneAlpha by drift.animateFloat(
+            initialValue = 0.26f,
+            targetValue = 0.46f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(5200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "blobOneAlpha"
+        )
+        val blobTwoX by drift.animateFloat(
+            initialValue = 190f,
+            targetValue = 60f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(13000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "blobTwoX"
+        )
+        val blobTwoY by drift.animateFloat(
+            initialValue = 320f,
+            targetValue = 210f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(8700, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "blobTwoY"
+        )
+
+        Box(
+            modifier = Modifier
+                .size(320.dp)
+                .offset(x = blobOneX.dp, y = blobOneY.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color(0xFF8B5CF6).copy(alpha = blobOneAlpha), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .size(380.dp)
+                .offset(x = blobTwoX.dp, y = blobTwoY.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color(0xFF4F46E5).copy(alpha = 0.30f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.55f to Color(0xFF05040A).copy(alpha = 0.35f),
+                        1f to Color(0xFF05040A).copy(alpha = 0.85f)
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1545,154 +1628,46 @@ private fun OnboardingGoogleSignInPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 20.dp)
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .background(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF8B5CF6).copy(alpha = 0.45f),
-                                    Color.Transparent
-                                )
-                            ),
-                            shape = CircleShape
-                        )
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_focus_shield_app_icon),
-                        contentDescription = "FocusShield Logo",
-                        modifier = Modifier.size(56.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Cloud Sync & Backup",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    ),
-                    textAlign = TextAlign.Center
+                ShieldHero(
+                    isSignedIn = currentUser != null,
+                    modifier = Modifier.staggerIn(0)
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
+                // One line of copy only. The screen used to carry a headline, a subtitle and three
+                // feature rows; the reassurance is the whole message now.
                 Text(
-                    text = "Sign in with Google to sync your study data, schedules, and profile image across devices.",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.White.copy(alpha = 0.7f),
-                        lineHeight = 20.sp
+                    text = "Your data is secure and safe",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        letterSpacing = (-0.2).sp
                     ),
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(0.9f)
+                    modifier = Modifier.staggerIn(90)
                 )
             }
 
-            // Signed In User Card or Benefits List
+            // Signed-in identity card (only when a Google account is already attached)
             val user = currentUser
             if (user != null) {
-                Box(
+                SignedInCloudCard(
+                    displayName = user.displayName,
+                    email = user.email,
+                    photoUrl = user.photoUrl?.toString(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 16.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF8B5CF6)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!user.photoUrl?.toString().isNullOrBlank()) {
-                                AsyncImage(
-                                    model = user.photoUrl?.toString(),
-                                    contentDescription = "Profile Photo",
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                )
-                            } else {
-                                Text(
-                                    text = (user.displayName?.firstOrNull() ?: user.email?.firstOrNull() ?: 'U').uppercase(),
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = user.displayName ?: "FocusShield User",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                )
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = "Signed In",
-                                    tint = Color(0xFF10B981),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Text(
-                                text = user.email ?: "",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            )
-                        }
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.White.copy(alpha = 0.05f))
-                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    OnboardingFeatureRow(
-                        icon = Icons.Rounded.CloudDone,
-                        title = "Cross-Device Sync",
-                        subtitle = "Sync schedules, blocklists & study stats automatically"
-                    )
-                    OnboardingFeatureRow(
-                        icon = Icons.Rounded.Person,
-                        title = "Profile Image Backup",
-                        subtitle = "Uploaded custom avatars restore instantly on new devices"
-                    )
-                    OnboardingFeatureRow(
-                        icon = Icons.Rounded.Security,
-                        title = "Secure Firebase Storage",
-                        subtitle = "Encrypted cloud persistence with zero-trust security"
-                    )
-                }
+                        .staggerIn(240)
+                )
             }
 
             // Bottom Actions
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .staggerIn(440)
                     .padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1731,6 +1706,19 @@ private fun OnboardingGoogleSignInPage(
                         )
                     }
                 } else {
+                    // Google-branded pill: a slow specular sweep crosses the surface so the primary
+                    // action reads as the most alive element on a static page.
+                    val shimmer = rememberInfiniteTransition(label = "signInShimmer")
+                    val sweep by shimmer.animateFloat(
+                        initialValue = -1.2f,
+                        targetValue = 2.2f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(2600, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "sweep"
+                    )
+
                     Button(
                         onClick = { launchGoogleSignIn() },
                         enabled = !isLoading,
@@ -1742,6 +1730,32 @@ private fun OnboardingGoogleSignInPage(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp)
+                            .graphicsLayer {
+                                // Sweep only while idle; a pulsing button behind a spinner reads
+                                // as a stuck control.
+                                shape = RoundedCornerShape(16.dp)
+                                clip = true
+                                alpha = 1f
+                                shadowElevation = if (isLoading) 0f else 14f
+                            }
+                            .drawWithContent {
+                                drawContent()
+                                if (!isLoading) {
+                                    val travel = size.width * 1.4f
+                                    val x = size.width * sweep
+                                    drawRect(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                Color.White.copy(alpha = 0.85f),
+                                                Color.Transparent
+                                            ),
+                                            start = androidx.compose.ui.geometry.Offset(x - travel / 2f, 0f),
+                                            end = androidx.compose.ui.geometry.Offset(x + travel / 2f, size.height)
+                                        )
+                                    )
+                                }
+                            }
                             .testTag("onboarding_google_sign_in_button")
                     ) {
                         if (isLoading) {
@@ -1749,6 +1763,14 @@ private fun OnboardingGoogleSignInPage(
                                 modifier = Modifier.size(24.dp),
                                 color = Color(0xFF8B5CF6),
                                 strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Connecting to Google…",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
                             )
                         } else {
                             Row(
@@ -1799,45 +1821,211 @@ private fun OnboardingGoogleSignInPage(
     }
 }
 
+/**
+ * Fades and lifts the annotated content in after [delayMillis].
+ *
+ * The whole page composes at once, so without this everything arrives as a single flat block at
+ * first frame. Call sites pass a different beat and the page assembles itself top-down.
+ *
+ * Exposed as a modifier rather than a wrapper composable so it can decorate any element — including
+ * a `Column` that has children — without forcing an extra nesting level. The animation is driven by
+ * a LaunchedEffect keyed on the delay, so it also re-runs when the pager brings this page back.
+ */
 @Composable
-private fun OnboardingFeatureRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String
+private fun Modifier.staggerIn(delayMillis: Int): Modifier {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(delayMillis) {
+        kotlinx.coroutines.delay(delayMillis.toLong())
+        shown = true
+    }
+    val progress by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+        label = "stagger"
+    )
+    return this.graphicsLayer {
+        alpha = progress
+        translationY = (1f - progress) * 26.dp.toPx()
+    }
+}
+
+/**
+ * The FocusShield shield inside a breathing halo with two sonar rings.
+ *
+ * Rings expand and fade on a 2.6s loop, phase-offset by 1.3s so exactly one ring is always visible;
+ * the halo pulses on a slower, out-of-phase beat so the two never move in lockstep.
+ */
+@Composable
+private fun ShieldHero(
+    isSignedIn: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    val pulse = rememberInfiniteTransition(label = "shieldHero")
+    val haloScale by pulse.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "haloScale"
+    )
+    val haloAlpha by pulse.animateFloat(
+        initialValue = 0.30f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "haloAlpha"
+    )
+    val ringProgress by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ring"
+    )
+
+    val accent = if (isSignedIn) Color(0xFF34D399) else Color(0xFF8B5CF6)
+
+    Box(
+        modifier = modifier.size(148.dp),
+        contentAlignment = Alignment.Center
     ) {
+        // Sonar ring A
         Box(
             modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF8B5CF6).copy(alpha = 0.2f)),
+                .size(148.dp)
+                .scale(0.72f + ringProgress * 0.42f)
+                .clip(CircleShape)
+                .border(1.dp, accent.copy(alpha = 0.42f * (1f - ringProgress)), CircleShape)
+        )
+        // Sonar ring B, half a cycle behind.
+        val ringB = (ringProgress + 0.5f) % 1f
+        Box(
+            modifier = Modifier
+                .size(148.dp)
+                .scale(0.72f + ringB * 0.42f)
+                .clip(CircleShape)
+                .border(1.dp, accent.copy(alpha = 0.42f * (1f - ringB)), CircleShape)
+        )
+        // Breathing halo
+        Box(
+            modifier = Modifier
+                .size(104.dp)
+                .scale(haloScale)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(accent.copy(alpha = haloAlpha), Color.Transparent)
+                    )
+                )
+        )
+        // Glass disc + mark
+        Box(
+            modifier = Modifier
+                .size(88.dp)
+                .scale(haloScale * 0.92f)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.10f))
+                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color(0xFFA78BFA),
-                modifier = Modifier.size(22.dp)
+            Image(
+                painter = painterResource(R.drawable.ic_focus_shield_app_icon),
+                contentDescription = "FocusShield Logo",
+                modifier = Modifier.size(58.dp)
             )
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+    }
+}
+
+/** Signed-in summary card: avatar (or initial), name, email and a pulsing "connected" dot. */
+@Composable
+private fun SignedInCloudCard(
+    displayName: String?,
+    email: String?,
+    photoUrl: String?,
+    modifier: Modifier = Modifier
+) {
+    val dot = rememberInfiniteTransition(label = "connectedDot")
+    val dotAlpha by dot.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dotAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .padding(vertical = 16.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color(0xFF34D399).copy(alpha = 0.28f), RoundedCornerShape(20.dp))
+            .padding(20.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF8B5CF6)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!photoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = photoUrl,
+                        contentDescription = "Profile Photo",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                    )
+                } else {
+                    Text(
+                        text = (displayName?.firstOrNull() ?: email?.firstOrNull() ?: 'U').uppercase(),
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = displayName ?: "FocusShield User",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10B981).copy(alpha = dotAlpha))
+                    )
+                }
+                Text(
+                    text = email ?: "",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
                 )
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 12.sp
-                )
-            )
+            }
         }
     }
 }
