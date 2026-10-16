@@ -52,8 +52,24 @@ data class FocusPreferences(
     val userPhotoUri: String? = null,
     val userAvatarPreset: String = "SHIELD",
     val userMotto: String = "Deep Work & Daily Mastery",
-    val userAcademicGoal: String = "Exam Rank & Cognitive Stamina"
-)
+    val userAcademicGoal: String = "Exam Rank & Cognitive Stamina",
+    // Cloud auto-save. Deliberately device-local (never part of CloudJson.accountPreferencesJson):
+    // "how often this phone syncs" is a property of the install, not of the account, so changing it
+    // must not mark the account preferences document dirty and push it to other devices.
+    val isAutoSaveToCloudEnabled: Boolean = true,
+    val autoSaveIntervalSeconds: Int = DEFAULT_AUTO_SAVE_INTERVAL_SECONDS
+) {
+    companion object {
+        /** Default cadence for the periodic cloud auto-save loop. */
+        const val DEFAULT_AUTO_SAVE_INTERVAL_SECONDS = 30
+
+        /** Below this the push rate outruns any human edit and only burns Firestore quota. */
+        const val MIN_AUTO_SAVE_INTERVAL_SECONDS = 15
+
+        /** Upper bound offered in Settings; Android clamps background periodic work to 15 minutes. */
+        const val MAX_AUTO_SAVE_INTERVAL_SECONDS = 300
+    }
+}
 
 class FocusPreferencesRepository(private val context: Context) {
 
@@ -99,6 +115,8 @@ class FocusPreferencesRepository(private val context: Context) {
         val KEY_USER_MOTTO = stringPreferencesKey("user_motto")
         val KEY_USER_ACADEMIC_GOAL = stringPreferencesKey("user_academic_goal")
         val KEY_USER_CLOUD_AVATAR_PATH = stringPreferencesKey("user_cloud_avatar_path")
+        val KEY_AUTO_SAVE_ENABLED = booleanPreferencesKey("auto_save_to_cloud_enabled")
+        val KEY_AUTO_SAVE_INTERVAL_SECONDS = intPreferencesKey("auto_save_interval_seconds")
     }
 
     val preferencesFlow: Flow<FocusPreferences> = context.dataStore.data
@@ -144,7 +162,13 @@ class FocusPreferencesRepository(private val context: Context) {
             userPhotoUri = preferences[PreferencesKeys.KEY_USER_PHOTO_URI],
             userAvatarPreset = preferences[PreferencesKeys.KEY_USER_AVATAR_PRESET] ?: "SHIELD",
             userMotto = preferences[PreferencesKeys.KEY_USER_MOTTO] ?: "Deep Work & Daily Mastery",
-            userAcademicGoal = preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] ?: "Exam Rank & Cognitive Stamina"
+            userAcademicGoal = preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] ?: "Exam Rank & Cognitive Stamina",
+            isAutoSaveToCloudEnabled = preferences[PreferencesKeys.KEY_AUTO_SAVE_ENABLED] ?: true,
+            autoSaveIntervalSeconds = (preferences[PreferencesKeys.KEY_AUTO_SAVE_INTERVAL_SECONDS]
+                ?: FocusPreferences.DEFAULT_AUTO_SAVE_INTERVAL_SECONDS).coerceIn(
+                FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS,
+                FocusPreferences.MAX_AUTO_SAVE_INTERVAL_SECONDS
+            )
         )
     }
 
@@ -251,6 +275,26 @@ class FocusPreferencesRepository(private val context: Context) {
     suspend fun updateBlockSplitScreen(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] = enabled
+        }
+    }
+
+    suspend fun updateAutoSaveToCloudEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_AUTO_SAVE_ENABLED] = enabled
+        }
+    }
+
+    /**
+     * Stores the auto-save cadence. Clamped to [FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS] /
+     * [MAX_AUTO_SAVE_INTERVAL_SECONDS] so a hand-crafted or restored DataStore value can never make
+     * the sync loop spin (or park for hours) — the same bound is applied on read.
+     */
+    suspend fun updateAutoSaveIntervalSeconds(seconds: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_AUTO_SAVE_INTERVAL_SECONDS] = seconds.coerceIn(
+                FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS,
+                FocusPreferences.MAX_AUTO_SAVE_INTERVAL_SECONDS
+            )
         }
     }
 

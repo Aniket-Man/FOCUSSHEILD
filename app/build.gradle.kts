@@ -157,6 +157,9 @@ dependencies {
   implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
+  // ProcessLifecycleOwner: drives the cloud auto-save flush when the last activity leaves the
+  // foreground. Declared explicitly rather than inherited transitively.
+  implementation(libs.androidx.lifecycle.process)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)

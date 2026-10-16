@@ -5,9 +5,11 @@ import androidx.room.withTransaction
 import com.example.data.local.FocusShieldDatabase
 import com.example.data.local.dao.SyncOutboxDao
 import com.example.data.local.entity.SyncOutboxEntity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -67,6 +69,24 @@ object SyncTracker {
     /** The most recent [MAX_RECORDED_REJECTIONS] rejected cloud rows (newest first). */
     val rejectedCloudRows: StateFlow<List<RejectedCloudRow>> = _rejectedCloudRows.asStateFlow()
 
+    private val _pendingCount = MutableStateFlow(0)
+
+    /**
+     * Number of ops waiting in the outbox.
+     *
+     * The periodic auto-save loop uses this to stay quiet while nothing has changed: a timer tick
+     * that finds an empty outbox returns immediately instead of pushing a redundant full snapshot to
+     * Firestore, so an idle phone costs no writes. Maintained at the two points where the outbox
+     * actually changes size — an insert in [write] and [markOutboxDrained] after a successful cycle —
+     * so it is a live count, not a polled approximation.
+     */
+    val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
+
+    /** Records that the outbox was emptied by a completed sync cycle. */
+    fun markOutboxDrained() {
+        _pendingCount.value = 0
+    }
+
     /**
      * Records a rejected cloud row. Called by [SyncEngine] for every row it refuses to insert; never
      * silently dropped, and never fatal for the cycle (the other rows still sync).
@@ -78,8 +98,23 @@ object SyncTracker {
         _rejectedCloudRows.value = (listOf(row) + _rejectedCloudRows.value).take(MAX_RECORDED_REJECTIONS)
     }
 
-    fun init(database: FocusShieldDatabase) {
+    /**
+     * Attaches the database and seeds [pendingCount] from whatever survived the last process.
+     *
+     * The seed matters: an outbox that still holds ops from a previous run (the user edited while
+     * signed out, offline, or the process was killed before a cycle ran) is real pending work, and
+     * without this the periodic auto-save loop would read zero, decide there was nothing to push, and
+     * those edits would sit there until the user happened to edit something else.
+     *
+     * [scope] is the application scope, so the read outlives this call.
+     */
+    fun init(database: FocusShieldDatabase, scope: CoroutineScope) {
         this.database = database
+        scope.launch {
+            lock.withLock {
+                runCatching { _pendingCount.value = database.syncOutboxDao().countPending() }
+            }
+        }
     }
 
     /** Record that a local row's current content ([payloadJson], a cloud-row JSON snapshot) must be
@@ -117,6 +152,9 @@ object SyncTracker {
                         payload = payload
                     )
                 )
+                // Re-count inside the same transaction so the published count can never disagree
+                // with the committed outbox (a concurrent writer's op is already visible here).
+                _pendingCount.value = outbox.countPending()
             }
         }
         onPendingChanged?.invoke()

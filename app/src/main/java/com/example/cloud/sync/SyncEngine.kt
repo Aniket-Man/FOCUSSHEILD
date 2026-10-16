@@ -212,6 +212,9 @@ class SyncEngine(
         // Clear local outbox as data is synchronized
         try {
             database.syncOutboxDao().clearAll()
+            // The periodic auto-save loop gates on this count, so it has to learn that the
+            // outbox is empty here — otherwise the next tick would fire a redundant full push.
+            SyncTracker.markOutboxDrained()
         } catch (_: Exception) {}
 
         installState.setDataOwnerAccountId(uid)

@@ -1,12 +1,17 @@
 package com.example
 
 import android.app.Application
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.example.cloud.auth.AuthRepository
+import com.example.cloud.auth.AuthState
 import com.example.cloud.net.ConnectivityMonitor
+import com.example.cloud.sync.AutoSaveScheduler
 import com.example.cloud.sync.CloudInstallState
 import com.example.cloud.sync.SyncEngine
 import com.example.cloud.sync.SyncGateway
@@ -29,6 +34,8 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @HiltAndroidApp
@@ -130,7 +137,14 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         SyncEngine(database, cloudInstallState, preferencesRepository, authRepository)
     }
     val syncGateway by lazy {
-        SyncGateway(applicationScope, authRepository, connectivityMonitor, syncEngine)
+        SyncGateway(
+            applicationScope,
+            authRepository,
+            connectivityMonitor,
+            syncEngine,
+            cloudInstallState,
+            preferencesRepository
+        )
     }
     val preferencesObserver by lazy {
         SyncedPreferencesObserver(preferencesRepository, cloudInstallState)
@@ -169,10 +183,42 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Cloud sync wiring: the outbox needs the database before any repository write can enqueue,
         // and the gateway + document-dirty observer must be live before the first seed-init write.
         // onPendingChanged is set last so a repository enqueue always finds a wired trigger.
-        SyncTracker.init(database)
+        SyncTracker.init(database, applicationScope)
         syncGateway.start()
         preferencesObserver.start(applicationScope)
         SyncTracker.onPendingChanged = { syncGateway.requestSync() }
+
+        // Periodic cloud auto-save. The foreground loop inside SyncGateway honours the user's
+        // cadence (15s–5min) while the app is alive; WorkManager covers the app-closed case, where
+        // Android's 15-minute periodic floor applies. Both are cancelled the moment the user signs
+        // out or turns auto-save off, so a local-only install schedules no work at all.
+        applicationScope.launch {
+            combine(
+                preferencesRepository.preferencesFlow,
+                authRepository.authState
+            ) { prefs, authState ->
+                prefs.autoSaveIntervalSeconds to
+                    (prefs.isAutoSaveToCloudEnabled && authState is AuthState.Authenticated)
+            }
+                .distinctUntilChanged()
+                .collect { (seconds, shouldRun) ->
+                    if (shouldRun) {
+                        AutoSaveScheduler.schedule(this@FocusShieldApp, seconds)
+                    } else {
+                        AutoSaveScheduler.cancel(this@FocusShieldApp)
+                    }
+                }
+        }
+
+        // A flush as the process leaves the foreground means the last few seconds of a session are
+        // usually already on Firestore by the time the user switches away.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStop(owner: LifecycleOwner) {
+                    applicationScope.launch { syncGateway.flushPending() }
+                }
+            }
+        )
 
         // Restore any previously-signed-in cloud session (no-op when not configured / signed out)
         applicationScope.launch {
