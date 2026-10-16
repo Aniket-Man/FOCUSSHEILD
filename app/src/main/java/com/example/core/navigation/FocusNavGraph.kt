@@ -287,7 +287,8 @@ fun FocusNavGraph(
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
-                onNavigateToWebsiteBlocker = { navController.navigate(Screen.WebsiteBlocker.route) }
+                onNavigateToWebsiteBlocker = { navController.navigate(Screen.WebsiteBlocker.route) },
+                onNavigateToAccount = { navController.navigate(Screen.Account.route) }
             )
         }
 

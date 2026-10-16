@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.cloud.auth.AuthState
+import com.example.cloud.sync.SyncCycleOutcome
+import com.example.cloud.sync.SyncTracker
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.data.preferences.FocusPreferences
 import com.example.data.preferences.FocusPreferencesRepository
@@ -27,7 +30,18 @@ data class SettingsUiState(
     val allTimeStudyTimeMillis: Long = 0L,
     val formattedAllTimeStudyTime: String = "0m",
     /** Badge id to the instant it was earned, derived from synced session history. */
-    val badgeUnlockTimes: Map<String, Long> = emptyMap()
+    val badgeUnlockTimes: Map<String, Long> = emptyMap(),
+    /** Email of the signed-in Google account, or null while running local-only. */
+    val signedInEmail: String? = null,
+    val signedInDisplayName: String? = null,
+    /** True while a sync cycle is in flight, for the live "Backing up…" affordance. */
+    val isSyncRunning: Boolean = false,
+    /** Outbox depth — edits waiting for the next push. */
+    val pendingSyncCount: Int = 0,
+    /** Wall-clock time of the last cycle that actually reached Firestore; 0 if never. */
+    val lastSyncAtMillis: Long = 0L,
+    /** Outcome of the most recent cycle attempt, for the status line. */
+    val lastSyncOutcome: SyncCycleOutcome? = null
 )
 
 class SettingsViewModel(
@@ -40,6 +54,8 @@ class SettingsViewModel(
         (application as FocusShieldApp).blockedAppRepository
     private val analyticsRepository =
         (application as FocusShieldApp).analyticsRepository
+    private val authRepository = (application as FocusShieldApp).authRepository
+    private val syncGateway = (application as FocusShieldApp).syncGateway
 
     private val _isAccessibilityEnabled = MutableStateFlow(false)
     private val _isBatteryOptimizationIgnored = MutableStateFlow(false)
@@ -53,6 +69,38 @@ class SettingsViewModel(
         val isBatteryOptimizationIgnored: Boolean,
         val isNotificationListenerGranted: Boolean,
         val isVpnGranted: Boolean
+    )
+
+    /** Account + cloud-sync state shown by the "Account & Cloud Sync" section. */
+    private data class CloudUiState(
+        val signedInEmail: String? = null,
+        val signedInDisplayName: String? = null,
+        val isSyncRunning: Boolean = false,
+        val pendingSyncCount: Int = 0,
+        val lastSyncAtMillis: Long = 0L,
+        val lastSyncOutcome: SyncCycleOutcome? = null
+    )
+
+    // Grouped in two steps because Kotlin's typed combine tops out at five flows; flattening six
+    // independent sources into one combine would mean boxing them all into Pair.
+    private val cloudState: StateFlow<CloudUiState> = combine(
+        authRepository.authState,
+        combine(syncGateway.running, SyncTracker.pendingCount) { running, pending -> running to pending },
+        combine(syncGateway.lastSyncAtMillis, syncGateway.lastOutcome) { at, outcome -> at to outcome }
+    ) { auth, (running, pending), (lastAt, outcome) ->
+        val signedIn = auth as? AuthState.Authenticated
+        CloudUiState(
+            signedInEmail = signedIn?.email?.takeIf { it.isNotBlank() },
+            signedInDisplayName = signedIn?.displayName?.takeIf { it.isNotBlank() },
+            isSyncRunning = running,
+            pendingSyncCount = pending,
+            lastSyncAtMillis = lastAt,
+            lastSyncOutcome = outcome
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = CloudUiState()
     )
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -72,8 +120,9 @@ class SettingsViewModel(
                 isVpnGranted = notifAndVpn.second
             )
         },
-        analyticsRepository.todaySummaryFlow
-    ) { inner, summary ->
+        analyticsRepository.todaySummaryFlow,
+        cloudState
+    ) { inner, summary, cloud ->
         SettingsUiState(
             preferences = inner.prefs,
             blockedAppsCount = inner.blockedAppsCount,
@@ -83,13 +132,44 @@ class SettingsViewModel(
             isVpnGranted = inner.isVpnGranted,
             allTimeStudyTimeMillis = summary.allTimeStudyTimeMillis,
             formattedAllTimeStudyTime = summary.formattedAllTimeStudyTime,
-            badgeUnlockTimes = summary.badgeUnlockTimes
+            badgeUnlockTimes = summary.badgeUnlockTimes,
+            signedInEmail = cloud.signedInEmail,
+            signedInDisplayName = cloud.signedInDisplayName,
+            isSyncRunning = cloud.isSyncRunning,
+            pendingSyncCount = cloud.pendingSyncCount,
+            lastSyncAtMillis = cloud.lastSyncAtMillis,
+            lastSyncOutcome = cloud.lastSyncOutcome
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = SettingsUiState()
     )
+
+    /**
+     * Signs out of Google.
+     *
+     * Intentionally keeps both the local Room data and the cloud documents: signing back into the
+     * same account restores everything, and signing into a different one does not destroy this
+     * device's history. Firebase sign-out plus clearing the Credential Manager state is enough for
+     * the next sign-in to pick a different account.
+     */
+    fun signOut() {
+        viewModelScope.launch { authRepository.signOut() }
+    }
+
+    /** Pushes any pending changes to Firestore now, instead of waiting for the next auto-save tick. */
+    fun syncNow() {
+        viewModelScope.launch { syncGateway.flushPending() }
+    }
+
+    fun updateAutoSaveToCloud(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepository.updateAutoSaveToCloudEnabled(enabled) }
+    }
+
+    fun updateAutoSaveIntervalSeconds(seconds: Int) {
+        viewModelScope.launch { preferencesRepository.updateAutoSaveIntervalSeconds(seconds) }
+    }
 
     fun claimReward(rewardId: String) {
         viewModelScope.launch {

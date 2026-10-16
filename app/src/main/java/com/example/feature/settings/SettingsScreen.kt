@@ -1,5 +1,10 @@
 package com.example.feature.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,12 +30,16 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Login
+import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.NightlightRound
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Security
@@ -38,6 +47,7 @@ import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -45,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,6 +95,7 @@ fun SettingsScreen(
     onNavigateToStrictMode: () -> Unit = {},
     onNavigateToStudyChannels: () -> Unit = {},
     onNavigateToWebsiteBlocker: () -> Unit = {},
+    onNavigateToAccount: () -> Unit = {},
     onTabSelected: (BottomTab) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -607,7 +619,230 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 3: App Information
+            // Section 3: Account & Cloud Sync
+            item {
+                SettingsSectionHeader(title = "ACCOUNT & CLOUD SYNC")
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // --- Who is signed in -------------------------------------------------
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(FocusShapes.card)
+                            .background(FocusColors.Surface)
+                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                            .padding(FocusSpacing.base)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.signedInEmail != null) FocusColors.Primary
+                                        else FocusColors.SurfaceVariant
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (uiState.signedInEmail != null) {
+                                    Text(
+                                        text = (uiState.signedInEmail?.firstOrNull() ?: '?').uppercase(),
+                                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CloudOff,
+                                        contentDescription = null,
+                                        tint = FocusColors.TextMuted,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = uiState.signedInDisplayName ?: "Signed out",
+                                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = FocusColors.TextPrimary,
+                                        fontSize = 15.sp
+                                    )
+                                )
+                                Text(
+                                    text = uiState.signedInEmail
+                                        ?: "Your data stays on this device until you sign in",
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                        color = FocusColors.TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                )
+                            }
+
+                            if (uiState.signedInEmail != null) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Signed in",
+                                    tint = FocusColors.EmeraldSuccess,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (uiState.signedInEmail == null) {
+                        SettingsNavigationRow(
+                            title = "Sign in with Google",
+                            subtitle = "Back up study data to Firebase and restore it on any device",
+                            icon = Icons.Rounded.Login,
+                            iconTint = FocusColors.Primary,
+                            onClick = onNavigateToAccount,
+                            testTag = "settings_sign_in_row"
+                        )
+                    } else {
+                        // --- Auto-save cadence --------------------------------------------
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(FocusShapes.card)
+                                .background(FocusColors.Surface)
+                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                                .padding(FocusSpacing.base)
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(FocusColors.Primary.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.CloudSync,
+                                            contentDescription = null,
+                                            tint = FocusColors.Primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(14.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Auto-save to Cloud",
+                                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = FocusColors.TextPrimary,
+                                                fontSize = 15.sp
+                                            )
+                                        )
+                                        Text(
+                                            text = if (uiState.preferences.isAutoSaveToCloudEnabled) {
+                                                "Backing up every ${formatInterval(uiState.preferences.autoSaveIntervalSeconds)}"
+                                            } else {
+                                                "Paused — data is kept on this device only"
+                                            },
+                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                                color = FocusColors.TextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        )
+                                    }
+
+                                    Switch(
+                                        checked = uiState.preferences.isAutoSaveToCloudEnabled,
+                                        onCheckedChange = viewModel::updateAutoSaveToCloud,
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = FocusColors.TextOnDark,
+                                            checkedTrackColor = FocusColors.EmeraldSuccess,
+                                            uncheckedThumbColor = FocusColors.TextMuted,
+                                            uncheckedTrackColor = FocusColors.SurfaceSubtle
+                                        ),
+                                        modifier = Modifier.testTag("toggle_auto_save_cloud")
+                                    )
+                                }
+
+                                AnimatedVisibility(
+                                    visible = uiState.preferences.isAutoSaveToCloudEnabled,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        AutoSaveIntervalSelector(
+                                            selectedSeconds = uiState.preferences.autoSaveIntervalSeconds,
+                                            enabled = !uiState.isSyncRunning,
+                                            onSelect = viewModel::updateAutoSaveIntervalSeconds
+                                        )
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        SyncStatusLine(
+                                            isRunning = uiState.isSyncRunning,
+                                            pendingCount = uiState.pendingSyncCount,
+                                            lastSyncAtMillis = uiState.lastSyncAtMillis,
+                                            onSyncNow = viewModel::syncNow
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- Sign out ------------------------------------------------------
+                        OutlinedButton(
+                            onClick = viewModel::signOut,
+                            shape = FocusShapes.card,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                FocusColors.BlockedRed.copy(alpha = 0.5f)
+                            ),
+                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                contentColor = FocusColors.BlockedRed
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("settings_sign_out_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Logout,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sign out",
+                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+
+                        Text(
+                            text = "Signing out keeps your data on this device and in the cloud. Sign back in any time to pick up where you left off.",
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                color = FocusColors.TextMuted,
+                                fontSize = 11.5.sp
+                            ),
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // Section 4: App Information
             item {
                 SettingsSectionHeader(title = "ABOUT FOCUSSHIELD")
                 Spacer(modifier = Modifier.height(8.dp))
@@ -673,6 +908,146 @@ fun SettingsScreen(
                 pendingAccessibilityPrompt = null
             }
         )
+    }
+}
+
+/** Cadences offered in Settings. The loop clamps to the same bounds, so these stay in range. */
+private val AUTO_SAVE_INTERVALS_SECONDS = listOf(15, 30, 60, 300)
+
+/** "30 seconds" / "1 minute" / "5 minutes" — never a bare number, so the unit is always explicit. */
+private fun formatInterval(seconds: Int): String = when {
+    seconds < 60 -> "$seconds seconds"
+    seconds % 60 == 0 -> "${seconds / 60} minute${if (seconds / 60 == 1) "" else "s"}"
+    else -> "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
+private fun AutoSaveIntervalSelector(
+    selectedSeconds: Int,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit
+) {
+    Column {
+        Text(
+            text = "BACK UP EVERY",
+            style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
+                color = FocusColors.TextMuted,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.9.sp,
+                fontSize = 10.sp
+            )
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AUTO_SAVE_INTERVALS_SECONDS.forEach { seconds ->
+                val selected = seconds == selectedSeconds
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (selected) FocusColors.Primary.copy(alpha = 0.16f)
+                            else FocusColors.SurfaceVariant
+                        )
+                        .border(
+                            1.dp,
+                            if (selected) FocusColors.Primary.copy(alpha = 0.6f)
+                            else FocusColors.CardBorderSubtle,
+                            RoundedCornerShape(10.dp)
+                        )
+                        .clickable(enabled = enabled) { onSelect(seconds) }
+                        .padding(vertical = 9.dp)
+                        .testTag("settings_autosave_interval_$seconds"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (seconds < 60) "${seconds}s" else "${seconds / 60}m",
+                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
+                            color = if (selected) FocusColors.Primary else FocusColors.TextSecondary,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Only pushes when something actually changed, so an idle shield costs nothing. Background backups are capped by Android at every 15 minutes.",
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                color = FocusColors.TextMuted,
+                fontSize = 11.sp
+            )
+        )
+    }
+}
+
+/**
+ * One line describing the health of the cloud copy: in-flight, work waiting, or how long ago the
+ * last successful push landed. Says "never" rather than claiming a sync that never happened.
+ */
+@Composable
+private fun SyncStatusLine(
+    isRunning: Boolean,
+    pendingCount: Int,
+    lastSyncAtMillis: Long,
+    onSyncNow: () -> Unit
+) {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    // A one-shot timestamp would leave "just now" frozen until the next sync; a cheap ticker keeps
+    // the age honest without any sync-side ticking.
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(10_000)
+        }
+    }
+    val elapsedSeconds = if (lastSyncAtMillis <= 0L) Long.MAX_VALUE
+    else ((now - lastSyncAtMillis).coerceAtLeast(0L)) / 1000L
+
+    val (statusText, statusColor) = when {
+        isRunning -> "Backing up to Firebase…" to FocusColors.Primary
+        pendingCount > 0 -> "$pendingCount change${if (pendingCount == 1) "" else "s"} waiting to upload" to FocusColors.AmberOrange
+        lastSyncAtMillis <= 0L -> "Not backed up yet" to FocusColors.TextMuted
+        elapsedSeconds < 60 -> "Backed up just now" to FocusColors.EmeraldSuccess
+        elapsedSeconds < 3600 -> "Backed up ${elapsedSeconds / 60}m ago" to FocusColors.EmeraldSuccess
+        elapsedSeconds < 86400 -> "Backed up ${elapsedSeconds / 3600}h ago" to FocusColors.TextSecondary
+        else -> "Backed up ${elapsedSeconds / 86400}d ago" to FocusColors.TextSecondary
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(statusColor)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = statusText,
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                color = statusColor,
+                fontSize = 12.sp
+            ),
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(
+            onClick = onSyncNow,
+            enabled = !isRunning && pendingCount > 0,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.testTag("settings_sync_now_button")
+        ) {
+            Text(
+                text = "Sync now",
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
+                    color = if (isRunning || pendingCount == 0) FocusColors.TextMuted else FocusColors.Primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+        }
     }
 }
 
