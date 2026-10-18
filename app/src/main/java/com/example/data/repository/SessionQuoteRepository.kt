@@ -128,6 +128,96 @@ object SessionQuoteRepository {
             fontStyle = "editorial",
             active = true,
             typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_11",
+            text = "Clarity of vision creates stillness of mind. Guard your attention like your most valuable possession.",
+            author = "Marcus Aurelius",
+            category = "Stillness",
+            fontStyle = "classic",
+            active = true,
+            typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_12",
+            text = "It is not that we have a short time to live, but that we waste a lot of it. Own your hours.",
+            author = "Seneca",
+            category = "Time",
+            fontStyle = "editorial",
+            active = true,
+            typingSpeedMs = 30L
+        ),
+        SessionQuote(
+            id = "quote_13",
+            text = "Genius is 1% talent and 99% hard work. Concentrated study dissolves every obstacle.",
+            author = "Albert Einstein",
+            category = "Mastery",
+            fontStyle = "calligraphy",
+            active = true,
+            typingSpeedMs = 26L
+        ),
+        SessionQuote(
+            id = "quote_14",
+            text = "Our greatest weakness lies in giving up. The most certain way to succeed is always to try just one more time.",
+            author = "Thomas Edison",
+            category = "Perseverance",
+            fontStyle = "classic",
+            active = true,
+            typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_15",
+            text = "It has long since come to my attention that people of accomplishment rarely sat back and let things happen to them.",
+            author = "Leonardo da Vinci",
+            category = "Focus",
+            fontStyle = "editorial",
+            active = true,
+            typingSpeedMs = 30L
+        ),
+        SessionQuote(
+            id = "quote_16",
+            text = "You may encounter many defeats, but you must not be defeated. Step forward into your goals.",
+            author = "Maya Angelou",
+            category = "Courage",
+            fontStyle = "calligraphy",
+            active = true,
+            typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_17",
+            text = "It always seems impossible until it's done. Silent daily work builds invincible power.",
+            author = "Nelson Mandela",
+            category = "Determination",
+            fontStyle = "classic",
+            active = true,
+            typingSpeedMs = 30L
+        ),
+        SessionQuote(
+            id = "quote_18",
+            text = "It does not matter how slowly you go as long as you do not stop.",
+            author = "Confucius",
+            category = "Consistency",
+            fontStyle = "editorial",
+            active = true,
+            typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_19",
+            text = "First say to yourself what you would be; and then do what you have to do.",
+            author = "Epictetus",
+            category = "Discipline",
+            fontStyle = "classic",
+            active = true,
+            typingSpeedMs = 28L
+        ),
+        SessionQuote(
+            id = "quote_20",
+            text = "Your future is shaped by the silent hours of focus you invest today.",
+            author = "FocusShield",
+            category = "Daily Mastery",
+            fontStyle = "editorial",
+            active = true,
+            typingSpeedMs = 26L
         )
     )
 
@@ -143,18 +233,19 @@ object SessionQuoteRepository {
     }
 
     /**
-     * Ensures the `/session_quotes` collection in Cloud Firestore is preloaded with the initial
-     * curated quotes so the external Admin Website immediately sees them in the database and can
-     * edit, toggle, or add new quotes.
+     * Ensures the `/session_quotes` collection in Cloud Firestore is populated with all curated
+     * quotes so the database serves as the live source of truth for both the app and the external Admin Website.
      */
     suspend fun ensurePreloadedInFirestore() = withContext(Dispatchers.IO) {
         if (hasAttemptedPreloadSeed) return@withContext
         val db = getFirestoreOrNull() ?: return@withContext
         try {
-            val snapshot = db.collection(COLLECTION_SESSION_QUOTES).limit(1).get().await()
-            if (snapshot.isEmpty) {
-                val now = System.currentTimeMillis()
-                for (quote in PRELOADED_QUOTES) {
+            val snapshot = db.collection(COLLECTION_SESSION_QUOTES).get().await()
+            val existingIds = snapshot.documents.map { it.id }.toSet()
+            val now = System.currentTimeMillis()
+
+            for (quote in PRELOADED_QUOTES) {
+                if (!existingIds.contains(quote.id)) {
                     val payload = hashMapOf<String, Any>(
                         "id" to quote.id,
                         "text" to quote.text,
@@ -181,8 +272,8 @@ object SessionQuoteRepository {
     }
 
     /**
-     * Fetches active quotes from `/session_quotes` in Cloud Firestore (seeding preloads first if
-     * the collection is empty) and picks one random quote, avoiding immediate back-to-back repeats.
+     * Fetches active quotes from `/session_quotes` in Cloud Firestore database and picks one random
+     * quote, avoiding immediate back-to-back repeats.
      */
     suspend fun fetchRandomQuoteForSummary(): SessionQuote = withContext(Dispatchers.IO) {
         val db = getFirestoreOrNull()
@@ -211,7 +302,7 @@ object SessionQuoteRepository {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Falling back to preloaded quotes due to network/Firestore error: ${e.message}")
+                Log.w(TAG, "Falling back to local quotes due to network/Firestore error: ${e.message}")
             }
         }
 
