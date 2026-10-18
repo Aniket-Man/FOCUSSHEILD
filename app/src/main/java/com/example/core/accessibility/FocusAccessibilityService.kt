@@ -469,11 +469,37 @@ class FocusAccessibilityService : AccessibilityService() {
                         }
                     }
                 } else if (isSessionRunningOrPaused) {
-                    // Issue #16: scroll/content-change bursts arrive many times a second while a
-                    // session is active; walk the full tree at most every 300ms unless the window
-                    // itself changed — app switches and navigation must evaluate immediately.
+                    val eventType = event?.eventType
                     val isYouTubeWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                             eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                    val isClickEvent = eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
+
+                    // --- SAFE CORNER SANDBOX (PASSIVE MONITORING STATE) ---
+                    // Once an approved channel is confirmed during a session, monitoring is moved into a passive state
+                    // where expensive node tree walks and continuous text extractions are suspended until a new
+                    // video navigation or window transition occurs, preventing UI lag and continuous redundant scans.
+                    if (com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive) {
+                        if (isYouTubeWindowChange || isClickEvent) {
+                            // New video navigation or screen transition -> exit passive state to actively re-inspect
+                            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred()
+                        } else {
+                            // PASSIVE STATE: Monitoring is suspended for routine scroll, selection, and content change events!
+                            val chan = com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
+                                ?: "Approved Channel"
+                            val videoTitle = com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedVideoTitle
+
+                            com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+                            homeFeedPopupDismissed = false
+                            lastBlockedYouTubeVideoKey = null
+
+                            dwellTracker()?.onAllowedContent(
+                                channelName = chan,
+                                videoTitle = videoTitle
+                            )
+                            return
+                        }
+                    }
+
                     if (!isYouTubeWindowChange && (now - lastYouTubeInspectTimestamp) < 300L) {
                         return
                     }

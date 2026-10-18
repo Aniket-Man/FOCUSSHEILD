@@ -87,6 +87,13 @@ data class YouTubeChannelContext(
  * Inspects the ACTIVE content/player subtree to avoid false positives from recommendation shelves,
  * in-app miniplayers, and Home feed video cards.
  */
+/**
+ * Safe Corner Sandbox:
+ * Once an approved channel is confirmed during a session, moves monitoring into a passive state
+ * where expensive node tree walks and continuous text extractions are suspended until a new video
+ * navigation or screen transition occurs. This prevents UI lag, CPU overhead, and redundant scans
+ * while watching approved study videos.
+ */
 object YouTubePlaybackSandbox {
     @Volatile
     var isSandboxActive: Boolean = false
@@ -100,21 +107,37 @@ object YouTubePlaybackSandbox {
     var sandboxedVideoTitle: String? = null
         private set
 
-    fun enterSandbox(channel: ChannelIdentityInfo, title: String?) {
+    @Volatile
+    var sandboxedVideoKey: String? = null
+        private set
+
+    @Volatile
+    var enteredSandboxAt: Long = 0L
+        private set
+
+    fun enterSandbox(channel: ChannelIdentityInfo, title: String?, videoKey: String? = null) {
         isSandboxActive = true
         sandboxedChannel = channel
         sandboxedVideoTitle = title
+        sandboxedVideoKey = videoKey ?: title
+        enteredSandboxAt = System.currentTimeMillis()
     }
 
     fun exitSandbox() {
         isSandboxActive = false
         sandboxedChannel = null
         sandboxedVideoTitle = null
+        sandboxedVideoKey = null
+        enteredSandboxAt = 0L
+    }
+
+    fun onVideoNavigationOccurred() {
+        // Exit passive sandbox when navigation occurs (new video clicked, screen changed, or tab switched)
+        exitSandbox()
     }
 
     fun onVideoClickedOrChanged() {
-        // Safe Playback Sandbox remains active across player control touches (play/pause, seek, fullscreen).
-        // It exits cleanly when the user leaves the watch page or an unapproved channel is detected.
+        onVideoNavigationOccurred()
     }
 }
 
