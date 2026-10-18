@@ -173,7 +173,7 @@ object DeviceUsageStatsHelper {
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName
-                if (pkg.isBlank()) continue
+                if (pkg.isBlank() || isIgnoredSystemPackage(pkg, context.packageName)) continue
 
                 val key = "$pkg/${event.className ?: event.className ?: pkg}"
                 val type = event.eventType
@@ -305,7 +305,7 @@ object DeviceUsageStatsHelper {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return result
             val aggregated = usm.queryAndAggregateUsageStats(startOfDay, now)
             aggregated?.forEach { (pkg, stat) ->
-                if (!result.containsKey(pkg) && stat.totalTimeInForeground > 0L) {
+                if (!isIgnoredSystemPackage(pkg, context.packageName) && !result.containsKey(pkg) && stat.totalTimeInForeground > 0L) {
                     result[pkg] = UsageResult(UsageResult.UsageStatus.VALID, stat.totalTimeInForeground, "AggregateUsageStats")
                 }
             }
@@ -410,56 +410,32 @@ object DeviceUsageStatsHelper {
     // ================================================================
 
     /**
-     * Queries total device screen on / foreground usage time for today.
+     * Queries total device foreground app usage time for today, excluding system launchers,
+     * lock-screen/SystemUI wakeups, input methods, and FocusShield's own overlays.
      */
     fun getTodayTotalScreenTimeMillis(context: Context): Long {
         if (!hasUsageStatsPermission(context)) return 0L
-        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return 0L
-
         val (startOfDay, now) = getTodayBounds()
 
         try {
-            // Try screen on/off events first
-            val events = usm.queryEvents(startOfDay, now)
-            val event = UsageEvents.Event()
-
-            var totalScreenTime = 0L
-            var lastInteractiveTime = 0L
-            var isInteractive = false
-            var hasInteractiveEvents = false
-
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event)
-                val type = event.eventType
-
-                if (type == 15) { // SCREEN_INTERACTIVE
-                    if (!isInteractive) {
-                        lastInteractiveTime = event.timeStamp
-                        isInteractive = true
-                        hasInteractiveEvents = true
-                    }
-                } else if (type == 16) { // SCREEN_NON_INTERACTIVE
-                    if (isInteractive) {
-                        totalScreenTime += (event.timeStamp - maxOf(lastInteractiveTime, startOfDay))
-                        isInteractive = false
-                        hasInteractiveEvents = true
-                    } else if (!hasInteractiveEvents && event.timeStamp > startOfDay) {
-                        totalScreenTime += (event.timeStamp - startOfDay)
-                        hasInteractiveEvents = true
-                    }
-                }
-            }
-            if (isInteractive) {
-                totalScreenTime += (now - maxOf(lastInteractiveTime, startOfDay))
+            // Primary: Sum of merged foreground intervals across all non-ignored user apps.
+            // This avoids counting lock-screen wakeups, launcher home screen idle time, or stuck
+            // SCREEN_INTERACTIVE flags from before midnight.
+            val foregroundAppsTotal = calculateAllAppsForegroundUsageFromEvents(context, startOfDay, now)
+                .values
+                .sum()
+            if (foregroundAppsTotal > 0L) {
+                return foregroundAppsTotal.coerceAtMost(now - startOfDay)
             }
 
-            if (hasInteractiveEvents && totalScreenTime > 0L) {
-                return totalScreenTime
-            }
-
-            // Fallback: Use UsageEvents activity-based calculation
-            return calculateAllAppsForegroundUsageFromEvents(context, startOfDay, now)
-                .values.sum()
+            // Fallback: Aggregate usage stats across non-ignored packages
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return 0L
+            val aggregated = usm.queryAndAggregateUsageStats(startOfDay, now)
+            val fallbackSum = aggregated?.entries
+                ?.filter { (pkg, _) -> !isIgnoredSystemPackage(pkg, context.packageName) }
+                ?.sumOf { (_, stat) -> stat.totalTimeInForeground.coerceAtLeast(0L) }
+                ?: 0L
+            return fallbackSum.coerceAtMost(now - startOfDay)
         } catch (_: Exception) {}
 
         return 0L
@@ -469,10 +445,30 @@ object DeviceUsageStatsHelper {
     // Utility
     // ================================================================
 
-    private fun isIgnoredSystemPackage(pkg: String): Boolean {
+    private val IGNORED_LAUNCHER_AND_SYSTEM_PACKAGES = setOf(
+        "android",
+        "com.android.systemui",
+        "com.google.android.apps.nexuslauncher",
+        "com.android.launcher3",
+        "com.android.launcher",
+        "com.sec.android.app.launcher",
+        "com.miui.home",
+        "com.huawei.android.launcher",
+        "com.oppo.launcher",
+        "com.oneplus.launcher",
+        "com.google.android.packageinstaller",
+        "com.android.packageinstaller",
+        "com.google.android.permissioncontroller",
+        "com.android.permissioncontroller"
+    )
+
+    private fun isIgnoredSystemPackage(pkg: String, selfPackageName: String = "com.example"): Boolean {
+        if (pkg in IGNORED_LAUNCHER_AND_SYSTEM_PACKAGES) return true
+        if (pkg == selfPackageName || pkg.startsWith("com.example") || pkg.startsWith("com.aistudio.focusshield")) return true
         return pkg.startsWith("com.android.systemui") ||
-                pkg == "android" ||
-                pkg.startsWith("com.google.android.inputmethod")
+                pkg.startsWith("com.google.android.inputmethod") ||
+                pkg.startsWith("com.samsung.android.honeyboard") ||
+                pkg.contains(".launcher")
     }
 
     /**

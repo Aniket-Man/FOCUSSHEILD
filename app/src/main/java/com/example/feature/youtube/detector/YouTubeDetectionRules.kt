@@ -102,13 +102,30 @@ object YouTubeDetectionRules {
     val ACTIVE_AD_VIEW_IDS: List<String> = listOf(
         "skip_ad_button",
         "skip_ad_button_container",
+        "skip_ad_button_text",
         "ad_progress_text",
         "ad_countdown_text",
-        "ad_countdown"
+        "ad_countdown",
+        "ad_skip_button",
+        "ad_badge",
+        "ad_duration",
+        "ad_time_remaining",
+        "ad_view",
+        "ad_break",
+        "modern_ad_ui",
+        "ad_headline",
+        "ad_cta_button",
+        "ad_layout",
+        "visit_advertiser_button",
+        "ad_attribution",
+        "player_ad_overlay",
+        "sponsored_badge",
+        "ad_disclosure_banner"
     )
 
     /**
      * Text or description prefixes identifying an active in-stream video ad.
+     * Note: "Stop ads" (the YouTube Premium action chip) is intentionally NOT an ad keyword.
      */
     val ACTIVE_AD_TEXT_KEYWORDS: List<String> = listOf(
         "Skip Ads",
@@ -117,7 +134,26 @@ object YouTubeDetectionRules {
         "Ad 1 of ",
         "Ad 2 of ",
         "Ad · 0:",
-        "Ad • 0:"
+        "Ad • 0:",
+        "Ad ·",
+        "Ad •",
+        "Advertisement",
+        "Ad will end in",
+        "Video will play after ad",
+        "Sponsored ·",
+        "Sponsored •",
+        "Visit advertiser",
+        "Why this ad?",
+        "Stop seeing this ad"
+    )
+
+    /**
+     * Action bar upsell chips that contain the word "ad" or "sponsor" but are NOT in-stream ads.
+     */
+    val NON_AD_UPSELL_LABELS: List<String> = listOf(
+        "Stop ads",
+        "Get YouTube Premium",
+        "Try YouTube Premium"
     )
 
     /**
@@ -426,8 +462,8 @@ object YouTubeDetectionRules {
             return embeddedHandle
         }
 
-        // Check if string contains separator delimiters (•, ·, |, -)
-        val delimiters = listOf("•", "·", "|", " - ")
+        // Check if string contains separator delimiters (•, ·, |)
+        val delimiters = listOf("•", "·", "|")
         val matchedDelimiter = delimiters.firstOrNull { trimmed.contains(it) }
 
         if (matchedDelimiter != null) {
@@ -500,11 +536,23 @@ object YouTubeDetectionRules {
      */
     fun isAdElement(viewId: String?, text: String?, desc: String?): Boolean {
         val vid = viewId ?: ""
+        val t = text?.trim() ?: ""
+        val d = desc?.trim() ?: ""
+
+        // Explicitly ignore "Stop ads" / YouTube Premium upsell chips in the action row
+        if (NON_AD_UPSELL_LABELS.any { t.equals(it, ignoreCase = true) || d.equals(it, ignoreCase = true) }) {
+            return false
+        }
+
         if (ACTIVE_AD_VIEW_IDS.any { vid.contains(it, ignoreCase = true) }) {
             return true
         }
-        val t = text?.trim() ?: ""
-        val d = desc?.trim() ?: ""
+        if ((t.equals("Sponsored", ignoreCase = true) || d.equals("Sponsored", ignoreCase = true) ||
+                    t.equals("Ad", ignoreCase = true)) &&
+            (vid.contains("ad_", ignoreCase = true) || vid.contains("player", ignoreCase = true))
+        ) {
+            return true
+        }
         for (kw in ACTIVE_AD_TEXT_KEYWORDS) {
             if (t.startsWith(kw, ignoreCase = true) || d.startsWith(kw, ignoreCase = true)) {
                 return true

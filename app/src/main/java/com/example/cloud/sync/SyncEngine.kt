@@ -16,7 +16,10 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import java.io.IOException
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 
@@ -70,11 +73,17 @@ class SyncEngine(
     private suspend fun syncWithFirestore(uid: String) {
         val userDoc = db.collection("users").document(uid)
 
+        val localSessions = database.sessionDao().getAllSessionsAscending()
+        val calculatedStreak = com.example.feature.analytics.domain.StreakCalculator.calculate(localSessions).currentStreak
+        val userGoalMinutes = preferencesRepository.preferencesFlow.first().dailyGoalMinutes
+
         // 1. Sync Profile Document
         val profilePayload = hashMapOf<String, Any>(
             "userId" to uid,
             "displayName" to (authRepository.currentDisplayName().takeUnless { it.isNullOrBlank() } ?: "User"),
             "email" to (authRepository.currentUserEmail() ?: ""),
+            "dailyStudyGoalMinutes" to userGoalMinutes,
+            "currentStreak" to calculatedStreak,
             "updatedAt" to FieldValue.serverTimestamp()
         )
 
@@ -82,10 +91,11 @@ class SyncEngine(
             val userSnap = userDoc.get().await()
             if (!userSnap.exists()) {
                 profilePayload["createdAt"] = FieldValue.serverTimestamp()
-                profilePayload["dailyStudyGoalMinutes"] = 60
-                profilePayload["currentStreak"] = 0
                 userDoc.set(profilePayload).await()
             } else {
+                userSnap.getTimestamp("createdAt")?.let {
+                    profilePayload["createdAt"] = it
+                }
                 userDoc.set(profilePayload, SetOptions.merge()).await()
             }
         } catch (e: Exception) {
@@ -94,7 +104,6 @@ class SyncEngine(
         }
 
         // 2. Push Local Sessions
-        val localSessions = database.sessionDao().getAllSessionsAscending()
         for (session in localSessions) {
             val sessionDoc = userDoc.collection("sessions").document(session.id)
             val sessionPayload = hashMapOf<String, Any>(
@@ -102,6 +111,11 @@ class SyncEngine(
                 "userId" to uid,
                 "mode" to session.mode.name,
                 "durationMinutes" to ((session.actualDurationMillis / (1000 * 60)).toInt()),
+                "subject" to session.subject,
+                "topic" to session.topic,
+                "goal" to session.goal,
+                "actualDurationMillis" to session.actualDurationMillis,
+                "completed" to session.completed,
                 "completedAt" to Timestamp(Date(session.endTime)),
                 "createdAt" to Timestamp(Date(session.createdAt))
             )
@@ -124,22 +138,27 @@ class SyncEngine(
                         .getOrDefault(SessionMode.TIMER)
                     val durMinutes = (doc.getLong("durationMinutes") ?: 0L).toInt()
                     val durMillis = durMinutes * 60 * 1000L
+                    val subject = doc.getString("subject") ?: "Study"
+                    val topic = doc.getString("topic") ?: "General"
+                    val goal = doc.getString("goal") ?: "Deep Focus"
+                    val actualMillis = doc.getLong("actualDurationMillis") ?: durMillis
+                    val completed = doc.getBoolean("completed") ?: true
                     val completedAt = doc.getTimestamp("completedAt")?.toDate()?.time ?: System.currentTimeMillis()
                     val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: completedAt
 
                     val restoredSession = SessionRecordEntity(
                         id = id,
                         mode = mode,
-                        title = "Focus Session",
-                        subject = "Study",
-                        topic = "General",
-                        goal = "Deep Focus",
+                        title = "$subject - $topic",
+                        subject = subject,
+                        topic = topic,
+                        goal = goal,
                         plannedDurationMillis = durMillis,
-                        actualDurationMillis = durMillis,
-                        startTime = completedAt - durMillis,
+                        actualDurationMillis = actualMillis,
+                        startTime = completedAt - actualMillis,
                         endTime = completedAt,
-                        completed = true,
-                        cancelled = false,
+                        completed = completed,
+                        cancelled = !completed,
                         pomodoroCycles = 1,
                         completedPomodoroCycles = 1,
                         createdAt = createdAt
@@ -153,17 +172,20 @@ class SyncEngine(
 
         // 4. Push Local Study Plans
         val localPlans = database.studyPlanDao().getAllPlans()
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         for (plan in localPlans) {
             val planDoc = userDoc.collection("study_plans").document(plan.id)
+            val schedDate = if (plan.dateString.isNotBlank()) plan.dateString else isoFormat.format(Date(plan.targetDate))
             val planPayload = hashMapOf<String, Any>(
                 "id" to plan.id,
                 "userId" to uid,
                 "title" to plan.subjectName,
-                "targetSubject" to plan.topicName,
-                "durationMinutes" to plan.plannedDurationMinutes,
-                "activeDays" to listOf("Mon", "Tue", "Wed", "Thu", "Fri"),
+                "subject" to plan.topicName,
+                "targetMinutes" to plan.plannedDurationMinutes,
+                "isCompleted" to plan.isCompleted,
+                "scheduledDate" to schedDate,
                 "createdAt" to Timestamp(Date(plan.createdAt)),
-                "updatedAt" to Timestamp(Date(plan.createdAt))
+                "updatedAt" to Timestamp(Date(System.currentTimeMillis()))
             )
             try {
                 planDoc.set(planPayload, SetOptions.merge()).await()
@@ -178,10 +200,12 @@ class SyncEngine(
             for (doc in remotePlansSnap.documents) {
                 val id = doc.getString("id") ?: doc.id
                 val existing = database.studyPlanDao().getPlanById(id)
+                val isDone = doc.getBoolean("isCompleted") ?: false
                 if (existing == null) {
                     val title = doc.getString("title") ?: "Study Plan"
-                    val subject = doc.getString("targetSubject") ?: ""
-                    val duration = (doc.getLong("durationMinutes") ?: 30L).toInt()
+                    val subject = doc.getString("subject") ?: ""
+                    val duration = (doc.getLong("targetMinutes") ?: 30L).toInt()
+                    val schedDate = doc.getString("scheduledDate") ?: ""
                     val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis()
 
                     val restoredPlan = StudyPlanEntity(
@@ -191,18 +215,20 @@ class SyncEngine(
                         topicName = subject,
                         plannedDurationMinutes = duration,
                         targetDate = createdAt,
-                        isCompleted = false,
+                        isCompleted = isDone,
                         colorHex = "#7C3AED",
                         createdAt = createdAt,
-                        dateString = "",
+                        dateString = schedDate,
                         startTime = "08:00",
                         endTime = "09:00",
                         startMinutes = 480,
                         endMinutes = 540,
-                        status = "PLANNED",
+                        status = if (isDone) "COMPLETED" else "PLANNED",
                         notes = ""
                     )
                     database.studyPlanDao().insertPlan(restoredPlan)
+                } else if (existing.isCompleted != isDone) {
+                    database.studyPlanDao().updatePlanCompletion(id, isDone)
                 }
             }
         } catch (e: Exception) {

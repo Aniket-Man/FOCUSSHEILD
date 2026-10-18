@@ -150,7 +150,7 @@ fun FocusNavGraph(
     }
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 
-    val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.GoogleSignIn.route
+    val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
 
     NavHost(
         navController = navController,
@@ -333,7 +333,8 @@ fun FocusNavGraph(
                 },
                 onNavigateToSummary = {
                     navController.navigate(Screen.SessionSummary.route) {
-                        popUpTo(Screen.Home.route)
+                        popUpTo(Screen.Home.route) { inclusive = false }
+                        launchSingleTop = true
                     }
                 }
             )
@@ -342,24 +343,49 @@ fun FocusNavGraph(
         // SUB-SCREEN: SESSION SUMMARY (POST-SESSION METRICS & SAVE / DON'T SAVE DECISION)
         composable(Screen.SessionSummary.route) {
             val pendingSummary by sessionViewModel.pendingSessionSummary.collectAsStateWithLifecycle()
+            // Retain the last valid summary during exit animations so the screen never blanks out
+            val cachedSummary = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.example.feature.session.domain.SessionSummaryData?>(null) }
             if (pendingSummary != null) {
+                cachedSummary.value = pendingSummary
+            }
+            val displaySummary = pendingSummary ?: cachedSummary.value
+
+            val navigateBackHome: () -> Unit = {
+                val popped = navController.popBackStack(Screen.Home.route, inclusive = false)
+                if (!popped) {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            if (displaySummary != null) {
                 FocusSessionSummaryScreen(
-                    summaryData = pendingSummary!!,
+                    summaryData = displaySummary,
                     onSaveSession = {
                         sessionViewModel.savePendingSession {
-                            navController.popBackStack(Screen.Home.route, inclusive = false)
+                            val isSignedIn = FocusShieldApp.instance.authRepository.currentUserEmail() != null
+                            if (isSignedIn) {
+                                navigateBackHome()
+                            } else {
+                                navController.navigate(Screen.Account.route) {
+                                    popUpTo(Screen.Home.route) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
                         }
                     },
                     onDiscardSession = {
                         sessionViewModel.discardPendingSession {
-                            navController.popBackStack(Screen.Home.route, inclusive = false)
+                            navigateBackHome()
                         }
                     }
                 )
             } else {
-                // If summary is null (e.g. back navigation or cleared), return to Home
+                // If summary is null (e.g. back navigation or cleared), return cleanly to Home
                 LaunchedEffect(Unit) {
-                    navController.popBackStack(Screen.Home.route, inclusive = false)
+                    navigateBackHome()
                 }
             }
         }
@@ -435,26 +461,6 @@ fun FocusNavGraph(
                 onSplashFinished = {
                     navController.navigate(nextDestinationAfterSplash) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
-            )
-        }
-
-        // GOOGLE SIGN IN FLOW
-        composable(Screen.GoogleSignIn.route) {
-            com.example.feature.auth.GoogleSignInScreen(
-                onSignInSuccess = {
-                    val nextRoute = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
-                    navController.navigate(nextRoute) {
-                        popUpTo(Screen.GoogleSignIn.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
-                onSkip = {
-                    val nextRoute = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
-                    navController.navigate(nextRoute) {
-                        popUpTo(Screen.GoogleSignIn.route) { inclusive = true }
                         launchSingleTop = true
                     }
                 }

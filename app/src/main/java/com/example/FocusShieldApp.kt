@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @HiltAndroidApp
@@ -188,6 +189,25 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         preferencesObserver.start(applicationScope)
         SyncTracker.onPendingChanged = { syncGateway.requestSync() }
 
+        // Automatically update Scholar Profile picture & display name from Gmail / Google account upon sign-in
+        applicationScope.launch {
+            authRepository.authState.collect { authState ->
+                if (authState is AuthState.Authenticated) {
+                    val photoUrl = authState.photoUrl
+                    val displayName = authState.displayName
+                    if (!photoUrl.isNullOrBlank()) {
+                        preferencesRepository.updateUserPhotoUri(photoUrl)
+                    }
+                    if (displayName.isNotBlank()) {
+                        val currentName = preferencesRepository.preferencesFlow.first().userName
+                        if (currentName.isBlank() || currentName == "Focus Scholar") {
+                            preferencesRepository.updateUserName(displayName)
+                        }
+                    }
+                }
+            }
+        }
+
         // Periodic cloud auto-save. The foreground loop inside SyncGateway honours the user's
         // cadence (15s–5min) while the app is alive; WorkManager covers the app-closed case, where
         // Android's 15-minute periodic floor applies. Both are cancelled the moment the user signs
@@ -221,9 +241,14 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         )
 
         // Restore any previously-signed-in cloud session (no-op when not configured / signed out)
+        // and ensure preloaded Session Summary live-writing quotes exist in Cloud Firestore.
         applicationScope.launch {
             try {
                 authRepository.restoreOnStart()
+            } catch (_: Exception) {
+            }
+            try {
+                com.example.data.repository.SessionQuoteRepository.ensurePreloadedInFirestore()
             } catch (_: Exception) {
             }
         }

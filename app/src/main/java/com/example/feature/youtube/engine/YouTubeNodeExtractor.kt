@@ -43,12 +43,31 @@ object YouTubeNodeExtractor {
         "$YT:id/player_view"
     )
 
+    private val WATCH_CONTAINER_VIEW_IDS = listOf(
+        "$YT:id/watch_panel",
+        "$YT:id/watch_swipey_item",
+        "$YT:id/watch_header_layout",
+        "$YT:id/watch_layout"
+    )
+
     private val AD_VIEW_IDS = listOf(
         "$YT:id/skip_ad_button",
         "$YT:id/skip_ad_button_container",
+        "$YT:id/skip_ad_button_text",
         "$YT:id/ad_progress_text",
         "$YT:id/ad_countdown_text",
-        "$YT:id/ad_countdown"
+        "$YT:id/ad_countdown",
+        "$YT:id/ad_skip_button",
+        "$YT:id/ad_badge",
+        "$YT:id/ad_duration",
+        "$YT:id/ad_time_remaining",
+        "$YT:id/ad_view",
+        "$YT:id/ad_break",
+        "$YT:id/modern_ad_ui",
+        "$YT:id/ad_headline",
+        "$YT:id/ad_cta_button",
+        "$YT:id/ad_layout",
+        "$YT:id/visit_advertiser_button"
     )
 
     private val SUBSCRIBE_BUTTON_IDS = listOf(
@@ -72,6 +91,15 @@ object YouTubeNodeExtractor {
         "$YT:id/channel_title",
         "$YT:id/channel_header",
         "$YT:id/owner_layout",
+        "$YT:id/channel_handle",
+        "$YT:id/byline",
+        "$YT:id/byline_text",
+        "$YT:id/byline_view",
+        "$YT:id/watch_metadata_byline",
+        "$YT:id/watch_metadata_subtitle",
+        "$YT:id/metadata_line",
+        "$YT:id/channel_sub_text",
+        "$YT:id/upload_info",
         "$YT:id/subtitle"
     )
 
@@ -403,12 +431,89 @@ object YouTubeNodeExtractor {
     }
 
     /**
+     * Structured dual channel identity extracted from the active YouTube watch header.
+     * Holds both the @handle under the title (e.g., "@SonypicturesBrasil") and the
+     * full channel display name from the Subscribe button / avatar / owner bar (e.g., "Sony Pictures Brasil").
+     */
+    data class WatchChannelIdentity(
+        val channelHandle: String? = null,
+        val channelName: String? = null
+    ) {
+        val isIdentifiable: Boolean
+            get() = !channelHandle.isNullOrBlank() || !channelName.isNullOrBlank()
+
+        val preferredDisplay: String?
+            get() = channelName ?: channelHandle
+    }
+
+    /**
+     * Checks if [node] or any of its ancestors (up to 5 levels) belongs to a recommendation card,
+     * comment thread, or ad companion overlay so below-the-fold channels (e.g. BnfTV, Food Pharmer)
+     * are never mistaken for the active video's channel.
+     */
+    private fun isInsideExcludedContainer(node: AccessibilityNodeInfo?): Boolean {
+        var current = node
+        var depth = 0
+        while (current != null && depth < 5) {
+            val resId = current.viewIdResourceName ?: ""
+            if (resId.isNotEmpty()) {
+                if (YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
+                        resId.contains(it, ignoreCase = true)
+                    }
+                ) {
+                    return true
+                }
+            }
+            current = try { current.parent } catch (_: Exception) { null }
+            depth++
+        }
+        return false
+    }
+
+    /**
+     * Extracts BOTH the @handle and the full channel display name from the active watch header.
+     * Cross-checks the watch subtitle/byline (@handle), Subscribe button description,
+     * channel avatar description, and watch owner views while strictly ignoring recommendations.
+     */
+    fun extractChannelIdentity(rootNode: AccessibilityNodeInfo?): WatchChannelIdentity {
+        if (rootNode == null) return WatchChannelIdentity()
+
+        val handle = extractChannelHandle(rootNode)
+        val fromSubscribe = extractChannelFromSubscribeButton(rootNode)
+        val fromAvatar = extractChannelFromAvatar(rootNode)
+        val fromOwnerView = extractChannelDisplayNameFromOwnerViews(rootNode)
+        val fromWatchPlayer = if (fromSubscribe == null && fromAvatar == null && fromOwnerView == null) {
+            extractChannelFromWatchPlayer(rootNode)
+        } else null
+
+        // Pick the best non-handle display name if available
+        val displayCandidates = listOfNotNull(fromSubscribe, fromAvatar, fromOwnerView, fromWatchPlayer)
+        val bestDisplayName = displayCandidates.firstOrNull { candidate ->
+            !candidate.startsWith("@") && !candidate.equals(handle, ignoreCase = true)
+        } ?: displayCandidates.firstOrNull()
+
+        val resolvedHandle = when {
+            !handle.isNullOrBlank() -> if (handle.startsWith("@")) handle else "@$handle"
+            bestDisplayName != null && bestDisplayName.startsWith("@") -> bestDisplayName
+            else -> null
+        }
+
+        val resolvedName = bestDisplayName?.removePrefix("@")?.trim()?.takeIf { it.isNotBlank() }
+
+        return WatchChannelIdentity(
+            channelHandle = resolvedHandle,
+            channelName = resolvedName
+        )
+    }
+
+    /**
      * Extracts channel name directly from the Subscribe button accessibility content description
-     * (e.g. "Subscribe to PW - JEE Wallah." or "Subscribed to Khan Academy").
+     * (e.g. "Subscribe to PW - JEE Wallah." or "Subscribed to Sony Pictures Brasil").
      */
     fun extractChannelFromSubscribeButton(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
         return findFirstMatching(rootNode, SUBSCRIBE_BUTTON_IDS) { node ->
+            if (isInsideExcludedContainer(node)) return@findFirstMatching null
             val desc = node.contentDescription?.toString()?.trim()
             val candidate = YouTubeDetectionRules.extractChannelFromSubscribeButton(desc)
             if (candidate != null) {
@@ -419,16 +524,17 @@ object YouTubeNodeExtractor {
 
     /**
      * Extracts the channel handle (@name) specifically from the watch metadata area
-     * below the video title (as shown in modern YouTube watch layouts).
-     * This provides the most precise channel detection signal.
+     * below the video title (as shown in modern YouTube watch layouts, e.g. @SonypicturesBrasil).
      */
     fun extractChannelHandle(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
 
-        // 1. Direct view ID query on dedicated handle and byline containers
+        // 1. Direct view ID query on dedicated handle and byline containers in the watch header
         val handleFromView = findFirstMatching(rootNode, HANDLE_VIEW_IDS) { node ->
             val resId = node.viewIdResourceName ?: ""
-            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
+            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) } &&
+                !isInsideExcludedContainer(node)
+            ) {
                 val text = node.text?.toString()?.trim() ?: ""
                 val desc = node.contentDescription?.toString()?.trim() ?: ""
 
@@ -445,57 +551,57 @@ object YouTubeNodeExtractor {
         return extractHandleFromWatchSubtree(rootNode)
     }
 
-    /**
-     * Extracts the verified channel name or @handle of the video currently on the watch page.
-     * Evaluates in strict order of reliability:
-     * 1. Direct channel @handle under video title (e.g. @PW-JEEWallah)
-     * 2. Subscribe button description ("Subscribe to PW - JEE Wallah.")
-     * 3. Channel avatar / profile link description ("Go to channel [Name]" or "[Name] avatar")
-     * 4. Direct channel name view IDs (channel_name, owner_name, owner_text, channel_title)
-     * 5. Bounded watch subtree traversal
-     * 6. Direct scan across active window nodes for @handle
-     */
-    fun extractChannelName(rootNode: AccessibilityNodeInfo?): String? {
+    private fun extractChannelDisplayNameFromOwnerViews(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
-
-        // 1. Precise channel handle (@name) under the video title
-        val handle = extractChannelHandle(rootNode)
-        if (handle != null) return handle
-
-        // 2. Subscribe button contentDescription
-        val fromSubscribe = extractChannelFromSubscribeButton(rootNode)
-        if (fromSubscribe != null) return fromSubscribe
-
-        // 3. Channel Avatar / profile button content description
-        val fromAvatar = extractChannelFromAvatar(rootNode)
-        if (fromAvatar != null) return fromAvatar
-
-        // 4. Direct channel view IDs
-        val channelFromView = findFirstMatching(rootNode, CHANNEL_VIEW_IDS) { node ->
+        return findFirstMatching(rootNode, CHANNEL_VIEW_IDS) { node ->
             val resId = node.viewIdResourceName ?: ""
-            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }) {
+            if (!EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) } &&
+                !isInsideExcludedContainer(node)
+            ) {
                 val text = node.text?.toString()?.trim()
-                if (!text.isNullOrBlank()) {
-                    val valid = YouTubeDetectionRules.extractAndValidateChannelName(text)
+                val desc = node.contentDescription?.toString()?.trim()
+                val candidate = when {
+                    !text.isNullOrBlank() -> text
+                    !desc.isNullOrBlank() -> desc
+                    else -> {
+                        var childCandidate: String? = null
+                        for (i in 0 until node.childCount) {
+                            val child = try { node.getChild(i) } catch (_: Exception) { null }
+                            val ct = child?.text?.toString()?.trim()
+                            val cd = child?.contentDescription?.toString()?.trim()
+                            if (!ct.isNullOrBlank()) {
+                                childCandidate = ct
+                                break
+                            } else if (!cd.isNullOrBlank()) {
+                                childCandidate = cd
+                                break
+                            }
+                        }
+                        childCandidate
+                    }
+                }
+                if (!candidate.isNullOrBlank()) {
+                    val valid = YouTubeDetectionRules.extractAndValidateChannelName(candidate)
                     if (valid != null) {
                         cleanChannelName(valid)
                     } else null
                 } else null
             } else null
         }
-        if (channelFromView != null) return channelFromView
+    }
 
-        // 5. Bounded watch subtree traversal
-        val fromWatch = extractChannelFromWatchPlayer(rootNode)
-        if (fromWatch != null) return fromWatch
-
-        // 6. Direct scan across active window nodes for @handle (e.g. @PW-JEEWallah)
-        return extractHandleFromAnyNode(rootNode)
+    /**
+     * Extracts the verified channel name or @handle of the video currently on the watch page.
+     */
+    fun extractChannelName(rootNode: AccessibilityNodeInfo?): String? {
+        if (rootNode == null) return null
+        val identity = extractChannelIdentity(rootNode)
+        return identity.channelName ?: identity.channelHandle?.removePrefix("@")
     }
 
     /**
      * Extracts channel name from Channel avatar / header button
-     * (e.g. "Go to channel Khan Academy" or "Physics Wallah avatar").
+     * (e.g. "Go to channel Khan Academy" or "Sony Pictures Brasil avatar").
      */
     fun extractChannelFromAvatar(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
@@ -507,8 +613,14 @@ object YouTubeNodeExtractor {
             "$YT:id/channel_thumbnail"
         )
         return findFirstMatching(rootNode, avatarIds) { node ->
+            if (isInsideExcludedContainer(node)) return@findFirstMatching null
             val desc = node.contentDescription?.toString()?.trim() ?: ""
-            val prefixes = listOf("Go to channel ", "Channel avatar for ", "Channel: ", "Visit ")
+            if (desc.isBlank()) return@findFirstMatching null
+            val handleMatch = HANDLE_REGEX.find(desc)
+            if (handleMatch != null) {
+                return@findFirstMatching cleanChannelName(handleMatch.value)
+            }
+            val prefixes = listOf("Go to channel ", "Channel avatar for ", "Channel: ", "Visit ", "Open channel page for ")
             for (p in prefixes) {
                 if (desc.startsWith(p, ignoreCase = true) && desc.length > p.length) {
                     val name = desc.substring(p.length).trim()
@@ -516,10 +628,22 @@ object YouTubeNodeExtractor {
                     if (cleaned != null) return@findFirstMatching cleaned
                 }
             }
-            if (desc.endsWith(" avatar", ignoreCase = true) && desc.length > 7) {
-                val name = desc.dropLast(7).trim()
-                val cleaned = cleanChannelName(name)
+            val suffixes = listOf(", Go to channel", " avatar", " channel avatar", ", open channel")
+            for (s in suffixes) {
+                if (desc.endsWith(s, ignoreCase = true) && desc.length > s.length) {
+                    val name = desc.substring(0, desc.length - s.length).trim()
+                    val cleaned = cleanChannelName(name)
+                    if (cleaned != null) return@findFirstMatching cleaned
+                }
+            }
+            if (desc.contains(" • ") || desc.contains(" · ")) {
+                val candidate = desc.substringBefore(" • ").substringBefore(" · ").trim()
+                val cleaned = cleanChannelName(candidate)
                 if (cleaned != null) return@findFirstMatching cleaned
+            }
+            val direct = cleanChannelName(desc)
+            if (direct != null && !direct.contains("avatar", ignoreCase = true) && !direct.contains("thumbnail", ignoreCase = true)) {
+                return@findFirstMatching direct
             }
             null
         }
@@ -527,9 +651,9 @@ object YouTubeNodeExtractor {
 
     /**
      * Direct scan of accessibility node tree looking specifically for @handle text tokens
-     * (e.g. "@PW-JEEWallah 1.2K likes 10K views 1h ago").
+     * in the upper watch header (e.g. "@SonypicturesBrasil 1.7K").
      */
-    fun extractHandleFromAnyNode(rootNode: AccessibilityNodeInfo?, maxNodes: Int = 350): String? {
+    fun extractHandleFromAnyNode(rootNode: AccessibilityNodeInfo?, maxNodes: Int = 200): String? {
         if (rootNode == null) return null
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(rootNode)
@@ -538,9 +662,8 @@ object YouTubeNodeExtractor {
             val node = queue.removeFirst()
             visited++
             val resId = node.viewIdResourceName ?: ""
-            val isExcluded = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
-                resId.contains(it, ignoreCase = true)
-            }
+            val isTitleNode = EXCLUDED_TITLE_VIEW_KEYWORDS.any { resId.contains(it, ignoreCase = true) }
+            val isExcluded = isTitleNode || isInsideExcludedContainer(node)
             if (!isExcluded) {
                 val text = node.text?.toString()?.trim() ?: ""
                 val desc = node.contentDescription?.toString()?.trim() ?: ""
@@ -552,6 +675,9 @@ object YouTubeNodeExtractor {
                         if (cleaned != null) return cleaned
                     }
                 }
+            } else if (YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any { resId.contains(it, ignoreCase = true) }) {
+                // Do not traverse into recommendation / comment containers
+                continue
             }
             for (i in 0 until node.childCount) {
                 val child = try { node.getChild(i) } catch (_: Exception) { null }
@@ -565,7 +691,7 @@ object YouTubeNodeExtractor {
      * Scans specifically the watch player metadata subtree for @handle nodes.
      */
     private fun extractHandleFromWatchSubtree(rootNode: AccessibilityNodeInfo): String? {
-        val watchContainer = findFirstMatching(rootNode, WATCH_PAGE_VIEW_IDS) { it }
+        val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
         val searchRoot = watchContainer ?: rootNode
 
         var visited = 0
@@ -577,11 +703,16 @@ object YouTubeNodeExtractor {
                 visited++
 
                 val viewId = node.viewIdResourceName ?: ""
-                val isTitleNode = EXCLUDED_TITLE_VIEW_KEYWORDS.any { viewId.contains(it, ignoreCase = true) }
-                val isExcluded = isTitleNode || YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
+                val isRecommendationContainer = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
                     viewId.contains(it, ignoreCase = true)
                 }
-                if (!isExcluded) {
+                if (isRecommendationContainer) {
+                    // Never descend into related videos or comments subtrees
+                    continue
+                }
+
+                val isTitleNode = EXCLUDED_TITLE_VIEW_KEYWORDS.any { viewId.contains(it, ignoreCase = true) }
+                if (!isTitleNode && !isInsideExcludedContainer(node)) {
                     val text = node.text?.toString()?.trim() ?: ""
                     val desc = node.contentDescription?.toString()?.trim() ?: ""
 
@@ -610,14 +741,11 @@ object YouTubeNodeExtractor {
      * "Subscribe to [Channel]", "@handle", or "Go to channel [Name]" nodes.
      */
     private fun extractChannelFromWatchPlayer(rootNode: AccessibilityNodeInfo): String? {
-        // Find the watch panel container so we only scan the active video area.
-        val watchContainer = findFirstMatching(rootNode, WATCH_PAGE_VIEW_IDS) { it }
-
+        val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
         val searchRoot = watchContainer ?: rootNode
         val candidates = mutableListOf<String>()
         var found = false
 
-        // Manual BFS limited to the watch player subtree
         var visited = 0
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
         queue.add(searchRoot to 0)
@@ -627,24 +755,19 @@ object YouTubeNodeExtractor {
                 visited++
 
                 val viewId = node.viewIdResourceName ?: ""
-
-                // Skip nodes from recommendations, comments, description sheet, live chat
                 val isExcluded = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
                     viewId.contains(it, ignoreCase = true)
                 }
-                if (!isExcluded) {
+                if (isExcluded) {
+                    // Do not descend into recommendation lists, comments, or ad overlays
+                    continue
+                }
+
+                if (!isInsideExcludedContainer(node)) {
                     val text = node.text?.toString()?.trim() ?: ""
                     val desc = node.contentDescription?.toString()?.trim() ?: ""
 
-                    // Check for @handle first in subtree
-                    val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
-                    if (handleMatch != null) {
-                        candidates.add(handleMatch.value)
-                        found = true
-                        break
-                    }
-
-                    // Subscribe button near the video — strongest signal for the video's own channel
+                    // Subscribe button near the video — strongest signal for the video's own channel name
                     val subscribePrefix = "Subscribe to "
                     if (desc.startsWith(subscribePrefix, ignoreCase = true) && desc.length > subscribePrefix.length) {
                         candidates.add(desc.substring(subscribePrefix.length).trim())
@@ -664,6 +787,17 @@ object YouTubeNodeExtractor {
                         candidates.add(desc.substring(goPrefix.length).trim())
                         found = true
                         break
+                    }
+
+                    // Check for @handle in watch header subtree
+                    val isTitleNode = EXCLUDED_TITLE_VIEW_KEYWORDS.any { viewId.contains(it, ignoreCase = true) }
+                    if (!isTitleNode) {
+                        val handleMatch = HANDLE_REGEX.find(text) ?: HANDLE_REGEX.find(desc)
+                        if (handleMatch != null) {
+                            candidates.add(handleMatch.value)
+                            found = true
+                            break
+                        }
                     }
                 }
 
@@ -770,5 +904,48 @@ object YouTubeNodeExtractor {
                 }
             }
         } catch (_: Exception) {}
+    }
+
+    /**
+     * If YouTube minimized the paused unapproved video into the bottom miniplayer bar after
+     * stepping back once, clicks the miniplayer's Close button so it does not linger.
+     */
+    fun dismissMiniplayerIfPresent(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+        try {
+            var visited = 0
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            while (queue.isNotEmpty() && visited < 100) {
+                val node = queue.removeFirst()
+                visited++
+                val viewId = node.viewIdResourceName?.lowercase() ?: ""
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+                val isMiniplayerClose =
+                    viewId.contains("miniplayer_close") ||
+                    viewId.contains("floaty_close") ||
+                    viewId.contains("modern_miniplayer_close") ||
+                    desc.equals("Close miniplayer", ignoreCase = true) ||
+                    desc.equals("Close player", ignoreCase = true)
+                if (isMiniplayerClose) {
+                    var target: AccessibilityNodeInfo? = node
+                    var depth = 0
+                    while (target != null && depth < 4) {
+                        if (target.isClickable) {
+                            if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                                return true
+                            }
+                        }
+                        target = target.parent
+                        depth++
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        } catch (_: Exception) {}
+        return false
     }
 }

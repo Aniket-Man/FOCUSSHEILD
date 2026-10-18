@@ -57,10 +57,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +75,7 @@ import coil.compose.AsyncImage
 import com.example.cloud.auth.GoogleWebClientId
 import com.example.cloud.auth.AuthState
 import com.example.cloud.sync.SyncCycleOutcome
+import com.example.core.design.FocusColors
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -169,12 +172,12 @@ fun AccountScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0F0E1E)
+                    containerColor = FocusColors.Background
                 )
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = Color(0xFF0F0E1E),
+        containerColor = FocusColors.Background,
         modifier = modifier
             .fillMaxSize()
             .statusBarsPadding()
@@ -307,7 +310,7 @@ fun AccountScreen(
                             }
 
                             val outcomeText = when (state.outcome) {
-                                SyncCycleOutcome.Synced -> "All data synchronized with Firestore"
+                                SyncCycleOutcome.Synced -> "Your study progress, goals, and notes are encrypted and securely backed up to your account."
                                 SyncCycleOutcome.Offline -> "Offline. Will sync automatically once online."
                                 is SyncCycleOutcome.Failed -> "Sync error: ${(state.outcome as SyncCycleOutcome.Failed).message}"
                                 else -> "Cloud backup ready"
@@ -441,12 +444,10 @@ fun AccountScreen(
                                     )
                                 } else {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "G",
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                fontWeight = FontWeight.Black,
-                                                color = Color(0xFF4285F4)
-                                            )
+                                        Image(
+                                            painter = painterResource(id = com.example.R.drawable.ic_google_logo),
+                                            contentDescription = "Google Logo",
+                                            modifier = Modifier.size(22.dp)
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(

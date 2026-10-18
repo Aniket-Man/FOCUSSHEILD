@@ -308,10 +308,7 @@ fun ActiveSessionScreen(
                     TextButton(
                         onClick = {
                             showEndSessionDialog = false
-                            val ended = viewModel.endSession()
-                            if (ended != null) {
-                                onNavigateToSummary()
-                            }
+                            viewModel.endSession()
                         },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = FocusColors.CoralWarning

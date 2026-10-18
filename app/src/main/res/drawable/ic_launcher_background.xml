@@ -1,10 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon background matching the supplied blue-to-purple gradient tile. -->
+<!-- Adaptive-icon background matching the supplied FocusShield #6E18E6 purple tile. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:angle="0"
-        android:centerColor="#663BEF"
-        android:endColor="#6821E5"
-        android:startColor="#6C8FF5"
-        android:type="linear" />
+    <solid android:color="#6E18E6" />
 </shape>

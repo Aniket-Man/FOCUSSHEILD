@@ -59,65 +59,65 @@ object FocusColors {
         primary = Color(0xFF7C3AED), // purple-600
         primaryDark = Color(0xFF6D28D9), // purple-700
         primaryLight = Color(0xFF8B5CF6), // purple-500
-        primaryContainer = Color(0xFFF3E8FF), // purple-100
-        onPrimaryContainer = Color(0xFF6B21A8), // purple-800
+        primaryContainer = Color(0xFFE9D5FF), // purple light container
+        onPrimaryContainer = Color(0xFF5B21B6), // purple-800
         gradientStart = Color(0xFF8B5CF6),
         gradientEnd = Color(0xFF6D28D9),
         purpleGradientLight = Color(0xFFC084FC),
-        emeraldSuccess = Color(0xFF22C55E), // green-500
-        emeraldLight = Color(0xFFDCFCE7), // green-100
-        coralWarning = Color(0xFFEA580C), // orange-600 / coral
-        coralLight = Color(0xFFFFEDD5), // orange-100
-        amberOrange = Color(0xFFF59E0B), // amber-500
-        amberLight = Color(0xFFFEF3C7), // amber-100
-        cyanBlue = Color(0xFF38BDF8), // sky-400
-        cyanLight = Color(0xFFE0F2FE), // sky-100
-        background = Color(0xFFFBF8FF), // soft warm lavender canvas
-        surface = Color(0xFFFFFFFF), // pure white
-        surfaceVariant = Color(0xFFF8FAFC), // slate-50
-        surfaceSubtle = Color(0xFFF1F5F9), // slate-100
-        cardBorder = Color(0xFFE2E8F0), // slate-200
-        cardBorderSubtle = Color(0xFFF1F5F9), // slate-100
-        textPrimary = Color(0xFF1E293B), // slate-800
-        textSecondary = Color(0xFF64748B), // slate-500
-        textMuted = Color(0xFF94A3B8), // slate-400
+        emeraldSuccess = Color(0xFF16A34A), // green-600
+        emeraldLight = Color(0xFFDCFCE7),
+        coralWarning = Color(0xFFEA580C),
+        coralLight = Color(0xFFFFEDD5),
+        amberOrange = Color(0xFFD97706),
+        amberLight = Color(0xFFFEF3C7),
+        cyanBlue = Color(0xFF0284C7),
+        cyanLight = Color(0xFFE0F2FE),
+        background = Color(0xFFF3ECFF), // Requested light mode background
+        surface = Color(0xFFFFFFFF), // pure white card surface
+        surfaceVariant = Color(0xFFF8F2FF),
+        surfaceSubtle = Color(0xFFECE0FD),
+        cardBorder = Color(0xFFE0D0F7),
+        cardBorderSubtle = Color(0xFFEBE0FA),
+        textPrimary = Color(0xFF1E152A), // rich dark slate purple
+        textSecondary = Color(0xFF5C4B75),
+        textMuted = Color(0xFF8E7AA8),
         textOnDark = Color(0xFFFFFFFF),
         textOnDarkMuted = Color(0xFFF3E8FF),
-        pomodoroGreen = Color(0xFF22C55E),
-        channelsAmber = Color(0xFFF59E0B),
-        blockedRed = Color(0xFFEF4444),
-        historyPurple = Color(0xFF8B5CF6),
+        pomodoroGreen = Color(0xFF16A34A),
+        channelsAmber = Color(0xFFD97706),
+        blockedRed = Color(0xFFDC2626),
+        historyPurple = Color(0xFF7C3AED),
         isDark = false
     )
 
-    // --- PITCH-BLACK AMOLED DARK PALETTE (Default) ---
+    // --- DARK PALETTE ---
     val DarkPalette = FocusColorPalette(
-        primary = Color(0xFF8B5CF6), // vibrant purple-500
-        primaryDark = Color(0xFF6D28D9), // purple-700
-        primaryLight = Color(0xFFA78BFA), // lavender purple-400
-        primaryContainer = Color(0xFF26183C), // deep purple dark container
-        onPrimaryContainer = Color(0xFFE9D5FF),
-        gradientStart = Color(0xFF8B5CF6),
+        primary = Color(0xFFA78BFA), // vibrant purple-400
+        primaryDark = Color(0xFF7C3AED), // purple-600
+        primaryLight = Color(0xFFC084FC), // purple-300
+        primaryContainer = Color(0xFF352048), // deep purple dark container
+        onPrimaryContainer = Color(0xFFF3E8FF),
+        gradientStart = Color(0xFF9333EA),
         gradientEnd = Color(0xFF6D28D9),
         purpleGradientLight = Color(0xFFC084FC),
         emeraldSuccess = Color(0xFF22C55E),
         emeraldLight = Color(0xFF143823),
         coralWarning = Color(0xFFFB923C),
         coralLight = Color(0xFF381F14),
-        amberOrange = Color(0xFFFBBF24), // amber/gold PRO
+        amberOrange = Color(0xFFFBBF24),
         amberLight = Color(0xFF36260E),
         cyanBlue = Color(0xFF38BDF8),
         cyanLight = Color(0xFF122C42),
-        background = Color(0xFF000000), // pure pitch black
-        surface = Color(0xFF121215), // elevated dark surface
-        surfaceVariant = Color(0xFF18181D), // card background
-        surfaceSubtle = Color(0xFF22222A), // chip/border background
-        cardBorder = Color(0xFF2C2C36), // card border
-        cardBorderSubtle = Color(0xFF1F1F26),
+        background = Color(0xFF21152F), // Requested dark mode background
+        surface = Color(0xFF2B1D3D), // elevated dark surface
+        surfaceVariant = Color(0xFF322247), // card background
+        surfaceSubtle = Color(0xFF3D2A54), // chip/border background
+        cardBorder = Color(0xFF4C3668), // card border
+        cardBorderSubtle = Color(0xFF3B2754),
         textPrimary = Color(0xFFFFFFFF), // pure white text
-        textSecondary = Color(0xFF9CA3AF), // slate-400
-        textMuted = Color(0xFF6B7280), // slate-500
-        textOnDark = Color(0xFFFFFFFF), // for high-contrast white text on purple buttons
+        textSecondary = Color(0xFFD4C4EA), // soft lavender
+        textMuted = Color(0xFFA592BF),
+        textOnDark = Color(0xFFFFFFFF),
         textOnDarkMuted = Color(0xFFE9D5FF),
         pomodoroGreen = Color(0xFF22C55E),
         channelsAmber = Color(0xFFFBBF24),
@@ -284,6 +284,10 @@ object FocusColors {
 
     val ProGold = Color(0xFFFBBF24)
     val ProGoldText = Color(0xFF000000)
+
+    // Unified Onboarding Palette (Pages 2–5): #6D28D9 and #1E1235
+    val OnboardingPurple = Color(0xFF6D28D9)
+    val OnboardingLavender = Color(0xFF1E1235)
 
     val SwitchColors: androidx.compose.material3.SwitchColors
         @Composable

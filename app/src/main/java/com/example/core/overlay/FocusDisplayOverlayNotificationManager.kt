@@ -201,15 +201,14 @@ object FocusDisplayOverlayNotificationManager {
         }
         rootLayout.addView(accentStrip)
 
-        // Compact Focus mark, matching the icon used by in-app buttons and full-screen overlays
+        // Official FocusShield logo with the white open-book mark
         val appLogoView = ImageView(context).apply {
             val logoSize = dp(32)
             layoutParams = LinearLayout.LayoutParams(logoSize, logoSize).apply {
                 marginEnd = dp(10)
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setImageResource(R.drawable.ic_focus_brand_mark)
-            setColorFilter(Color.parseColor("#7C4DFF"))
+            setImageResource(R.drawable.ic_focus_shield_app_icon)
         }
         rootLayout.addView(appLogoView)
 

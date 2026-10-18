@@ -65,6 +65,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -414,6 +415,45 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    } else {
+                        // Empty state card for Today's Plan
+                        Surface(
+                            shape = FocusShapes.card,
+                            color = FocusColors.Surface,
+                            border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onNavigateToPlannerTab() }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CalendarToday,
+                                    contentDescription = null,
+                                    tint = FocusColors.TextMuted,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Text(
+                                    text = "No study plans for today",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = FocusColors.TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                                Text(
+                                    text = "Tap Add Study above or open the Planner to schedule your focus blocks",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = FocusColors.TextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -525,6 +565,16 @@ fun HomeScreen(
                 viewModel.claimReward(badge.id)
                 onNavigateToProfile()
             }
+        )
+    }
+
+    // Scratch Card / Mystery Box Reward Dialog (earned upon completing eligible study session)
+    val pendingScratchCard by sessionViewModel.pendingScratchCard.collectAsStateWithLifecycle()
+    pendingScratchCard?.let { card ->
+        com.example.feature.rewards.scratch.ScratchCardDialog(
+            card = card,
+            onRevealed = { sessionViewModel.onScratchCardRevealed() },
+            onDismiss = { sessionViewModel.dismissScratchCard() }
         )
     }
 }

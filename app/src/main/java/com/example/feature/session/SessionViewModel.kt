@@ -779,7 +779,7 @@ class SessionViewModel(
             isAppBlockingEnabled = session.isAppBlockingEnabled,
             isStudyChannelsEnabled = session.isStudyChannelsEnabled,
             isYouTubeStudyModeEnabled = isYouTubeStudyMode,
-            isBrowserStudyModeEnabled = session.isBrowserStudyModeEnabled,
+            isBrowserStudyModeEnabled = session.isBrowserStudyModeEnabled || _setupState.value.isBrowserStudyModeEnabled,
             blockedAppsCount = session.blockedAppPackages.size,
             distractionsBlockedCount = 0,
             completedPomodoroCycles = completedCycles,
@@ -805,33 +805,37 @@ class SessionViewModel(
 
     /**
      * User clicked "Save Session": stores the session data into local Room database and cloud sync.
+     * Suspends until the database write completes before triggering the navigation callback.
      */
     fun savePendingSession(onComplete: () -> Unit = {}) {
         val summary = _pendingSessionSummary.value
         val session = summary?.rawSession ?: sessionManager.activeSession.value
-        if (session != null) {
-            persistSessionRecord(
-                session = session,
-                isCompleted = summary?.isCompleted ?: true,
-                isCancelled = summary?.isCancelled ?: false
-            )
+        viewModelScope.launch {
+            if (session != null) {
+                persistSessionRecordSync(
+                    session = session,
+                    isCompleted = summary?.isCompleted ?: true,
+                    isCancelled = summary?.isCancelled ?: false,
+                    forcedActualDuration = summary?.pureStudyDurationMillis
+                )
+            }
+            resetToIdle()
+            onComplete()
+            // Clear pending summary state after navigation completes so no blank screen flashes
+            _pendingSessionSummary.value = null
         }
-        _pendingSessionSummary.value = null
-        resetToIdle()
-        onComplete()
     }
 
     /**
      * User clicked "Don't Save": discards session data without writing to database.
      */
     fun discardPendingSession(onComplete: () -> Unit = {}) {
-        _pendingSessionSummary.value = null
         resetToIdle()
         onComplete()
+        _pendingSessionSummary.value = null
     }
 
     fun resetToIdle() {
-        _pendingSessionSummary.value = null
         sessionManager.resetToIdle()
         try {
             val context = FocusShieldApp.instance
@@ -840,46 +844,59 @@ class SessionViewModel(
         } catch (e: Exception) { }
     }
 
-    private fun persistSessionRecord(session: FocusSession, isCompleted: Boolean, isCancelled: Boolean) {
+    private suspend fun persistSessionRecordSync(
+        session: FocusSession,
+        isCompleted: Boolean,
+        isCancelled: Boolean,
+        forcedActualDuration: Long? = null
+    ) {
         // Atomic check-and-add: add() returns false if already present, preventing duplicate persists.
         if (!persistedSessionIds.add(session.id)) return
 
-        val actualStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
+        val calculatedStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
             session = session,
             isCompleted = isCompleted
         )
 
-        viewModelScope.launch {
-            try {
-                sessionRepositoryProvider().recordSession(
-                    session = session,
-                    actualStudyDurationMillis = actualStudyTime,
-                    isCompleted = isCompleted,
-                    isCancelled = isCancelled
-                )
-            } catch (e: Exception) {
-                // Room persistence logged safely
-            }
+        // Ensure test sessions (e.g. running for 2-10 seconds) record valid positive elapsed time
+        val elapsedFromStart = (System.currentTimeMillis() - session.startedAt).coerceAtLeast(0L)
+        val finalStudyTime = when {
+            forcedActualDuration != null && forcedActualDuration > 0L -> forcedActualDuration
+            calculatedStudyTime > 0L -> calculatedStudyTime
+            elapsedFromStart > 0L -> elapsedFromStart
+            else -> 1000L // Minimum 1 second for a recorded session
+        }
 
-            // Offer a scratch card reward for eligible completed sessions
-            if (isCompleted) {
-                try {
-                    val app = FocusShieldApp.instance
-                    val studyMinutes = (actualStudyTime / 60_000L).toInt()
-                    val summary = app.analyticsRepository.todaySummaryFlow.first()
-                    val card = app.scratchCardRepository.createCardIfEligible(
-                        sessionId = session.id,
-                        subject = session.subject,
-                        studyMinutes = studyMinutes,
-                        currentStreak = summary.currentStreakDays,
-                        allTimeStudyMillis = summary.allTimeStudyTimeMillis
-                    )
-                    if (card != null) {
-                        _pendingScratchCard.value = card
-                    }
-                } catch (e: Exception) {
-                    // Scratch card is a bonus feature; never let it break session persistence
+        try {
+            sessionRepositoryProvider().recordSession(
+                session = session,
+                actualStudyDurationMillis = finalStudyTime,
+                isCompleted = isCompleted,
+                isCancelled = isCancelled,
+                endTime = System.currentTimeMillis()
+            )
+        } catch (e: Exception) {
+            // Room persistence logged safely
+        }
+
+        // Offer a scratch card reward for eligible completed sessions
+        if (isCompleted) {
+            try {
+                val app = FocusShieldApp.instance
+                val studyMinutes = (finalStudyTime / 60_000L).toInt()
+                val summary = app.analyticsRepository.todaySummaryFlow.first()
+                val card = app.scratchCardRepository.createCardIfEligible(
+                    sessionId = session.id,
+                    subject = session.subject,
+                    studyMinutes = studyMinutes,
+                    currentStreak = summary.currentStreakDays,
+                    allTimeStudyMillis = summary.allTimeStudyTimeMillis
+                )
+                if (card != null) {
+                    _pendingScratchCard.value = card
                 }
+            } catch (e: Exception) {
+                // Scratch card is a bonus feature; never let it break session persistence
             }
         }
     }

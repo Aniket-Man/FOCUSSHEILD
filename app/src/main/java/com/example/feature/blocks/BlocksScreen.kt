@@ -1,5 +1,6 @@
 package com.example.feature.blocks
 
+import com.example.R
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -429,8 +430,7 @@ fun BlocksScreen(
                         // YouTube Shorts
                         BlockRowToggleItem(
                             title = "YouTube Shorts",
-                            icon = Icons.Rounded.SmartDisplay,
-                            iconTint = Color(0xFFFF0000),
+                            drawableRes = R.drawable.ic_youtube_shorts_logo,
                             checked = settingsState.preferences.isYouTubeShortsBlockingEnabled,
                             onCheckedChange = { checked ->
                                 if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
@@ -457,8 +457,7 @@ fun BlocksScreen(
                         // IG Reels
                         BlockRowToggleItem(
                             title = "IG Reels",
-                            icon = Icons.Rounded.VideoLibrary,
-                            iconTint = Color(0xFFE1306C),
+                            drawableRes = R.drawable.ic_instagram_reels_logo,
                             checked = settingsState.preferences.isInstagramReelsBlockingEnabled,
                             onCheckedChange = { checked ->
                                 if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
@@ -485,8 +484,7 @@ fun BlocksScreen(
                         // Facebook Reels
                         BlockRowToggleItem(
                             title = "Facebook Reels",
-                            icon = Icons.Rounded.SmartDisplay,
-                            iconTint = Color(0xFF1877F2),
+                            drawableRes = R.drawable.ic_facebook_reels_logo,
                             checked = settingsState.preferences.isFacebookReelsBlockingEnabled,
                             onCheckedChange = { checked ->
                                 if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
@@ -1685,8 +1683,9 @@ private fun AppLimitCard(
 @Composable
 private fun BlockRowToggleItem(
     title: String,
-    icon: ImageVector,
-    iconTint: Color,
+    icon: ImageVector? = null,
+    drawableRes: Int? = null,
+    iconTint: Color = FocusColors.Primary,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     testTag: String = ""
@@ -1701,15 +1700,23 @@ private fun BlockRowToggleItem(
             modifier = Modifier
                 .size(36.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(iconTint.copy(alpha = 0.15f)),
+                .background(if (drawableRes != null) Color.Transparent else iconTint.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(20.dp)
-            )
+            if (drawableRes != null) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(drawableRes),
+                    contentDescription = title,
+                    modifier = Modifier.size(28.dp)
+                )
+            } else if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(14.dp))

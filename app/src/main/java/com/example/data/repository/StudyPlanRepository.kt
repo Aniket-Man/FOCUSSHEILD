@@ -209,131 +209,24 @@ class StudyPlanRepository(
      * (resetting isCompleted to false) based on recurring templates or previous plans,
      * maintaining a fresh daily schedule while preserving past session history in the database.
      */
-    suspend fun ensureTodayPlansExist(): List<StudyPlanEntity> {
-        val (todayStart, todayEnd) = getTodayBounds()
-        val todayPlans = studyPlanDao.getPlansForDate(todayStart, todayEnd)
-        if (todayPlans.isNotEmpty()) {
-            return todayPlans
-        }
-
-        val allPlans = studyPlanDao.getAllPlans()
-        val now = System.currentTimeMillis()
-        val dateStr = dateFormat.format(Date(now))
-
-        if (allPlans.isNotEmpty()) {
-            // Group by distinct subject + start time to avoid duplicates
-            val distinctTemplates = allPlans.distinctBy { "${it.subjectName}_${it.startTime}_${it.topicName}" }
-            val newTodayPlans = distinctTemplates.map { template ->
-                StudyPlanEntity(
-                    id = UUID.randomUUID().toString(),
-                    subjectId = template.subjectId,
-                    subjectName = template.subjectName,
-                    topicName = template.topicName,
-                    plannedDurationMinutes = template.plannedDurationMinutes,
-                    targetDate = now,
-                    dateString = dateStr,
-                    startTime = template.startTime,
-                    endTime = template.endTime,
-                    startMinutes = template.startMinutes,
-                    endMinutes = template.endMinutes,
-                    isCompleted = false,
-                    status = "PLANNED",
-                    colorHex = template.colorHex,
-                    notes = template.notes,
-                    createdAt = now
-                )
+    suspend fun clearPreloadedDefaultPlans() {
+        val defaultIds = listOf("default-plan-1", "default-plan-2", "default-plan-3")
+        for (id in defaultIds) {
+            if (studyPlanDao.getPlanById(id) != null) {
+                studyPlanDao.deletePlanById(id)
+                SyncTracker.enqueueDelete(SyncTables.STUDY_PLANS, id)
             }
-            studyPlanDao.insertAll(newTodayPlans)
-            newTodayPlans.forEach { plan ->
-                SyncTracker.enqueueUpsert(
-                    SyncTables.STUDY_PLANS,
-                    plan.id,
-                    CloudJson.studyPlanToJson(plan).toString()
-                )
-            }
-            return newTodayPlans
-        } else {
-            initializeDefaultPlansIfEmpty()
-            return studyPlanDao.getPlansForDate(todayStart, todayEnd)
         }
     }
 
-    suspend fun initializeDefaultPlansIfEmpty() {
-        if (studyPlanDao.getPlanCount() == 0) {
-            val now = System.currentTimeMillis()
-            val dateStr = dateFormat.format(Date(now))
-            val defaultPlans = listOf(
-                StudyPlanEntity(
-                    id = "default-plan-1",
-                    subjectId = "physics",
-                    subjectName = "Physics",
-                    topicName = "Electrostatics",
-                    plannedDurationMinutes = 120,
-                    targetDate = now,
-                    dateString = dateStr,
-                    startTime = "08:00",
-                    endTime = "10:00",
-                    startMinutes = 480,
-                    endMinutes = 600,
-                    isCompleted = false,
-                    status = "PLANNED",
-                    colorHex = "#7C3AED",
-                    notes = "Solve 20 JEE Advanced problems"
-                ),
-                StudyPlanEntity(
-                    id = "default-plan-2",
-                    subjectId = "mathematics",
-                    subjectName = "Mathematics",
-                    topicName = "Differential Equations",
-                    plannedDurationMinutes = 90,
-                    targetDate = now,
-                    dateString = dateStr,
-                    startTime = "11:00",
-                    endTime = "12:30",
-                    startMinutes = 660,
-                    endMinutes = 750,
-                    isCompleted = false,
-                    status = "PLANNED",
-                    colorHex = "#F59E0B",
-                    notes = "First-order differential equations and integrating factors"
-                ),
-                StudyPlanEntity(
-                    id = "default-plan-3",
-                    subjectId = "chemistry",
-                    subjectName = "Chemistry",
-                    topicName = "Chemical Bonding",
-                    plannedDurationMinutes = 180,
-                    targetDate = now,
-                    dateString = dateStr,
-                    startTime = "16:00",
-                    endTime = "19:00",
-                    startMinutes = 960,
-                    endMinutes = 1140,
-                    isCompleted = false,
-                    status = "PLANNED",
-                    colorHex = "#10B981",
-                    notes = "VSEPR theory and hybridization"
-                )
-            )
-            studyPlanDao.insertAll(defaultPlans)
-            defaultPlans.forEach { plan ->
-                SyncTracker.enqueueUpsert(
-                    SyncTables.STUDY_PLANS,
-                    plan.id,
-                    CloudJson.studyPlanToJson(plan).toString()
-                )
-            }
+    suspend fun ensureTodayPlansExist(): List<StudyPlanEntity> {
+        clearPreloadedDefaultPlans()
+        val (todayStart, todayEnd) = getTodayBounds()
+        return studyPlanDao.getPlansForDate(todayStart, todayEnd)
+    }
 
-            try {
-                val context = com.example.FocusShieldApp.instance
-                StudyPlanAlarmScheduler.schedulePlanReminders(context, defaultPlans)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: RuntimeException) {
-                // Seeding is best-effort (the plans are already stored); logged, not swallowed.
-                Log.w(TAG, "Could not arm reminders for the default study plans", e)
-            }
-        }
+    suspend fun initializeDefaultPlansIfEmpty() {
+        clearPreloadedDefaultPlans()
     }
 
     companion object {

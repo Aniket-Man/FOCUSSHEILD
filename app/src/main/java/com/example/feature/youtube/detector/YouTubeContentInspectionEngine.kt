@@ -87,6 +87,37 @@ data class YouTubeChannelContext(
  * Inspects the ACTIVE content/player subtree to avoid false positives from recommendation shelves,
  * in-app miniplayers, and Home feed video cards.
  */
+object YouTubePlaybackSandbox {
+    @Volatile
+    var isSandboxActive: Boolean = false
+        private set
+
+    @Volatile
+    var sandboxedChannel: ChannelIdentityInfo? = null
+        private set
+
+    @Volatile
+    var sandboxedVideoTitle: String? = null
+        private set
+
+    fun enterSandbox(channel: ChannelIdentityInfo, title: String?) {
+        isSandboxActive = true
+        sandboxedChannel = channel
+        sandboxedVideoTitle = title
+    }
+
+    fun exitSandbox() {
+        isSandboxActive = false
+        sandboxedChannel = null
+        sandboxedVideoTitle = null
+    }
+
+    fun onVideoClickedOrChanged() {
+        // Safe Playback Sandbox remains active across player control touches (play/pause, seek, fullscreen).
+        // It exits cleanly when the user leaves the watch page or an unapproved channel is detected.
+    }
+}
+
 object YouTubeContentInspectionEngine {
 
     // Temporal in-memory channel context for the active YouTube session
@@ -98,6 +129,7 @@ object YouTubeContentInspectionEngine {
      */
     fun clearChannelContext() {
         activeChannelContext = null
+        YouTubePlaybackSandbox.exitSandbox()
         YouTubeContentEngine.reset()
     }
 
@@ -150,28 +182,66 @@ object YouTubeContentInspectionEngine {
             )
         }
 
+        // 0. Wake up from the Safe Playback Sandbox if the user clicked another video or opened a new screen
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
+            YouTubePlaybackSandbox.onVideoClickedOrChanged()
+        }
+
+        // 1. If currently in the Safe Playback Sandbox for an approved channel, return APPROVED immediately!
+        // This stops continuous node tree scanning & text extraction during scrolling below the player.
+        if (YouTubePlaybackSandbox.isSandboxActive) {
+            val sandboxedChannel = YouTubePlaybackSandbox.sandboxedChannel ?: ChannelIdentityInfo()
+            return ContentInspectionResult(
+                contentType = YouTubeContentType.VIDEO_PLAYBACK,
+                activeVideo = ActiveVideoInfo(title = YouTubePlaybackSandbox.sandboxedVideoTitle, isPlayerVisible = true, isPlaybackActive = true),
+                channelInfo = sandboxedChannel,
+                approvalStatus = ChannelApprovalStatus.APPROVED,
+                confidence = DetectionConfidence.HIGH,
+                matchedSignals = listOf("safe_playback_sandbox_active")
+            )
+        }
+
         // Playback has priority over every navigation surface.  YouTube keeps Home/Search
         // containers in its dynamic hierarchy after opening a video, so navigation must never
         // be allowed to hide a confirmed playing video.
         val activePlayer = detectActiveWatchPlayer(rootNode)
         if (activePlayer != null && !activePlayer.isMiniplayer) {
             val isAd = com.example.feature.youtube.engine.YouTubeNodeExtractor.detectAd(rootNode)
+            val extractedChannel = extractChannelFromActivePlayer(rootNode)
+            val isApproved = extractedChannel.isIdentifiable &&
+                isChannelApproved(extractedChannel, approvedIds, approvedNames)
+
             if (isAd) {
                 signals.add("active_watch_player")
                 signals.add("ad_playback_in_progress")
+                val adApprovalStatus = when {
+                    extractedChannel.isIdentifiable && isApproved -> ChannelApprovalStatus.APPROVED
+                    extractedChannel.isIdentifiable && !isApproved -> ChannelApprovalStatus.UNAPPROVED
+                    getActiveChannelContext(now)?.source == "ACTIVE_PLAYING_VIDEO" -> {
+                        if (getActiveChannelContext(now)?.isApproved == true) {
+                            ChannelApprovalStatus.APPROVED
+                        } else {
+                            ChannelApprovalStatus.UNAPPROVED
+                        }
+                    }
+                    else -> ChannelApprovalStatus.APPROVED // Allow pre-roll ad until underlying channel is identified
+                }
                 return ContentInspectionResult(
                     contentType = YouTubeContentType.VIDEO_PLAYBACK,
                     activeVideo = activePlayer,
-                    channelInfo = ChannelIdentityInfo(channelName = "Ad", channelHandle = null, channelId = null),
-                    approvalStatus = ChannelApprovalStatus.APPROVED,
+                    channelInfo = if (extractedChannel.isIdentifiable) {
+                        extractedChannel
+                    } else {
+                        ChannelIdentityInfo(channelName = "Ad", channelHandle = null, channelId = null)
+                    },
+                    approvalStatus = adApprovalStatus,
                     confidence = DetectionConfidence.HIGH,
                     matchedSignals = signals
                 )
             }
 
-            val extractedChannel = extractChannelFromActivePlayer(rootNode)
-            val isApproved = extractedChannel.isIdentifiable &&
-                isChannelApproved(extractedChannel, approvedIds, approvedNames)
             val playback = YouTubeContentEngine.observe(
                 videoKey = activePlayer.title,
                 isPlayerVisible = activePlayer.isPlayerVisible,
@@ -191,9 +261,14 @@ object YouTubeContentInspectionEngine {
                     } else {
                         ChannelApprovalStatus.UNAPPROVED
                     }
-                    // Only a verified active video's own channel is remembered.  A channel page
-                    // or an earlier recommendation is never used as approval for this video.
+                    // Only a verified active video's own channel is remembered.
                     setChannelContext(extractedChannel, isApproved, source = "ACTIVE_PLAYING_VIDEO", now = now)
+
+                    // If approved, transfer this playback into the Safe Playback Sandbox!
+                    if (approvalStatus == ChannelApprovalStatus.APPROVED) {
+                        YouTubePlaybackSandbox.enterSandbox(extractedChannel, activePlayer.title)
+                    }
+
                     signals.add("playback_detected")
                     signals.add("channel_${approvalStatus.name.lowercase(Locale.ROOT)}")
                     return ContentInspectionResult(
@@ -521,96 +596,15 @@ object YouTubeContentInspectionEngine {
      * Inspects active watch subtree for channel information, excluding feed containers & recommendations.
      */
     private fun extractChannelFromActivePlayer(rootNode: AccessibilityNodeInfo): ChannelIdentityInfo {
-        var channelName: String? = null
-        var channelHandle: String? = null
-        val channelId: String? = null
-
-        // Fast direct view ID search for verified channel name view IDs
-        val fastChannelIds = listOf(
-            "com.google.android.youtube:id/channel_name",
-            "com.google.android.youtube:id/owner_name",
-            "com.google.android.youtube:id/owner_text",
-            "com.google.android.youtube:id/channel_title"
-        )
-        scanNodes(rootNode, maxDepth = 12, maxNodes = 60) { node ->
-            val viewId = node.viewIdResourceName ?: ""
-            for (id in fastChannelIds) {
-                if (viewId == id || viewId.endsWith("/${id.substringAfterLast('/')}") || viewId.endsWith(":id/${id.substringAfterLast('/')}")) {
-                    val text = node.text?.toString()?.trim()
-                    if (!text.isNullOrBlank()) {
-                        val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
-                        if (validName != null) {
-                            channelName = validName
-                            return@scanNodes true
-                        }
-                    }
-                }
-            }
-            false
+        val watchIdentity = com.example.feature.youtube.engine.YouTubeNodeExtractor.extractChannelIdentity(rootNode)
+        if (watchIdentity.isIdentifiable) {
+            return ChannelIdentityInfo(
+                channelName = watchIdentity.channelName,
+                channelHandle = watchIdentity.channelHandle,
+                channelId = null
+            )
         }
-
-        scanNodes(rootNode, maxDepth = 15, maxNodes = 120) { node ->
-            val viewId = node.viewIdResourceName ?: ""
-            val text = node.text?.toString()?.trim() ?: ""
-            val desc = node.contentDescription?.toString()?.trim() ?: ""
-
-            // Strict exclusion of recommendation lists, home feed grids, video cards, and comments
-            for (exId in YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS) {
-                if (viewId.contains(exId, ignoreCase = true)) {
-                    return@scanNodes false
-                }
-            }
-
-            // Direct Handle detection: only from channel header or byline views, never inside comments
-            if (text.startsWith("@") && text.length in 3..40 && channelHandle == null) {
-                // Ensure viewId doesn't belong to a comment or chat
-                val isCommentRelated = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any { viewId.contains(it, ignoreCase = true) }
-                if (!isCommentRelated) {
-                    channelHandle = text
-                }
-            } else if (desc.startsWith("@") && desc.length in 3..40 && channelHandle == null) {
-                val isCommentRelated = YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any { viewId.contains(it, ignoreCase = true) }
-                if (!isCommentRelated) {
-                    channelHandle = desc
-                }
-            }
-
-            // Channel byline / title near active player
-            for (chanId in YouTubeDetectionRules.CHANNEL_IDENTITY_VIEW_IDS) {
-                if (viewId.contains(chanId, ignoreCase = true)) {
-                    if (text.isNotBlank() && channelName == null) {
-                        val validName = YouTubeDetectionRules.extractAndValidateChannelName(text)
-                        if (validName != null) {
-                            channelName = validName
-                        }
-                    }
-                }
-            }
-
-            // Content Descriptions: "Subscribe to [Channel]", "Go to channel [Channel]"
-            if (desc.contains("Subscribe to", ignoreCase = true)) {
-                val rawCandidate = desc.substringAfter("Subscribe to", "").substringBefore(".").trim()
-                val validName = YouTubeDetectionRules.extractAndValidateChannelName(rawCandidate)
-                if (validName != null && channelName == null) {
-                    channelName = validName
-                }
-            } else if (desc.contains("Go to channel", ignoreCase = true) || desc.contains("View channel", ignoreCase = true)) {
-                val rawCandidate = desc.replace("Go to channel", "", ignoreCase = true)
-                    .replace("View channel", "", ignoreCase = true).trim()
-                val validName = YouTubeDetectionRules.extractAndValidateChannelName(rawCandidate)
-                if (validName != null && channelName == null) {
-                    channelName = validName
-                }
-            }
-
-            false
-        }
-
-        return ChannelIdentityInfo(
-            channelName = channelName,
-            channelHandle = channelHandle,
-            channelId = channelId
-        )
+        return ChannelIdentityInfo()
     }
 
     private fun isHomeFeedOrBottomNavActive(rootNode: AccessibilityNodeInfo): Boolean {
@@ -639,7 +633,7 @@ object YouTubeContentInspectionEngine {
     }
 
     /**
-     * Checks whether candidate channel is in the approved sets with rich fuzzy matching.
+     * Checks whether candidate channel is in the approved sets with unified dual @handle + channel name matching.
      */
     fun isChannelApproved(
         channelInfo: ChannelIdentityInfo,
@@ -650,45 +644,33 @@ object YouTubeContentInspectionEngine {
         val id = channelInfo.channelId
         val name = channelInfo.channelName
 
-        if (!handle.isNullOrBlank()) {
-            val normHandle = handle.trim().lowercase(Locale.ROOT).replace("@", "")
-            if (approvedIds.contains(normHandle) || approvedIds.contains("@$normHandle")) return true
-            for (appId in approvedIds) {
-                val normAppId = appId.lowercase(Locale.ROOT).replace("@", "")
-                if (normAppId.isNotBlank() && (normHandle.contains(normAppId) || normAppId.contains(normHandle))) {
-                    return true
-                }
-            }
+        if (!handle.isNullOrBlank() &&
+            com.example.feature.youtube.engine.YouTubeContentBlockEngine.isChannelApproved(
+                handle,
+                approvedIds,
+                approvedNames
+            )
+        ) {
+            return true
         }
-
-        if (!id.isNullOrBlank()) {
-            val normId = id.trim().lowercase(Locale.ROOT).replace("@", "")
-            if (approvedIds.contains(normId) || approvedIds.contains("@$normId")) return true
+        if (!id.isNullOrBlank() &&
+            com.example.feature.youtube.engine.YouTubeContentBlockEngine.isChannelApproved(
+                id,
+                approvedIds,
+                approvedNames
+            )
+        ) {
+            return true
         }
-
-        if (!name.isNullOrBlank()) {
-            val normCandidate = YouTubeDetectionRules.normalizeString(name)
-            if (normCandidate.isNotBlank()) {
-                if (approvedNames.contains(normCandidate)) return true
-                for (approved in approvedNames) {
-                    val normApproved = YouTubeDetectionRules.normalizeString(approved)
-                    if (normApproved.isNotBlank()) {
-                        if (normCandidate.contains(normApproved) || normApproved.contains(normCandidate)) {
-                            return true
-                        }
-                    }
-                }
-                for (appId in approvedIds) {
-                    val normAppId = YouTubeDetectionRules.normalizeString(appId)
-                    if (normAppId.isNotBlank() && normAppId.length >= 4) {
-                        if (normCandidate.contains(normAppId) || normAppId.contains(normCandidate)) {
-                            return true
-                        }
-                    }
-                }
-            }
+        if (!name.isNullOrBlank() &&
+            com.example.feature.youtube.engine.YouTubeContentBlockEngine.isChannelApproved(
+                name,
+                approvedIds,
+                approvedNames
+            )
+        ) {
+            return true
         }
-
         return false
     }
 

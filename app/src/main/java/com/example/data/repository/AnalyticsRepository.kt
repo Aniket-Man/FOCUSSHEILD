@@ -86,9 +86,25 @@ class AnalyticsRepository(
             sessionDao.getAllSessionsFlow(),
             preferencesRepository.preferencesFlow
         ) { todaySessions, todayBreaks, todayAttempts, allSessions, prefs ->
-            val totalStudyMillis = todaySessions.sumOf { it.actualDurationMillis }
+            val totalStudyMillis = todaySessions.sumOf { session ->
+                DayBounds.clampedDurationInWindow(
+                    startTime = session.startTime,
+                    endTime = session.endTime,
+                    actualDurationMillis = session.actualDurationMillis,
+                    windowStart = todayStart,
+                    windowEnd = todayEnd
+                )
+            }
             val completedSessions = todaySessions.count { it.completed }
-            val totalBreakMillis = todayBreaks.sumOf { it.actualDurationMillis }
+            val totalBreakMillis = todayBreaks.sumOf { brk ->
+                DayBounds.clampedDurationInWindow(
+                    startTime = brk.startTime,
+                    endTime = brk.endTime,
+                    actualDurationMillis = brk.actualDurationMillis,
+                    windowStart = todayStart,
+                    windowEnd = todayEnd
+                )
+            }
             val blockedCount = todayAttempts.size
             val uniqueSubjects = todaySessions.map { it.subject }.distinct().size
             val uniqueTopics = todaySessions.map { it.topic }.distinct().size
@@ -220,16 +236,53 @@ class AnalyticsRepository(
         allSessions: List<SessionRecordEntity>,
         prefs: FocusPreferences
     ): PeriodAnalyticsSummary {
-        val totalStudyMillis = sessions.sumOf { it.actualDurationMillis }
-        val completedCount = sessions.count { it.completed }
+        // Clamp cross-boundary sessions and breaks to the active period window so multi-day
+        // or cross-midnight records contribute only the portion inside [startMillis, endMillis].
+        val clampedSessions = sessions.map { session ->
+            val clampedDuration = DayBounds.clampedDurationInWindow(
+                startTime = session.startTime,
+                endTime = session.endTime,
+                actualDurationMillis = session.actualDurationMillis,
+                windowStart = dateRange.startMillis,
+                windowEnd = dateRange.endMillis
+            )
+            session.copy(actualDurationMillis = clampedDuration)
+        }.filter { it.actualDurationMillis > 0L }
 
-        val totalBreakMillis = breaks.sumOf { it.actualDurationMillis }
+        val clampedActivities = activities.map { act ->
+            val clampedDuration = DayBounds.clampedDurationInWindow(
+                startTime = act.startedAt,
+                endTime = act.endedAt,
+                actualDurationMillis = act.durationMillis,
+                windowStart = dateRange.startMillis,
+                windowEnd = dateRange.endMillis
+            )
+            act.copy(durationMillis = clampedDuration)
+        }.filter { it.durationMillis > 0L }
+
+        val sessionIdsInPeriod = clampedSessions.map { it.id }.toSet()
+        val standaloneYouTubeMillis = clampedActivities
+            .filter { it.source == StudyActivitySource.YOUTUBE && it.sessionId !in sessionIdsInPeriod }
+            .sumOf { it.durationMillis }
+
+        val totalStudyMillis = clampedSessions.sumOf { it.actualDurationMillis } + standaloneYouTubeMillis
+        val completedCount = clampedSessions.count { it.completed }
+
+        val totalBreakMillis = breaks.sumOf { brk ->
+            DayBounds.clampedDurationInWindow(
+                startTime = brk.startTime,
+                endTime = brk.endTime,
+                actualDurationMillis = brk.actualDurationMillis,
+                windowStart = dateRange.startMillis,
+                windowEnd = dateRange.endMillis
+            )
+        }
         val breakCount = breaks.size
         val avgBreakMillis = if (breakCount > 0) totalBreakMillis / breakCount else 0L
 
         val blockedCount = attempts.size
 
-        // Build Daily Chart
+        // Build Daily Chart using original sessions sliced by local calendar day
         val dailyChart = generateDailyChart(dateRange, sessions, prefs.dailyGoalMinutes)
 
         val studyDaysCount = dailyChart.count { it.studyTimeMillis > 0 }
@@ -240,19 +293,19 @@ class AnalyticsRepository(
         val consistencyPercent = ((studyDaysCount.toFloat() / totalDaysInRange.toFloat()) * 100).toInt()
 
         // Subject Breakdown
-        val subjectBreakdowns = computeSubjectBreakdowns(sessions, totalStudyMillis)
+        val subjectBreakdowns = computeSubjectBreakdowns(clampedSessions, totalStudyMillis)
 
         // Topic Breakdown
-        val topicBreakdowns = computeTopicBreakdowns(sessions)
+        val topicBreakdowns = computeTopicBreakdowns(clampedSessions)
 
-        // Source Breakdown
-        val sourceBreakdowns = computeSourceBreakdowns(sessions, activities, totalStudyMillis)
+        // Source Breakdown (partitioning YouTube Study time inside sessions so there is zero double-counting)
+        val sourceBreakdowns = computeSourceBreakdowns(clampedSessions, clampedActivities, totalStudyMillis)
 
         // Blocked Apps Breakdown
         val blockedAppStats = computeBlockedAppStats(attempts)
 
         // YouTube Study Intelligence
-        val youtubeStats = computeYouTubeStats(activities, attempts)
+        val youtubeStats = computeYouTubeStats(clampedActivities, attempts)
 
         // Streak Info
         val streakInfo = StreakCalculator.calculate(
@@ -265,7 +318,7 @@ class AnalyticsRepository(
             dateRangeLabel = dateRange.label,
             totalStudyTimeMillis = totalStudyMillis,
             formattedTotalStudyTime = formatDurationToHoursMins(totalStudyMillis),
-            totalSessions = sessions.size,
+            totalSessions = clampedSessions.size,
             completedSessions = completedCount,
             totalBreakDurationMillis = totalBreakMillis,
             formattedTotalBreakTime = formatDurationToHoursMins(totalBreakMillis),
@@ -299,12 +352,20 @@ class AnalyticsRepository(
         val todayKey = StreakCalculator.formatDateKey(System.currentTimeMillis())
         val goalMillis = goalMinutes * 60 * 1000L
 
-        // Group sessions by day
+        // Slice sessions across local calendar days identically to StreakCalculator so
+        // cross-midnight sessions attribute each day's exact study minutes without discrepancies.
         val sessionDayMap = mutableMapOf<String, Pair<Long, Int>>() // dateKey -> (totalMillis, count)
         for (session in sessions) {
-            val key = StreakCalculator.formatDateKey(session.startTime)
-            val current = sessionDayMap.getOrDefault(key, Pair(0L, 0))
-            sessionDayMap[key] = Pair(current.first + session.actualDurationMillis, current.second + 1)
+            val endMillis = if (session.endTime > 0) session.endTime else (session.startTime + session.actualDurationMillis)
+            val slices = DayBounds.sliceSessionDurationByDay(
+                startTime = session.startTime,
+                endTime = endMillis,
+                actualDurationMillis = session.actualDurationMillis
+            )
+            for ((dateKey, sliceMillis) in slices) {
+                val current = sessionDayMap.getOrDefault(dateKey, Pair(0L, 0))
+                sessionDayMap[dateKey] = Pair(current.first + sliceMillis, current.second + 1)
+            }
         }
 
         val result = mutableListOf<StudyDay>()
@@ -396,29 +457,47 @@ class AnalyticsRepository(
     ): List<SourceBreakdown> {
         val sourceTotals = mutableMapOf<StudyActivitySource, Pair<Long, Int>>()
 
-        // Aggregate from sessions
+        // Partition YouTube study activities that occurred inside a Focus Session so they are
+        // never double-counted on top of the session's primary mode (TIMER / STOPWATCH / POMODORO).
+        val youtubeActivities = activities.filter { it.source == StudyActivitySource.YOUTUBE }
+        val youtubeBySessionId = youtubeActivities.groupBy { it.sessionId }
+
         for (session in sessions) {
             val source = when (session.mode) {
                 com.example.data.model.SessionMode.TIMER -> StudyActivitySource.TIMER
                 com.example.data.model.SessionMode.STOPWATCH -> StudyActivitySource.STOPWATCH
                 com.example.data.model.SessionMode.POMODORO -> StudyActivitySource.POMODORO
             }
-            val cur = sourceTotals.getOrDefault(source, Pair(0L, 0))
-            sourceTotals[source] = Pair(cur.first + session.actualDurationMillis, cur.second + 1)
+            val linkedYouTubeMillis = youtubeBySessionId[session.id]
+                ?.sumOf { it.durationMillis }
+                ?.coerceIn(0L, session.actualDurationMillis)
+                ?: 0L
+            val nonYouTubeSessionMillis = (session.actualDurationMillis - linkedYouTubeMillis).coerceAtLeast(0L)
+            if (nonYouTubeSessionMillis > 0L || linkedYouTubeMillis == 0L) {
+                val cur = sourceTotals.getOrDefault(source, Pair(0L, 0))
+                sourceTotals[source] = Pair(cur.first + nonYouTubeSessionMillis, cur.second + 1)
+            }
         }
 
-        // Check if there are distinct YouTube activities
-        val youtubeActivities = activities.filter { it.source == StudyActivitySource.YOUTUBE }
         if (youtubeActivities.isNotEmpty()) {
-            val ytDuration = youtubeActivities.sumOf { it.durationMillis }
-            sourceTotals[StudyActivitySource.YOUTUBE] = Pair(ytDuration, youtubeActivities.size)
+            // Cap each session's YouTube duration to that session's actual duration when linked
+            var totalYtDuration = 0L
+            val sessionDurationById = sessions.associate { it.id to it.actualDurationMillis }
+            for ((sessId, actList) in youtubeBySessionId) {
+                val rawSum = actList.sumOf { it.durationMillis }
+                val cap = sessionDurationById[sessId]
+                totalYtDuration += if (cap != null) rawSum.coerceAtMost(cap) else rawSum
+            }
+            if (totalYtDuration > 0L) {
+                sourceTotals[StudyActivitySource.YOUTUBE] = Pair(totalYtDuration, youtubeActivities.size)
+            }
         }
 
         val totalCombined = sourceTotals.values.sumOf { it.first }.coerceAtLeast(totalStudyMillis)
 
         return sourceTotals.map { (source, pair) ->
             val duration = pair.first
-            val percentage = if (totalCombined > 0) duration.toFloat() / totalCombined.toFloat() else 0f
+            val percentage = if (totalCombined > 0) (duration.toFloat() / totalCombined.toFloat()).coerceIn(0f, 1f) else 0f
             SourceBreakdown(
                 source = source,
                 sourceLabel = source.label,

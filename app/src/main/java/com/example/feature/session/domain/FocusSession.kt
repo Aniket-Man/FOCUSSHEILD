@@ -39,7 +39,11 @@ data class FocusSession(
     val isPaused: Boolean get() = state == SessionState.PAUSED
     val isCompleted: Boolean get() = state == SessionState.COMPLETED
     val isCancelled: Boolean get() = state == SessionState.CANCELLED
-    val isBreakActive: Boolean get() = manualBreak != null && manualBreak.isActive
+    val isBreakActive: Boolean
+        get() = (manualBreak != null && manualBreak.isActive) ||
+                (mode == SessionMode.POMODORO &&
+                        (pomodoroPhase == PomodoroPhase.SHORT_BREAK || pomodoroPhase == PomodoroPhase.LONG_BREAK) &&
+                        remainingDurationMillis > 0L)
 
     /**
      * Progress ratio from 0.0 to 1.0 based on session mode.

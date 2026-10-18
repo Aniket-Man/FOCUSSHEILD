@@ -46,4 +46,78 @@ object DayBounds {
     /** The local calendar date of an epoch-millis instant (the key used to bucket by day). */
     fun localDate(timeMillis: Long): LocalDate =
         Instant.ofEpochMilli(timeMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    /** Returns `[00:00:00.000, 23:59:59.999]` epoch millis for [date] in [zone]. */
+    fun boundsForDate(date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Pair<Long, Long> {
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+        return start to end
+    }
+
+    /**
+     * Computes how much of a record's [actualDurationMillis] falls inside `[windowStart, windowEnd]`.
+     * If the record is completely inside the window, returns [actualDurationMillis].
+     * If the record crosses a boundary (e.g. midnight), scales [actualDurationMillis] proportionally
+     * to the overlap with `[windowStart, windowEnd]`.
+     */
+    fun clampedDurationInWindow(
+        startTime: Long,
+        endTime: Long,
+        actualDurationMillis: Long,
+        windowStart: Long,
+        windowEnd: Long
+    ): Long {
+        if (actualDurationMillis <= 0L) return 0L
+        val effectiveEnd = if (endTime > startTime) endTime else (startTime + actualDurationMillis)
+        if (startTime >= windowStart && effectiveEnd <= windowEnd) {
+            return actualDurationMillis
+        }
+        val overlapStart = maxOf(startTime, windowStart)
+        val overlapEnd = minOf(effectiveEnd, windowEnd)
+        if (overlapEnd <= overlapStart) return 0L
+
+        val wallSpan = (effectiveEnd - startTime).coerceAtLeast(1L)
+        val overlapSpan = overlapEnd - overlapStart
+        return ((actualDurationMillis.toDouble() * overlapSpan.toDouble()) / wallSpan.toDouble())
+            .toLong()
+            .coerceIn(0L, actualDurationMillis)
+    }
+
+    /**
+     * Slices a session's [actualDurationMillis] across all local calendar days (`yyyy-MM-dd`) it spans.
+     * Ensures Daily Chart and StreakCalculator attribute cross-midnight sessions identically.
+     */
+    fun sliceSessionDurationByDay(
+        startTime: Long,
+        endTime: Long,
+        actualDurationMillis: Long,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): Map<String, Long> {
+        if (actualDurationMillis <= 0L) return emptyMap()
+        val effectiveEnd = if (endTime > startTime) endTime else (startTime + actualDurationMillis)
+        val startDate = Instant.ofEpochMilli(startTime).atZone(zone).toLocalDate()
+        val endDate = Instant.ofEpochMilli(effectiveEnd).atZone(zone).toLocalDate()
+
+        if (startDate == endDate) {
+            return mapOf(startDate.toString() to actualDurationMillis)
+        }
+
+        val slices = linkedMapOf<String, Long>()
+        var current = startDate
+        var allocated = 0L
+        while (!current.isAfter(endDate)) {
+            val (dayStart, dayEnd) = boundsForDate(current, zone)
+            val slice = if (current == endDate) {
+                (actualDurationMillis - allocated).coerceAtLeast(0L)
+            } else {
+                clampedDurationInWindow(startTime, effectiveEnd, actualDurationMillis, dayStart, dayEnd)
+            }
+            if (slice > 0L) {
+                slices[current.toString()] = slice
+                allocated += slice
+            }
+            current = current.plusDays(1)
+        }
+        return slices
+    }
 }

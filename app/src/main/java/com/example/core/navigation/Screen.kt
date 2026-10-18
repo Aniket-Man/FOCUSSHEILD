@@ -28,6 +28,5 @@ sealed class Screen(val route: String) {
     object Update : Screen("update")
     object Splash : Screen("splash")
     object Onboarding : Screen("onboarding")
-    object GoogleSignIn : Screen("google_sign_in")
     object Rewards : Screen("rewards")
 }

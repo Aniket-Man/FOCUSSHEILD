@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Canonical FocusShield logo tile: the supplied blue-to-purple gradient with the same
-    rounded-square silhouette used by the reference artwork.
--->
+<!-- Canonical FocusShield logo tile: #6E18E6 rounded-square matching the supplied logo. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <corners android:radius="18dp" />
-    <gradient
-        android:angle="0"
-        android:centerColor="#663BEF"
-        android:endColor="#6821E5"
-        android:startColor="#6C8FF5"
-        android:type="linear" />
+    <solid android:color="#6E18E6" />
 </shape>

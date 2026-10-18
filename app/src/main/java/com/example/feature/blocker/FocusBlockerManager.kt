@@ -95,7 +95,18 @@ class FocusBlockerManager private constructor(
         val session = sessionManager.activeSession.value
         val state = sessionManager.sessionState.value
         val breakInfo = session?.manualBreak
-        val isBreakActive = breakInfo != null && breakInfo.isActive && now < breakInfo.endsAt
+        val isManualBreakActive = breakInfo != null && breakInfo.isActive && now < breakInfo.endsAt
+        val isPomodoroBreakActive = session != null &&
+                session.mode == com.example.data.model.SessionMode.POMODORO &&
+                (session.pomodoroPhase == com.example.feature.session.domain.PomodoroPhase.SHORT_BREAK ||
+                        session.pomodoroPhase == com.example.feature.session.domain.PomodoroPhase.LONG_BREAK) &&
+                session.remainingDurationMillis > 0L
+        val isBreakActive = isManualBreakActive || isPomodoroBreakActive
+        val breakEndsAt = when {
+            isManualBreakActive -> breakInfo!!.endsAt
+            isPomodoroBreakActive -> now + (session?.remainingDurationMillis ?: 0L)
+            else -> 0L
+        }
 
         val approvedIds = studyChannelRepository?.getApprovedChannelIds() ?: emptySet()
         val approvedNames = studyChannelRepository?.getApprovedChannelNames() ?: emptySet()
@@ -113,7 +124,7 @@ class FocusBlockerManager private constructor(
             isStrictModeEnabled = session?.isStrictModeEnabled ?: false,
             strictModeConfig = session?.strictModeConfig ?: StrictModeConfig(),
             isBreakActive = isBreakActive,
-            breakEndsAt = breakInfo?.endsAt ?: 0L,
+            breakEndsAt = breakEndsAt,
             blockedPackages = allBlocked,
             isYouTubeStudyModeEnabled = session?.isStudyChannelsEnabled ?: true,
             approvedChannelIds = approvedIds,

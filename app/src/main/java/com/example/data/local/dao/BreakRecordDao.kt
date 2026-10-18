@@ -22,15 +22,15 @@ interface BreakRecordDao {
     @Query("SELECT * FROM break_records WHERE sessionId = :sessionId ORDER BY startTime ASC")
     suspend fun getBreaksForSession(sessionId: String): List<BreakRecordEntity>
 
-    @Query("SELECT * FROM break_records WHERE startTime >= :startTime AND endTime <= :endTime ORDER BY startTime DESC")
+    @Query("SELECT * FROM break_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime ORDER BY startTime DESC")
     fun getBreaksBetweenFlow(startTime: Long, endTime: Long): Flow<List<BreakRecordEntity>>
 
-    @Query("SELECT * FROM break_records WHERE startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT * FROM break_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     suspend fun getBreaksBetween(startTime: Long, endTime: Long): List<BreakRecordEntity>
 
-    @Query("SELECT SUM(actualDurationMillis) FROM break_records WHERE startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT SUM(actualDurationMillis) FROM break_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     fun getTotalBreakDurationBetweenFlow(startTime: Long, endTime: Long): Flow<Long?>
 
-    @Query("SELECT COUNT(*) FROM break_records WHERE startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT COUNT(*) FROM break_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     fun getBreakCountBetweenFlow(startTime: Long, endTime: Long): Flow<Int>
 }

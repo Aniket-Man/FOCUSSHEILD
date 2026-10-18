@@ -160,6 +160,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private var lastFloatingWindowCheckTimestamp: Long = 0L
     private var homeFeedPopupDismissed = false
     private var youtubeBackNavigationPending = false
+    private var lastBlockedYouTubeVideoKey: String? = null
     private val mainThreadHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -434,13 +435,40 @@ class FocusAccessibilityService : AccessibilityService() {
             // 2. YouTube Study Mode Inspection Flow (Focus Session & Channels Rules)
             if (YouTubeDetectionRules.isYouTubePackage(rawPackageName) && blockerManager != null) {
                 // If recently redirected back from a blocked channel/short, allow a 2.5-second grace period
-                // so the YouTube UI can land on Home and dismiss the miniplayer without re-triggering blocks
-                if ((now - lastYouTubeBlockTimestamp) < 2500L) {
+                // so the YouTube UI can land on the previous screen without re-triggering blocks
+                if (youtubeBackNavigationPending || (now - lastYouTubeBlockTimestamp) < 2500L) {
                     return
                 }
 
                 val protectionState = blockerManager.getCurrentProtectionState(now)
-                if (protectionState.sessionState.name == "RUNNING" || protectionState.sessionState.name == "PAUSED") {
+                val isSessionRunningOrPaused =
+                    protectionState.sessionState.name == "RUNNING" || protectionState.sessionState.name == "PAUSED"
+                val isBreakActiveNow = protectionState.isBreakActive && now < protectionState.breakEndsAt
+
+                if (isSessionRunningOrPaused && isBreakActiveNow) {
+                    // During an active Manual or Pomodoro break, do not block YouTube or bill study time
+                    com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+                    homeFeedPopupDismissed = false
+                    lastBlockedYouTubeVideoKey = null
+                    dwellTracker()?.flush("break active")
+                } else if (isSessionRunningOrPaused && !protectionState.isYouTubeStudyModeEnabled) {
+                    // YouTube Study Mode disabled for this session: apply standard whole-app block if YouTube is in blockedPackages
+                    com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
+                    homeFeedPopupDismissed = false
+                    lastBlockedYouTubeVideoKey = null
+                    dwellTracker()?.flush("study mode disabled")
+                    if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                        val decision = blockerManager.evaluateProtection(rawPackageName, now = now)
+                        if (decision == ProtectionDecision.BLOCK) {
+                            blockerManager.handleBlockedPackage(
+                                packageName = rawPackageName,
+                                fallbackAppName = null,
+                                decision = decision
+                            )
+                            return
+                        }
+                    }
+                } else if (isSessionRunningOrPaused) {
                     // Issue #16: scroll/content-change bursts arrive many times a second while a
                     // session is active; walk the full tree at most every 300ms unless the window
                     // itself changed — app switches and navigation must evaluate immediately.
@@ -480,16 +508,22 @@ class FocusAccessibilityService : AccessibilityService() {
                             homeFeedPopupDismissed = false
                         }
 
-                        // Approved content is the only verdict that earns watch time. Every other verdict
-                        // — navigation surfaces, Home, and all three block verdicts — closes the segment,
-                        // so an approved video that leads into a blocked one is billed only for itself.
-                        if (decision.verdict == YouTubeBlockVerdict.ALLOW) {
+                        // Approved content is the only verdict that earns watch time. When an ad is
+                        // playing on an approved channel (decision.isAdPlaying == true), we allow
+                        // the ad to finish so the lecture can start, without billing ad time as study.
+                        if (decision.verdict == YouTubeBlockVerdict.ALLOW && !decision.isAdPlaying) {
+                            lastBlockedYouTubeVideoKey = null
                             dwellTracker()?.onAllowedContent(
                                 channelName = decision.detectedChannel,
                                 videoTitle = decision.detectedTitle
                             )
                         } else {
-                            dwellTracker()?.flush("verdict ${decision.verdict}")
+                            if (!decision.isBlocking) {
+                                lastBlockedYouTubeVideoKey = null
+                            }
+                            dwellTracker()?.flush(
+                                if (decision.isAdPlaying) "ad playback" else "verdict ${decision.verdict}"
+                            )
                         }
 
                         if (decision.isBlocking) {
@@ -520,7 +554,8 @@ class FocusAccessibilityService : AccessibilityService() {
                                 YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
                                 YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
                                     val chan = decision.detectedChannel ?: "Unapproved Channel"
-                                    val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode)
+                                    val videoKey = "${decision.detectedChannel.orEmpty()}|${decision.detectedTitle.orEmpty()}"
+                                    val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode, videoKey)
                                     if (didBlock) {
                                         com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
                                         com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
@@ -552,6 +587,7 @@ class FocusAccessibilityService : AccessibilityService() {
                     // Session no longer active while YouTube is open: remove any lingering Study Mode popup
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                     homeFeedPopupDismissed = false
+                    lastBlockedYouTubeVideoKey = null
                     dwellTracker()?.flush("session not running")
                 }
             } else {
@@ -851,53 +887,49 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Handles YouTube Unapproved Channel blocking: pauses the video first, then steps back once for just one time.
-     * When reaching the homepage, clears channel context so no channel name is detected.
+     * Handles YouTube Unapproved Channel (and unapproved channel ad) blocking:
+     * 1. Stops playback ONCE (media pause key + explicit pause control click).
+     * 2. Steps back ONCE from the watch/continue screen to the previous list/search/home screen.
      */
-    private fun handleYouTubeUnapprovedChannelBlocked(rootNode: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
+    private fun handleYouTubeUnapprovedChannelBlocked(
+        rootNode: android.view.accessibility.AccessibilityNodeInfo?,
+        videoKey: String? = null
+    ): Boolean {
         val now = System.currentTimeMillis()
-        if (now - lastYouTubeBlockTimestamp < 2000L) {
+        if (youtubeBackNavigationPending || (now - lastYouTubeBlockTimestamp) < 2500L) {
+            return false
+        }
+        if (!videoKey.isNullOrBlank() &&
+            videoKey != "|" &&
+            videoKey == lastBlockedYouTubeVideoKey &&
+            (now - lastYouTubeBlockTimestamp) < 8000L
+        ) {
             return false
         }
         lastYouTubeBlockTimestamp = now
+        lastBlockedYouTubeVideoKey = videoKey
+        youtubeBackNavigationPending = true
 
         YouTubeContentBlockEngine.reset()
+
+        // Step 1 (One time): Stop the video/ad playback immediately
         silenceAndPausePlayback()
         clickPauseButtonInNodeTree(rootNode)
-        navigateYouTubeBackOnce(rootNode)
-        return true
-    }
 
-    /**
-     * Enforces the exact blocked-playback lifecycle: allow the pause to settle -> one
-     * BACK / collapse inside YouTube. The pending guard prevents an accessibility-event burst from issuing multiple back
-     * actions for one video.
-     */
-    private fun navigateYouTubeBackOnce(rootNode: android.view.accessibility.AccessibilityNodeInfo? = null) {
-        if (youtubeBackNavigationPending) return
-        youtubeBackNavigationPending = true
+        // Step 2 (One time): Step back once from the watch/continue screen
         mainThreadHandler.postDelayed({
             try {
-                val protectionState = try {
-                    FocusBlockerManager.instance.getCurrentProtectionState()
-                } catch (_: Exception) {
-                    null
-                }
-                val shouldStillEnforce = protectionState?.let {
-                    (it.sessionState == com.example.feature.session.domain.SessionState.RUNNING ||
-                            it.sessionState == com.example.feature.session.domain.SessionState.PAUSED) &&
-                            it.isAppBlockingEnabled &&
-                            it.isYouTubeStudyModeEnabled
-                } == true
-                if (shouldStillEnforce) {
-                    val activeRoot = try { rootInActiveWindow } catch (e: Exception) { rootNode }
-                    collapseYouTubePlayerOrBack(activeRoot)
-                }
-            } catch (_: Exception) {
-            } finally {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            } catch (_: Exception) {}
+            mainThreadHandler.postDelayed({
                 youtubeBackNavigationPending = false
-            }
-        }, 150L)
+                try {
+                    val afterBackRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                    YouTubeNodeExtractor.dismissMiniplayerIfPresent(afterBackRoot)
+                } catch (_: Exception) {}
+            }, 350L)
+        }, 160L)
+        return true
     }
 
     private fun collapseYouTubePlayerOrBack(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
@@ -935,7 +967,9 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Finds and clicks any active "Pause" or "Pause video" buttons in the accessibility tree using BFS.
+     * Finds and clicks an active "Pause" or "Pause video" button in the accessibility tree using BFS.
+     * Crucially checks that the button's label explicitly represents the playing ("Pause") state and
+     * never clicks a Play/Pause toggle when it is already paused ("Play video").
      */
     private fun clickPauseButtonInNodeTree(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
         if (rootNode == null) return
@@ -947,12 +981,15 @@ class FocusAccessibilityService : AccessibilityService() {
                 val node = queue.removeFirst()
                 visited++
                 val resId = node.viewIdResourceName?.lowercase() ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val text = node.text?.toString() ?: ""
-                val isPause = resId.contains("pause") ||
-                        desc.contains("Pause", ignoreCase = true) ||
-                        text.contains("Pause", ignoreCase = true)
-                if (isPause) {
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+                val text = node.text?.toString()?.trim() ?: ""
+                val isExplicitPauseState =
+                    desc.equals("Pause", ignoreCase = true) ||
+                    desc.equals("Pause video", ignoreCase = true) ||
+                    text.equals("Pause", ignoreCase = true) ||
+                    text.equals("Pause video", ignoreCase = true) ||
+                    (resId.contains("pause_button") && !resId.contains("play_pause") && !desc.contains("Play", ignoreCase = true))
+                if (isExplicitPauseState) {
                     if (performClickOnNodeOrParent(node)) {
                         return
                     }

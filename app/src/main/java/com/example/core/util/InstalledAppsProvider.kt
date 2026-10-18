@@ -12,17 +12,40 @@ import android.net.Uri
 import android.os.Build
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import java.util.concurrent.ConcurrentHashMap
 
 data class InstalledAppItem(
     val packageName: String,
     val appName: String,
     val icon: Drawable?,
+    val iconBitmap: ImageBitmap? = null,
     val isBrowser: Boolean = false,
     val isSystemApp: Boolean = false,
     val hasAppLimit: Boolean = false
 )
 
 object InstalledAppsProvider {
+
+    private val iconCache = ConcurrentHashMap<String, ImageBitmap>()
+
+    fun Drawable.toImageBitmapCached(packageName: String): ImageBitmap {
+        iconCache[packageName]?.let { return it }
+
+        val imageBitmap = if (this is BitmapDrawable && this.bitmap != null && !this.bitmap.isRecycled) {
+            this.bitmap.asImageBitmap()
+        } else {
+            val w = if (intrinsicWidth > 0) intrinsicWidth else 96
+            val h = if (intrinsicHeight > 0) intrinsicHeight else 96
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            setBounds(0, 0, canvas.width, canvas.height)
+            draw(canvas)
+            bitmap.asImageBitmap()
+        }
+
+        iconCache[packageName] = imageBitmap
+        return imageBitmap
+    }
 
     fun Drawable.toImageBitmap(): ImageBitmap {
         if (this is BitmapDrawable && this.bitmap != null && !this.bitmap.isRecycled) {
@@ -63,11 +86,13 @@ object InstalledAppsProvider {
             if (pkg != context.packageName && seenPackages.add(pkg)) {
                 val label = info.loadLabel(pm).toString()
                 val icon = try { info.loadIcon(pm) } catch (e: Exception) { null }
+                val cachedBitmap = icon?.toImageBitmapCached(pkg)
                 browserApps.add(
                     InstalledAppItem(
                         packageName = pkg,
                         appName = label,
                         icon = icon,
+                        iconBitmap = cachedBitmap,
                         isBrowser = true
                     )
                 )
@@ -108,6 +133,7 @@ object InstalledAppsProvider {
             if (pkg != context.packageName && !knownBrowserPackages.contains(pkg) && pkg != "com.google.android.youtube" && seenPackages.add(pkg)) {
                 val label = info.loadLabel(pm).toString()
                 val icon = try { info.loadIcon(pm) } catch (e: Exception) { null }
+                val cachedBitmap = icon?.toImageBitmapCached(pkg)
                 val isSystem = try {
                     (info.activityInfo.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                 } catch (e: Exception) { false }
@@ -118,6 +144,7 @@ object InstalledAppsProvider {
                         packageName = pkg,
                         appName = label,
                         icon = icon,
+                        iconBitmap = cachedBitmap,
                         isBrowser = false,
                         isSystemApp = isSystem,
                         hasAppLimit = hasLimit

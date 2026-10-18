@@ -267,7 +267,7 @@ object AppLimitFloatingOverlayManager {
             )
         }
 
-        // --- Top row: brand mark (left) + "Turn off" pill (right) ---
+        // --- Top row: white open-book brand mark (left) + "Turn off" pill (right) ---
         val topRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -278,15 +278,23 @@ object AppLimitFloatingOverlayManager {
         }
 
         val brandIcon = ImageView(context).apply {
-            setImageResource(R.drawable.focus_shield_wordmark)
+            setImageResource(R.drawable.ic_focus_brand_mark)
+            setColorFilter(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
+            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
+        }
+        val brandTitle = TextView(context).apply {
+            text = "FocusShield"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(20)
-            )
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(8) }
         }
         topRow.addView(brandIcon)
+        topRow.addView(brandTitle)
         topRow.addView(
             View(context),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)

@@ -76,7 +76,7 @@ class FocusPreferencesRepository(private val context: Context) {
     private val syncPrefs = context.getSharedPreferences("focus_shield_sync_prefs", Context.MODE_PRIVATE)
 
     fun isCompletedOnboardingSync(): Boolean {
-        return syncPrefs.getBoolean("onboarding_completed", false)
+        return syncPrefs.getBoolean("onboarding_v1_3_dark_violet_completed", false)
     }
 
     private object PreferencesKeys {
@@ -94,7 +94,7 @@ class FocusPreferencesRepository(private val context: Context) {
         val KEY_IG_REELS_BLOCKING = booleanPreferencesKey("ig_reels_blocking")
         val KEY_FB_REELS_BLOCKING = booleanPreferencesKey("fb_reels_blocking")
         val KEY_SHORTS_ALWAYS_BLOCKED = booleanPreferencesKey("shorts_always_blocked")
-        val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+        val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_v1_3_dark_violet_completed")
         val KEY_DAILY_GOAL_MINUTES = intPreferencesKey("daily_goal_minutes")
         val KEY_MIN_STREAK_THRESHOLD_MINUTES = intPreferencesKey("min_streak_threshold_minutes")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
@@ -248,7 +248,7 @@ class FocusPreferencesRepository(private val context: Context) {
     }
 
     suspend fun setOnboardingCompleted(completed: Boolean = true) {
-        syncPrefs.edit().putBoolean("onboarding_completed", completed).apply()
+        syncPrefs.edit().putBoolean("onboarding_v1_3_dark_violet_completed", completed).apply()
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_ONBOARDING_COMPLETED] = completed
         }

@@ -1,11 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android small-notification icons must be an alpha-only white silhouette. -->
+<!-- Android small-notification icon: alpha-only white silhouette of the FocusShield open-book mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:viewportWidth="100"
+    android:viewportHeight="100">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M3,8.2 L7.7,2 L12,8.2 L16.3,2 L21,8.2 L21,22 L16.3,15.9 L12,22 L7.7,15.9 L3,22 Z" />
+        android:pathData="M39.6,8.2 L39.6,62.0 C42.8,69.5 46.5,78.2 48.6,86.6 L48.6,35.5 C46.8,25.5 43.5,16.0 39.6,8.2 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M60.4,8.2 C56.5,16.0 53.2,25.5 51.4,35.5 L51.4,86.6 C53.5,78.2 57.2,69.5 60.4,62.0 L60.4,8.2 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M27.9,13.4 L27.9,68.4 C35.2,70.6 41.8,76.8 45.9,85.0 C43.8,77.4 40.8,70.0 37.3,63.5 L37.3,27.2 C34.8,21.8 31.5,17.2 27.9,13.4 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M72.1,13.4 C68.5,17.2 65.2,21.8 62.7,27.2 L62.7,63.5 C59.2,70.0 56.2,77.4 54.1,85.0 C58.2,76.8 64.8,70.6 72.1,68.4 L72.1,13.4 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15.5,26.4 C18.5,22.8 22.8,22.4 25.5,25.0 L25.5,70.0 C32.8,71.8 39.0,76.8 43.1,83.5 C35.5,75.0 24.5,74.2 15.5,79.7 L15.5,26.4 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M74.5,25.0 C77.2,22.4 81.5,22.8 84.5,26.4 L84.5,79.7 C75.5,74.2 64.5,75.0 56.9,83.5 C61.0,76.8 67.2,71.8 74.5,70.0 L74.5,25.0 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.9,32.6 L7.9,92.1 L50.0,89.2 L92.1,92.1 L89.1,32.6 L89.9,89.1 L50.0,89.1 L10.1,89.1 Z" />
 </vector>

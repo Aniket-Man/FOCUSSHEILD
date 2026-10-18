@@ -100,8 +100,8 @@ val AVATAR_PRESETS = listOf(
     AvatarPreset(
         id = "SHIELD",
         label = "Scholar",
-        icon = Icons.Rounded.Shield,
-        gradientColors = listOf(Color(0xFFA78BFA), Color(0xFF7C3AED))
+        icon = com.example.core.ui.FocusBrandMark,
+        gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6E18E6))
     ),
     AvatarPreset(
         id = "PHOENIX",

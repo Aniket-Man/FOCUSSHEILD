@@ -25,25 +25,25 @@ interface SessionDao {
     @Query("SELECT * FROM session_records ORDER BY endTime DESC LIMIT :limit")
     fun getRecentSessionsFlow(limit: Int = 10): Flow<List<SessionRecordEntity>>
 
-    @Query("SELECT * FROM session_records WHERE startTime >= :startTime AND endTime <= :endTime ORDER BY endTime DESC")
+    @Query("SELECT * FROM session_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime ORDER BY endTime DESC")
     fun getSessionsBetweenFlow(startTime: Long, endTime: Long): Flow<List<SessionRecordEntity>>
 
-    @Query("SELECT * FROM session_records WHERE startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT * FROM session_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     suspend fun getSessionsBetween(startTime: Long, endTime: Long): List<SessionRecordEntity>
 
     @Query("SELECT * FROM session_records WHERE subject = :subject ORDER BY endTime DESC")
     fun getSessionsForSubjectFlow(subject: String): Flow<List<SessionRecordEntity>>
 
-    @Query("SELECT COUNT(*) FROM session_records WHERE completed = 1 AND startTime >= :startOfDay")
+    @Query("SELECT COUNT(*) FROM session_records WHERE completed = 1 AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startOfDay")
     fun getCompletedSessionsCountSinceFlow(startOfDay: Long): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM session_records WHERE completed = 1 AND startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT COUNT(*) FROM session_records WHERE completed = 1 AND startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     fun getCompletedSessionsCountBetweenFlow(startTime: Long, endTime: Long): Flow<Int>
 
-    @Query("SELECT SUM(actualDurationMillis) FROM session_records WHERE startTime >= :startOfDay")
+    @Query("SELECT SUM(actualDurationMillis) FROM session_records WHERE (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startOfDay")
     fun getTotalStudyTimeMillisSinceFlow(startOfDay: Long): Flow<Long?>
 
-    @Query("SELECT SUM(actualDurationMillis) FROM session_records WHERE startTime >= :startTime AND endTime <= :endTime")
+    @Query("SELECT SUM(actualDurationMillis) FROM session_records WHERE startTime <= :endTime AND (CASE WHEN endTime > 0 THEN endTime ELSE startTime + actualDurationMillis END) >= :startTime")
     fun getTotalStudyTimeMillisBetweenFlow(startTime: Long, endTime: Long): Flow<Long?>
 
     @Query("SELECT SUM(actualDurationMillis) FROM session_records")

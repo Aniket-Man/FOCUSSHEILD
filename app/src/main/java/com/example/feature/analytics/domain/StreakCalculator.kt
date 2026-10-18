@@ -33,10 +33,8 @@ object StreakCalculator {
 
         val minThresholdMillis = minDailyThresholdMinutes * 60 * 1000L
 
-        // Group actual study time by the day the session ENDED. Bucketing by start time credited a
-        // 23:30 -> 00:40 session entirely to yesterday, so a student who studied across midnight
-        // got no streak credit for today's minutes — exactly when streaks broke for late-night
-        // study. endTime falls back to start + actual duration for rows that predate endTime.
+        // Slice each session across the local calendar days it spans so cross-midnight sessions
+        // credit each day's exact portion consistently across StreakCalculator, TodaySummary, and DailyChart.
         val dailyStudyMap = mutableMapOf<String, Long>()
         for (session in sessions) {
             val endMillis = if (session.endTime > 0) {
@@ -44,9 +42,15 @@ object StreakCalculator {
             } else {
                 session.startTime + session.actualDurationMillis
             }
-            val dateKey = formatDateKey(endMillis)
-            val current = dailyStudyMap.getOrDefault(dateKey, 0L)
-            dailyStudyMap[dateKey] = current + session.actualDurationMillis
+            val daySlices = com.example.core.util.DayBounds.sliceSessionDurationByDay(
+                startTime = session.startTime,
+                endTime = endMillis,
+                actualDurationMillis = session.actualDurationMillis,
+                zone = zone()
+            )
+            for ((dateKey, sliceMillis) in daySlices) {
+                dailyStudyMap[dateKey] = dailyStudyMap.getOrDefault(dateKey, 0L) + sliceMillis
+            }
         }
 
         val qualifyingDays = dailyStudyMap.filter { it.value >= minThresholdMillis }.keys.toSet()

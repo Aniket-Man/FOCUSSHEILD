@@ -2,6 +2,11 @@ package com.example.feature.session.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -10,9 +15,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,12 +37,9 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
-import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.HourglassBottom
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,35 +67,53 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
-import com.example.core.ui.FocusLottieAnimation
 import com.example.core.util.TimeFormatter
 import com.example.data.model.SessionMode
+import com.example.data.repository.SessionQuote
+import com.example.data.repository.SessionQuoteRepository
 import com.example.feature.session.domain.SessionSummaryData
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// Eye-attractive custom Google Fonts bundled locally via font-util
+private val PlayfairDisplayFontFamily = FontFamily(
+    Font(R.font.playfair_display, FontWeight.Normal),
+    Font(R.font.playfair_display, FontWeight.Bold)
+)
+
+private val CormorantGaramondFontFamily = FontFamily(
+    Font(R.font.cormorant_garamond, FontWeight.Normal),
+    Font(R.font.cormorant_garamond, FontWeight.Bold)
+)
+
+private val CinzelFontFamily = FontFamily(
+    Font(R.font.cinzel, FontWeight.Normal),
+    Font(R.font.cinzel, FontWeight.Bold)
+)
+
 /**
- * Beautiful, immersive Post-Session Summary Screen.
- * Displays all telemetry and session metrics gathered during the focus session:
- * - Subject & Topic
- * - Pure Focused Study Duration vs Planned Target
- * - Break Time taken
- * - Session Mode & Discipline achievements
- * - Protection metrics (Strict Mode, Blocked Apps Count, YouTube Study Mode, etc.)
- * - Start & End Timestamps
- *
- * Provides two distinct, beautifully styled options:
- * 1. "Save Session" (Stores data into user database & cloud sync)
- * 2. "Don't Save" (Discards the session data without writing to database)
+ * Post-Session Summary Screen matching the user's reference layout:
+ * - No gray circular dot at the top.
+ * - In that top space, a Live-Writing Animated Quote fetched from Cloud Firestore (`/session_quotes`)
+ *   writes itself out live in an eye-catching custom display font.
+ * - Clean `TOTAL STUDY TIME RECORDED` hero card, Subject/Topic/Goal card, 2x2 metric grid,
+ *   `Protection & Telemetry Breakdown` card, and `Save Session` / `Don't Save` bottom actions.
  */
 @Composable
 fun FocusSessionSummaryScreen(
@@ -119,6 +140,15 @@ fun FocusSessionSummaryScreen(
     }
 
     val isCompletedGoal = summaryData.isCompleted && !summaryData.isCancelled
+
+    // Live-writing quote state fetched from Cloud Firestore (/session_quotes)
+    var activeQuote by remember(summaryData.sessionId) {
+        mutableStateOf<SessionQuote?>(null)
+    }
+
+    LaunchedEffect(summaryData.sessionId) {
+        activeQuote = SessionQuoteRepository.fetchRandomQuoteForSummary()
+    }
 
     Scaffold(
         topBar = {
@@ -184,7 +214,7 @@ fun FocusSessionSummaryScreen(
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Option 1: Save Session (Primary Emerald Green / Purple Action)
+                    // Option 1: Save Session
                     Button(
                         onClick = {
                             if (!isSaving) {
@@ -240,7 +270,7 @@ fun FocusSessionSummaryScreen(
                         }
                     }
 
-                    // Option 2: Don't Save (Subtle outline / coral discard)
+                    // Option 2: Don't Save
                     OutlinedButton(
                         onClick = {
                             if (!isSaving) {
@@ -286,7 +316,9 @@ fun FocusSessionSummaryScreen(
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.fillMaxSize().testTag("focus_session_summary_screen")
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("focus_session_summary_screen")
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -296,31 +328,17 @@ fun FocusSessionSummaryScreen(
                 .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Animated Celebration or Completion Header
-            Box(
+            // Live-Writing Quote Showcase in the top space (gray circle dot completely removed)
+            LiveWritingQuoteHero(
+                quote = activeQuote ?: SessionQuoteRepository.PRELOADED_QUOTES.first(),
                 modifier = Modifier
-                    .size(108.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                FocusColors.Primary.copy(alpha = 0.22f),
-                                Color.Transparent
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                FocusLottieAnimation(
-                    rawRes = if (isCompletedGoal) R.raw.focus_success else R.raw.timer_animation,
-                    modifier = Modifier.size(92.dp),
-                    iterations = 1
-                )
-            }
+                    .fillMaxWidth()
+                    .testTag("session_summary_live_quote")
+            )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
                 text = if (isCompletedGoal) "Great Job! Session Finished" else "Focus Session Ended",
@@ -348,71 +366,14 @@ fun FocusSessionSummaryScreen(
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Primary Highlight Card: Pure Focus Study Duration
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(FocusShapes.card)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                FocusColors.Primary.copy(alpha = 0.16f),
-                                FocusColors.Surface
-                            )
-                        )
-                    )
-                    .border(1.5.dp, FocusColors.Primary.copy(alpha = 0.35f), FocusShapes.card)
-                    .padding(20.dp)
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Schedule,
-                            contentDescription = null,
-                            tint = FocusColors.Primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "TOTAL STUDY TIME RECORDED",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = FocusColors.Primary,
-                                letterSpacing = 0.8.sp
-                            )
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = formattedStudyDuration,
-                        style = MaterialTheme.typography.headlineLarge.copy(
-                            fontWeight = FontWeight.Black,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 32.sp
-                        ),
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = "$startFormatted  ➔  $endFormatted",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            }
+            // TOTAL STUDY TIME RECORDED Hero Card (matches reference screenshot)
+            TotalStudyTimeRecordedCard(
+                formattedStudyDuration = formattedStudyDuration,
+                startFormatted = startFormatted,
+                endFormatted = endFormatted
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -540,7 +501,7 @@ fun FocusSessionSummaryScreen(
                     modifier = Modifier.weight(1f)
                 )
 
-                // Metric 4: Shielded Apps / Pomodoro Cycles / Laps / Break
+                // Metric 4: Break Time / Pomodoro Cycles / Laps
                 val secondaryMetricTitle: String
                 val secondaryMetricValue: String
                 val secondaryMetricIcon: ImageVector
@@ -633,6 +594,198 @@ fun FocusSessionSummaryScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
         }
+    }
+}
+
+/**
+ * Renders the Firestore quote in the top space of the Session Summary screen with a live-writing
+ * (character-by-character ink reveal) animation and custom editorial/calligraphy typography.
+ * Completely gridless: no outer card box, no border frame, and no background grid.
+ */
+@Composable
+private fun LiveWritingQuoteHero(
+    quote: SessionQuote,
+    modifier: Modifier = Modifier
+) {
+    var visibleCharCount by remember(quote.id, quote.text) { mutableIntStateOf(0) }
+    var isFinishedWriting by remember(quote.id, quote.text) { mutableStateOf(false) }
+
+    LaunchedEffect(quote.id, quote.text) {
+        visibleCharCount = 0
+        isFinishedWriting = false
+        val fullLength = quote.text.length
+        val stepDelay = quote.typingSpeedMs.coerceIn(12L, 80L)
+        for (i in 1..fullLength) {
+            delay(stepDelay)
+            visibleCharCount = i
+        }
+        isFinishedWriting = true
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "quoteCursor")
+    val cursorAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursorAlpha"
+    )
+
+    val selectedFontFamily = remember(quote.fontStyle) {
+        when (quote.fontStyle.lowercase()) {
+            "calligraphy" -> CormorantGaramondFontFamily
+            "classic" -> CinzelFontFamily
+            else -> PlayfairDisplayFontFamily
+        }
+    }
+
+    val displayedText = remember(quote.text, visibleCharCount) {
+        quote.text.take(visibleCharCount.coerceIn(0, quote.text.length))
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 96.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        // Live-writing quote text with glowing ink cursor (gridless, open layout)
+        Text(
+            text = buildAnnotatedString {
+                withStyle(
+                    SpanStyle(
+                        color = FocusColors.Primary,
+                        fontFamily = PlayfairDisplayFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 24.sp
+                    )
+                ) {
+                    append("“")
+                }
+                withStyle(
+                    SpanStyle(
+                        color = FocusColors.TextPrimary,
+                        fontFamily = selectedFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = if (quote.fontStyle.equals("calligraphy", ignoreCase = true)) 22.sp else 20.sp
+                    )
+                ) {
+                    append(displayedText)
+                }
+                if (isFinishedWriting) {
+                    withStyle(
+                        SpanStyle(
+                            color = FocusColors.Primary,
+                            fontFamily = PlayfairDisplayFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp
+                        )
+                    ) {
+                        append("”")
+                    }
+                } else {
+                    withStyle(
+                        SpanStyle(
+                            color = FocusColors.Primary.copy(alpha = cursorAlpha),
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp
+                        )
+                    ) {
+                        append(" ▍")
+                    }
+                }
+            },
+            lineHeight = 28.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("session_summary_live_quote_text")
+        )
+
+        AnimatedVisibility(
+            visible = isFinishedWriting && quote.author.isNotBlank(),
+            enter = fadeIn(tween(420)) + slideInVertically(tween(420)) { it / 2 }
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "— ${quote.author}",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontFamily = CinzelFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = FocusColors.TextSecondary,
+                        fontSize = 12.5.sp,
+                        letterSpacing = 1.1.sp
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("session_summary_live_quote_author")
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Gridless `TOTAL STUDY TIME RECORDED` hero section (no outer box, no border, no grid lines).
+ */
+@Composable
+private fun TotalStudyTimeRecordedCard(
+    formattedStudyDuration: String,
+    startFormatted: String,
+    endFormatted: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 14.dp, horizontal = 16.dp)
+            .testTag("total_study_time_card"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Schedule,
+                contentDescription = null,
+                tint = FocusColors.Primary,
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = "TOTAL STUDY TIME RECORDED",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = FocusColors.Primary,
+                    fontSize = 11.5.sp,
+                    letterSpacing = 1.sp
+                )
+            )
+        }
+
+        Text(
+            text = formattedStudyDuration,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontWeight = FontWeight.ExtraBold,
+                color = FocusColors.TextPrimary,
+                fontSize = 38.sp
+            )
+        )
+
+        Text(
+            text = "$startFormatted  →  $endFormatted",
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = FocusColors.TextSecondary,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp
+            )
+        )
     }
 }
 

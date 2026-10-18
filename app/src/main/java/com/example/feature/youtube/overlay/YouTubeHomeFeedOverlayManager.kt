@@ -171,10 +171,10 @@ object YouTubeHomeFeedOverlayManager {
             elevation = dp(12).toFloat()
         }
 
-        // Folded-map Focus mark, in the same compact purple style as the in-app button
+        // White open-book FocusShield brand mark
         val icon = ImageView(context).apply {
             setImageResource(R.drawable.ic_focus_brand_mark)
-            setColorFilter(Color.parseColor("#9B7CF6"))
+            setColorFilter(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
 

@@ -1,84 +1,213 @@
 {
   "entities": {
     "UserProfile": {
-      "title": "User Profile",
-      "description": "Profile data and synced avatar for an authenticated user",
+      "title": "UserProfile",
+      "description": "User profile settings, study preferences, and streak statistics.",
       "type": "object",
       "properties": {
-        "userId": { "type": "string", "description": "The Firebase Auth UID of the user" },
-        "displayName": { "type": "string", "description": "Display name of the user" },
-        "email": { "type": "string", "description": "Email address of the user" },
-        "photoBase64": { "type": "string", "description": "Compressed Base64 avatar data" },
-        "dailyStudyGoalMinutes": { "type": "integer", "description": "Daily study goal in minutes" },
-        "currentStreak": { "type": "integer", "description": "Current consecutive active study days" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp; clients must pass serverTimestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp; clients must pass serverTimestamp" }
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's display name."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User's email address."
+        },
+        "dailyStudyGoalMinutes": {
+          "type": "integer",
+          "description": "Target daily study time in minutes."
+        },
+        "currentStreak": {
+          "type": "integer",
+          "description": "Current consecutive days study streak."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Profile creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Profile last update timestamp."
+        }
       },
-      "required": ["userId", "displayName", "email", "createdAt", "updatedAt"]
+      "required": ["userId", "displayName", "dailyStudyGoalMinutes", "currentStreak", "createdAt", "updatedAt"]
     },
-    "SessionRecord": {
-      "title": "Session Record",
-      "description": "Historical study session record",
+    "FocusSession": {
+      "title": "FocusSession",
+      "description": "A completed focus or study session synced to the user's cloud history.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique session identifier" },
-        "userId": { "type": "string", "description": "The Firebase Auth UID of the user" },
-        "mode": { "type": "string", "description": "Session mode like POMODORO, STOPWATCH, or TIMER" },
-        "durationMinutes": { "type": "integer", "description": "Duration completed in minutes" },
-        "completedAt": { "type": "string", "format": "date-time", "description": "When session completed" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp record was created" }
+        "id": {
+          "type": "string",
+          "description": "Unique session identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Session mode (e.g., POMODORO, DEEP_FOCUS, STOPWATCH)."
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "description": "Completed focus duration in minutes."
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the session was completed."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject studied during this session."
+        },
+        "topic": {
+          "type": "string",
+          "description": "Specific topic studied."
+        },
+        "goal": {
+          "type": "string",
+          "description": "Target goal for this session."
+        },
+        "actualDurationMillis": {
+          "type": "integer",
+          "description": "Verified study duration in milliseconds."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether the session completed its planned duration."
+        }
       },
       "required": ["id", "userId", "mode", "durationMinutes", "completedAt", "createdAt"]
     },
-    "StudyPlanRecord": {
-      "title": "Study Plan Record",
-      "description": "User customized study plan",
+    "StudyPlan": {
+      "title": "StudyPlan",
+      "description": "A scheduled study task or planner item belonging to a user.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique plan identifier" },
-        "userId": { "type": "string", "description": "The Firebase Auth UID of the user" },
-        "title": { "type": "string", "description": "Plan title or description" },
-        "targetSubject": { "type": "string", "description": "Associated subject name" },
-        "durationMinutes": { "type": "integer", "description": "Target duration in minutes" },
-        "activeDays": { "type": "array", "description": "Days of week when plan is active" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+        "id": {
+          "type": "string",
+          "description": "Unique study plan identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the study task."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject or category name."
+        },
+        "targetMinutes": {
+          "type": "integer",
+          "description": "Planned duration in minutes."
+        },
+        "isCompleted": {
+          "type": "boolean",
+          "description": "Whether the planned task is completed."
+        },
+        "scheduledDate": {
+          "type": "string",
+          "description": "ISO date string for the scheduled study day."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp."
+        }
       },
-      "required": ["id", "userId", "title", "targetSubject", "durationMinutes", "createdAt", "updatedAt"]
+      "required": ["id", "userId", "title", "targetMinutes", "isCompleted", "scheduledDate", "createdAt", "updatedAt"]
     },
-    "AppLimitRecord": {
-      "title": "App Limit Record",
-      "description": "Usage limit configured for an application",
+    "SessionQuote": {
+      "title": "SessionQuote",
+      "description": "A live-writing motivational/study quote displayed on the Session Summary screen and managed via an external Admin Website.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique limit identifier" },
-        "userId": { "type": "string", "description": "The Firebase Auth UID of the user" },
-        "packageName": { "type": "string", "description": "Android application package name" },
-        "appName": { "type": "string", "description": "Human-readable application name" },
-        "dailyLimitMinutes": { "type": "integer", "description": "Allowed minutes per day" },
-        "isStrict": { "type": "boolean", "description": "Whether strict mode blocking is enabled" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+        "id": {
+          "type": "string",
+          "description": "Unique quote document identifier (e.g., quote_01)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The quote body text that animates live on the Session Summary screen."
+        },
+        "author": {
+          "type": "string",
+          "description": "Author or source attribution for the quote."
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional theme tag (e.g., Deep Work, Discipline, Perseverance)."
+        },
+        "fontStyle": {
+          "type": "string",
+          "description": "Typography style key: 'editorial' (Playfair Display), 'calligraphy' (Cormorant Garamond), or 'classic' (Cinzel)."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether this quote is active in the Session Summary rotation."
+        },
+        "typingSpeedMs": {
+          "type": "integer",
+          "description": "Live-writing speed in milliseconds per character (e.g., 28-40)."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "Last update epoch timestamp in milliseconds."
+        }
       },
-      "required": ["id", "userId", "packageName", "appName", "dailyLimitMinutes", "isStrict", "createdAt", "updatedAt"]
+      "required": ["id", "text", "author", "active", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
-      "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Root user profile document"
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profile document keyed by Firebase Auth UID."
     },
     "/users/{userId}/sessions/{sessionId}": {
-      "schema": { "$ref": "#/entities/SessionRecord" },
-      "description": "User study sessions subcollection"
+      "schema": {
+        "$ref": "#/entities/FocusSession"
+      },
+      "description": "Completed focus sessions belonging to the user."
     },
     "/users/{userId}/study_plans/{planId}": {
-      "schema": { "$ref": "#/entities/StudyPlanRecord" },
-      "description": "User study plans subcollection"
+      "schema": {
+        "$ref": "#/entities/StudyPlan"
+      },
+      "description": "Study planner tasks belonging to the user."
     },
-    "/users/{userId}/app_limits/{limitId}": {
-      "schema": { "$ref": "#/entities/AppLimitRecord" },
-      "description": "User app limits subcollection"
+    "/session_quotes/{quoteId}": {
+      "schema": {
+        "$ref": "#/entities/SessionQuote"
+      },
+      "description": "Global collection of live-writing Session Summary quotes preloaded by the app and editable from the external Admin Website."
     }
   }
 }

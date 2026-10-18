@@ -117,10 +117,10 @@ fun FocusHeader(
             }
         }
 
-        // Right: theme switcher, notification bell, and profile button
+        // Right: theme switcher and profile avatar button
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Theme Mode Toggle button (Light / Dark)
             Box(
@@ -142,52 +142,7 @@ fun FocusHeader(
                 )
             }
 
-            // Notification button. Deliberately styled as a *notification* rather than as one more
-            // neutral icon button in the row: a filled bell, and while an update is pending the
-            // whole button takes the accent fill so the unread state is legible before the badge is.
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .shadow(if (isDark) 0.dp else 2.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f))
-                    .clip(CircleShape)
-                    .background(if (showNotificationDot) FocusColors.Primary else FocusColors.Surface)
-                    .border(
-                        width = 1.dp,
-                        color = if (showNotificationDot) FocusColors.Primary else FocusColors.CardBorderSubtle,
-                        shape = CircleShape
-                    )
-                    .clickable(onClick = onNotificationClick)
-                    .testTag("notification_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Notifications,
-                    contentDescription = "Notifications",
-                    tint = if (showNotificationDot) FocusColors.TextOnDark else FocusColors.TextPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
-
-                // Unread-update badge. Sits on the bell's top-end rim and only occupies space when
-                // lit, so the bell itself never shifts. The ring is drawn in the button's own fill
-                // colour so the badge reads as punched out of it either way.
-                if (showNotificationDot) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 4.dp, end = 4.dp)
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.BlockedRed)
-                            .border(1.5.dp, FocusColors.Primary, CircleShape)
-                            .testTag("notification_dot")
-                    )
-                }
-            }
-
-            // Profile button — the user's own avatar rather than a generic shield: the photo they
-            // uploaded from the phone when there is one, otherwise the preset emblem they picked
-            // (UserProfileAvatar owns that fallback, so the header and the profile screen cannot
-            // disagree about which image represents the user).
+            // Profile button — displays the user's Google Gmail account profile picture or selected preset
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -206,7 +161,6 @@ fun FocusHeader(
                     )
                 )
 
-                // Same pending-update badge as the bell, off the same state.
                 if (showProfileDot) {
                     Box(
                         modifier = Modifier

@@ -28,16 +28,16 @@ interface StudyActivityDao {
     @Query("SELECT * FROM study_activities WHERE sessionId = :sessionId ORDER BY startedAt ASC")
     suspend fun getActivitiesForSession(sessionId: String): List<StudyActivityEntity>
 
-    @Query("SELECT * FROM study_activities WHERE startedAt >= :startTime AND startedAt <= :endTime ORDER BY startedAt DESC")
+    @Query("SELECT * FROM study_activities WHERE startedAt <= :endTime AND (CASE WHEN endedAt > 0 THEN endedAt ELSE startedAt + durationMillis END) >= :startTime ORDER BY startedAt DESC")
     fun getActivitiesBetweenFlow(startTime: Long, endTime: Long): Flow<List<StudyActivityEntity>>
 
-    @Query("SELECT * FROM study_activities WHERE startedAt >= :startTime AND startedAt <= :endTime")
+    @Query("SELECT * FROM study_activities WHERE startedAt <= :endTime AND (CASE WHEN endedAt > 0 THEN endedAt ELSE startedAt + durationMillis END) >= :startTime")
     suspend fun getActivitiesBetween(startTime: Long, endTime: Long): List<StudyActivityEntity>
 
     @Query("SELECT * FROM study_activities ORDER BY startedAt DESC")
     fun getAllActivitiesFlow(): Flow<List<StudyActivityEntity>>
 
-    @Query("SELECT SUM(durationMillis) FROM study_activities WHERE startedAt >= :startTime AND startedAt <= :endTime")
+    @Query("SELECT SUM(durationMillis) FROM study_activities WHERE startedAt <= :endTime AND (CASE WHEN endedAt > 0 THEN endedAt ELSE startedAt + durationMillis END) >= :startTime")
     fun getTotalDurationBetweenFlow(startTime: Long, endTime: Long): Flow<Long?>
 
     @Query("DELETE FROM study_activities WHERE sessionId = :sessionId")

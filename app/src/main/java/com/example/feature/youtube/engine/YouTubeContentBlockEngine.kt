@@ -24,8 +24,8 @@ object YouTubeContentBlockEngine {
     /** Total budget for channel metadata to render before the video is treated as unknown. */
     private const val CHANNEL_METADATA_GRACE_MILLIS = 5000L
 
-    /** Time gap delay (in millis) after video playback starts before enforcing any blocking decision. */
-    private const val PLAYBACK_START_DELAY_MILLIS = 3000L
+    /** Maximum time to wait for channel metadata while a pre-roll ad is actively playing and hiding the channel header. */
+    private const val AD_MAX_WAIT_FOR_CHANNEL_MILLIS = 60_000L
 
     private const val MIN_FUZZY_MATCH_LENGTH = 3
 
@@ -39,6 +39,9 @@ object YouTubeContentBlockEngine {
     private var playbackStartedAt: Long = 0L
 
     @Volatile
+    private var wasAdPlayingOnLastTick: Boolean = false
+
+    @Volatile
     private var lastSeenChannelName: String? = null
 
     @Volatile
@@ -49,6 +52,10 @@ object YouTubeContentBlockEngine {
 
     @Volatile
     private var lastApprovedChannel: String? = null
+
+    @Volatile
+    var isCurrentlyOnApprovedWatchPage: Boolean = false
+        private set
 
     /**
      * Evaluates the current YouTube screen and returns the block decision.
@@ -82,49 +89,119 @@ object YouTubeContentBlockEngine {
             }
         }
 
-        // 2.1 AD DETECTION & BYPASS:
-        // When an ad is actively playing, never block and do not disturb approved channel state.
+        // 2.1 Ad detection (Sponsor / Skip Ad / Ad countdown / Visit advertiser)
         val isAd = YouTubeNodeExtractor.detectAd(rootNode)
-        if (isAd) {
-            return YouTubeBlockDecision(
-                verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                reason = "YouTube Ad is playing"
-            )
+
+        // When a pre-roll ad finishes and transitions to the main video, reset the metadata grace timer
+        // so the video's watch header has a full grace window to finish rendering.
+        if (wasAdPlayingOnLastTick && !isAd) {
+            currentVideoFirstSeenAt = currentTime
         }
+        wasAdPlayingOnLastTick = isAd
 
         // 2.2 Record watch page active timestamp
         if (playbackStartedAt == 0L) {
             playbackStartedAt = currentTime
         }
 
-        // 3. TITLE + CHANNEL MATCHING PIPELINE
+        // 3. DUAL CHANNEL IDENTITY EXTRACTION (@handle under title + Channel Name from Subscribe/Avatar/Owner)
         val title = YouTubeNodeExtractor.extractVideoTitle(rootNode)
-        val channel = YouTubeNodeExtractor.extractChannelName(rootNode)
-            ?: resolveChannelFromText(rootNode)
+        val identity = YouTubeNodeExtractor.extractChannelIdentity(rootNode)
+        val fallbackChannel = if (!identity.isIdentifiable) resolveChannelFromText(rootNode) else null
 
         if (title != null) lastSeenVideoTitle = title
         trackVideo(title, currentTime)
 
-        // 3.1 ACTIVE SESSION LATCH: If this specific video was already verified and approved,
-        // keep it approved while metadata is temporarily occluded.
-        if (lastApprovedVideoKey != null && title != null && currentVideoKey == lastApprovedVideoKey && channel == null) {
-            return YouTubeBlockDecision.approvedChannel(lastApprovedChannel ?: "Approved Channel")
+        val isHandleApproved = !identity.channelHandle.isNullOrBlank() &&
+                isChannelApproved(identity.channelHandle, approvedChannelIds, approvedChannelNames)
+        val isNameApproved = !identity.channelName.isNullOrBlank() &&
+                isChannelApproved(identity.channelName, approvedChannelIds, approvedChannelNames)
+        val isFallbackApproved = !fallbackChannel.isNullOrBlank() &&
+                isChannelApproved(fallbackChannel, approvedChannelIds, approvedChannelNames)
+
+        val hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank()
+        val isPositivelyApproved = isHandleApproved || isNameApproved || isFallbackApproved
+
+        // 3.1 ACTIVE SESSION LATCH & SAFE PLAYBACK SANDBOX: If this specific video was already verified and approved,
+        // or the Safe Playback Sandbox is active, keep it approved while metadata, scrolling, or mid-roll ads
+        // temporarily occlude the watch header.
+        // However, if a new unapproved channel is positively identified on screen, exit sandbox and never override it.
+        val isSandboxActiveForPlayback = com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive
+        val isLatchedApproved = !hasPositiveChannelIdentification && (
+            (lastApprovedVideoKey != null && title != null && currentVideoKey == lastApprovedVideoKey) ||
+            isSandboxActiveForPlayback
+        )
+
+        val approved = isPositivelyApproved || isLatchedApproved
+        val displayChannel = when {
+            isNameApproved -> identity.channelName
+            isHandleApproved -> identity.channelName ?: identity.channelHandle
+            isFallbackApproved -> fallbackChannel
+            hasPositiveChannelIdentification -> identity.preferredDisplay ?: fallbackChannel
+            isLatchedApproved -> lastApprovedChannel ?: lastSeenChannelName ?: com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
+            else -> null
+        }
+        if (displayChannel != null) {
+            lastSeenChannelName = displayChannel
         }
 
-        if (channel != null) lastSeenChannelName = channel
-        // Never allow a new or unverified video to inherit an earlier approved channel name
-        val effectiveChannel = channel ?: if (currentVideoKey != null && currentVideoKey == lastApprovedVideoKey) lastSeenChannelName else null
+        // 3.2 SMART AD DETECTION & HANDLING RULES:
+        // - If an ad is playing on an APPROVED channel: ALLOW the ad to run so the video can play after the ad.
+        // - If an ad is playing and the channel is already identified as UNAPPROVED: STOP and step back immediately.
+        // - If a pre-roll ad temporarily hides channel metadata: ALLOW the ad until the channel is identified.
+        if (isAd) {
+            if (approved) {
+                lastApprovedVideoKey = currentVideoKey
+                lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
+                isCurrentlyOnApprovedWatchPage = true
+                return YouTubeBlockDecision.approvedChannel(
+                    channel = lastApprovedChannel ?: "Approved Channel",
+                    title = title,
+                    isAdPlaying = true
+                )
+            } else if (hasPositiveChannelIdentification) {
+                // Ad is playing on a positively identified UNAPPROVED channel -> stop ad & step back immediately!
+                isCurrentlyOnApprovedWatchPage = false
+                return YouTubeBlockDecision.blockedChannel(displayChannel ?: "Unapproved Channel")
+            } else {
+                // Pre-roll ad is hiding the channel header before the video starts -> allow ad while waiting for channel
+                val withinAdWait = (currentTime - currentVideoFirstSeenAt) < AD_MAX_WAIT_FOR_CHANNEL_MILLIS
+                if (withinAdWait) {
+                    return YouTubeBlockDecision(
+                        verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+                        reason = "Pre-roll ad playing; waiting for channel identification",
+                        detectedTitle = title,
+                        isAdPlaying = true
+                    )
+                } else {
+                    isCurrentlyOnApprovedWatchPage = false
+                    return YouTubeBlockDecision.blockedChannel("Unapproved Video Ad")
+                }
+            }
+        }
 
-        val approved = isContentApproved(title, effectiveChannel, approvedChannelIds, approvedChannelNames)
+        // 3.3 NORMAL VIDEO PLAYBACK (No Ad):
         if (approved) {
             lastApprovedVideoKey = currentVideoKey
-            lastApprovedChannel = effectiveChannel ?: "Approved Channel"
-            return YouTubeBlockDecision.approvedChannel(lastApprovedChannel ?: "Approved Channel")
-        } else {
-            // Unapproved channel positively identified -> block immediately!
-            if (effectiveChannel != null) {
-                return YouTubeBlockDecision.blockedChannel(effectiveChannel)
-            }
+            lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
+            isCurrentlyOnApprovedWatchPage = true
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
+                channel = com.example.feature.youtube.detector.ChannelIdentityInfo(
+                    channelName = lastApprovedChannel,
+                    channelHandle = identity.channelHandle
+                ),
+                title = title ?: lastSeenVideoTitle
+            )
+            return YouTubeBlockDecision.approvedChannel(
+                channel = lastApprovedChannel ?: "Approved Channel",
+                title = title,
+                isAdPlaying = false
+            )
+        } else if (hasPositiveChannelIdentification) {
+            // Unapproved channel positively identified -> exit sandbox and block
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+            isCurrentlyOnApprovedWatchPage = false
+            return YouTubeBlockDecision.blockedChannel(displayChannel)
         }
 
         // 4. Channel metadata not rendered yet: wait briefly, then treat as unknown.
@@ -136,6 +213,7 @@ object YouTubeContentBlockEngine {
             )
         }
 
+        isCurrentlyOnApprovedWatchPage = false
         if (!blockUnknownContent) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW,
@@ -144,10 +222,6 @@ object YouTubeContentBlockEngine {
             )
         }
         return YouTubeBlockDecision.unknownContent(title, null)
-    }
-
-    private fun effectiveChannelOrFallback(channel: String?): String {
-        return channel ?: lastSeenChannelName ?: "Approved Channel"
     }
 
     /**
@@ -213,6 +287,7 @@ object YouTubeContentBlockEngine {
                 lastSeenChannelName = null
                 lastApprovedVideoKey = null
                 lastApprovedChannel = null
+                isCurrentlyOnApprovedWatchPage = false
             }
         } else {
             if (currentVideoFirstSeenAt == 0L) {
@@ -225,8 +300,11 @@ object YouTubeContentBlockEngine {
         currentVideoKey = null
         currentVideoFirstSeenAt = 0L
         playbackStartedAt = 0L
+        wasAdPlayingOnLastTick = false
         lastApprovedVideoKey = null
         lastApprovedChannel = null
+        isCurrentlyOnApprovedWatchPage = false
+        com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
     }
 
     /**
@@ -238,6 +316,22 @@ object YouTubeContentBlockEngine {
         lastSeenVideoTitle = null
         lastApprovedVideoKey = null
         lastApprovedChannel = null
+        isCurrentlyOnApprovedWatchPage = false
+    }
+
+    /**
+     * Evaluates whether a dual WatchChannelIdentity (@handle + channelName) matches the user's approved channels.
+     */
+    fun isChannelIdentityApproved(
+        identity: YouTubeNodeExtractor.WatchChannelIdentity,
+        approvedChannelIds: Set<String>,
+        approvedChannelNames: Set<String>
+    ): Boolean {
+        val handleApproved = !identity.channelHandle.isNullOrBlank() &&
+                isChannelApproved(identity.channelHandle, approvedChannelIds, approvedChannelNames)
+        val nameApproved = !identity.channelName.isNullOrBlank() &&
+                isChannelApproved(identity.channelName, approvedChannelIds, approvedChannelNames)
+        return handleApproved || nameApproved
     }
 
     /**
@@ -256,8 +350,8 @@ object YouTubeContentBlockEngine {
     }
 
     /**
-     * Checks whether the detected channel is whitelisted against the user's
-     * approved study channels (handles and names).
+     * Checks whether the detected channel (either @handle or display name) is whitelisted
+     * against the user's approved study channels (both handles and names).
      */
     fun isChannelApproved(
         detectedChannel: String,
@@ -269,11 +363,12 @@ object YouTubeContentBlockEngine {
         val detected = detectedChannel.trim()
         val detectedHandle = normalizeHandle(detected)
         val detectedName = normalizeName(detected)
+        if (detectedHandle.isEmpty() && detectedName.isEmpty()) return false
         val detectedWords = extractSignificantWords(detected)
 
         for (approved in approvedChannelIds) {
             val approvedHandle = normalizeHandle(approved)
-            if (approvedHandle.isNotEmpty() && approvedHandle == detectedHandle) return true
+            if (approvedHandle.isNotEmpty() && (approvedHandle == detectedHandle || approvedHandle == detectedName)) return true
             if (isFuzzyMatch(detectedHandle, approvedHandle)) return true
             if (isFuzzyMatch(detectedName, approvedHandle)) return true
             if (matchWords(detectedWords, extractSignificantWords(approved))) return true
@@ -281,7 +376,7 @@ object YouTubeContentBlockEngine {
 
         for (approved in approvedChannelNames) {
             val approvedName = normalizeName(approved)
-            if (approvedName.isNotEmpty() && approvedName == detectedName) return true
+            if (approvedName.isNotEmpty() && (approvedName == detectedName || approvedName == detectedHandle)) return true
             if (isFuzzyMatch(detectedName, approvedName)) return true
             if (isFuzzyMatch(detectedHandle, approvedName)) return true
             if (matchWords(detectedWords, extractSignificantWords(approved))) return true
@@ -289,15 +384,19 @@ object YouTubeContentBlockEngine {
 
         // Sub-channel / Brand alias matching:
         // E.g. PW-JEEWallah, PW-NEETWallah, PW Foundation belong to Physics Wallah
-        val isPwDetected = detectedHandle.contains("pw") || detectedName.contains("pw") ||
-                detectedHandle.contains("physicswallah") || detectedName.contains("physicswallah")
+        val isPwDetected = detectedWords.contains("pw") ||
+                detectedHandle.startsWith("pw") ||
+                detectedHandle.contains("physicswallah") ||
+                detectedName.contains("physicswallah")
         if (isPwDetected) {
             val isPwApproved = approvedChannelIds.any {
                 val h = normalizeHandle(it)
-                h.contains("pw") || h.contains("physicswallah")
+                val w = extractSignificantWords(it)
+                w.contains("pw") || h.startsWith("pw") || h.contains("physicswallah")
             } || approvedChannelNames.any {
                 val n = normalizeName(it)
-                n.contains("pw") || n.contains("physicswallah")
+                val w = extractSignificantWords(it)
+                w.contains("pw") || n.startsWith("pw") || n.contains("physicswallah")
             }
             if (isPwApproved) return true
         }
@@ -309,27 +408,28 @@ object YouTubeContentBlockEngine {
         return text.lowercase(Locale.ROOT)
             .replace(Regex("[^a-z0-9]"), " ")
             .split(" ")
-            .filter { it.length >= 3 && it !in listOf("the", "and", "official", "channel", "video", "hindi", "english") }
+            .filter { it.length >= 2 && it !in listOf("the", "and", "official", "channel", "video", "hindi", "english") }
     }
 
     private fun matchWords(wordsA: List<String>, wordsB: List<String>): Boolean {
         if (wordsA.isEmpty() || wordsB.isEmpty()) return false
         val overlap = wordsA.intersect(wordsB.toSet())
-        // If the shorter list has all its words inside the other list, or at least 2 significant words match
-        return (overlap.isNotEmpty() && overlap.size == minOf(wordsA.size, wordsB.size)) || overlap.size >= 2
+        return (overlap.isNotEmpty() && overlap.size == minOf(wordsA.size, wordsB.size) && overlap.any { it.length >= 3 }) ||
+                overlap.count { it.length >= 3 } >= 2
     }
 
     private fun isFuzzyMatch(a: String, b: String): Boolean {
         if (a.isEmpty() || b.isEmpty()) return false
+        if (a == b) return true
         val shorter = minOf(a.length, b.length)
-        if (shorter < MIN_FUZZY_MATCH_LENGTH) return false
+        if (shorter < 4) return false
         if (a.contains(b) || b.contains(a)) return true
-        
+
         // Brand acronym expansion (e.g. pw -> physicswallah)
-        val expandedA = a.replace("pw", "physicswallah")
-        val expandedB = b.replace("pw", "physicswallah")
+        val expandedA = if (a.startsWith("pw")) a.replaceFirst("pw", "physicswallah") else a
+        val expandedB = if (b.startsWith("pw")) b.replaceFirst("pw", "physicswallah") else b
         if (expandedA.contains(expandedB) || expandedB.contains(expandedA)) return true
-        
+
         return false
     }
 

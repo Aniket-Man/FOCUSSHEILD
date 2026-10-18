@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
 fun SplashScreen(
     onSplashFinished: () -> Unit
 ) {
+    val currentOnSplashFinished by androidx.compose.runtime.rememberUpdatedState(onSplashFinished)
     // Entrance animations
     val scale = remember { Animatable(0.72f) }
     val alpha = remember { Animatable(0f) }
@@ -114,7 +115,7 @@ fun SplashScreen(
 
         // Brief cinematic pause for user recognition before smooth transition to destination
         delay(1600)
-        onSplashFinished()
+        currentOnSplashFinished()
     }
 
     Box(
@@ -157,31 +158,17 @@ fun SplashScreen(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(horizontal = 24.dp)
         ) {
-            // Supplied gradient folded-map app logo with a multi-layer glowing container
+            // Exact supplied FocusShield app logo (matching home screen launcher icon with zero variation)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .scale(scale.value)
                     .alpha(alpha.value)
             ) {
-                // Secondary decorative ambient halo
-                Box(
-                    modifier = Modifier
-                        .size(140.dp)
-                        .scale(pulseScale)
-                        .background(
-                            color = FocusColors.DarkPalette.primary.copy(alpha = 0.20f),
-                            shape = CircleShape
-                        )
-                )
-
-                // High-resolution vector emblem
                 Image(
-                    painter = painterResource(id = R.drawable.ic_splash_shield),
+                    painter = painterResource(id = R.drawable.ic_focus_shield_app_icon),
                     contentDescription = "FocusShield app logo",
-                    modifier = Modifier
-                        .size(112.dp)
-                        .clip(RoundedCornerShape(28.dp))
+                    modifier = Modifier.size(104.dp)
                 )
             }
 

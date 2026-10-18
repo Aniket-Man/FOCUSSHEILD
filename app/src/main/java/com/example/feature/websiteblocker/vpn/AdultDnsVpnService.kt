@@ -206,7 +206,7 @@ class AdultDnsVpnService : VpnService() {
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("18+ Content Shield Active")
             .setContentText("Protecting browsing and apps against adult websites")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_focus_notification)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

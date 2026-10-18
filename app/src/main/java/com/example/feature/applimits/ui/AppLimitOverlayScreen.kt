@@ -159,17 +159,24 @@ fun AppLimitOverlayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Folded-map mark, retaining the previous compact monochrome treatment
-                Box(
-                    modifier = Modifier
-                        .size(36.dp),
-                    contentAlignment = Alignment.CenterStart
+                // White open-book FocusShield brand mark + title
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
                         imageVector = FocusBrandMark,
-                        contentDescription = "Focus Limit",
-                        tint = FocusColors.Primary,
-                        modifier = Modifier.size(28.dp)
+                        contentDescription = "FocusShield",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = "FocusShield",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 16.sp
+                        )
                     )
                 }
 

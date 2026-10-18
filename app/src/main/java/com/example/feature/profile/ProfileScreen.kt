@@ -598,103 +598,6 @@ fun ProfileScreen(
                                 testTag = "profile_accessibility_row"
                             )
 
-                            ProfileNavigationRow(
-                                title = "New Updates",
-                                subtitle = "Check for the latest version of FocusShield",
-                                icon = Icons.Rounded.SystemUpdate,
-                                iconTint = FocusColors.Primary,
-                                onClick = onNavigateToUpdates,
-                                testTag = "profile_updates_row",
-                                showBadge = false
-                            )
-
-                            ProfileNavigationRow(
-                                title = "App Tour & System Setup Wizard",
-                                subtitle = "Revisit the 3-step onboarding and permissions walkthrough",
-                                icon = Icons.Rounded.Security,
-                                iconTint = FocusColors.Primary,
-                                onClick = onNavigateToOnboarding,
-                                testTag = "profile_onboarding_row"
-                            )
-                        }
-                    }
-                }
-
-                // Study Defaults
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                    ) {
-                        Text(
-                            text = "DEFAULT STUDY PREFERENCES",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(FocusShapes.card)
-                                .background(FocusColors.Surface)
-                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                                .padding(FocusSpacing.lg),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Rounded.HourglassBottom,
-                                    contentDescription = null,
-                                    tint = FocusColors.Primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Default Timer Duration",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = FocusColors.TextPrimary
-                                        )
-                                    )
-                                    Text(
-                                        text = "${uiState.preferences.defaultTimerMinutes} minutes per standard study block",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = FocusColors.TextSecondary
-                                        )
-                                    )
-                                }
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Schedule,
-                                    contentDescription = null,
-                                    tint = FocusColors.AmberOrange,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Pomodoro Default Intervals",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = FocusColors.TextPrimary
-                                        )
-                                    )
-                                    Text(
-                                        text = "${uiState.preferences.pomodoroFocusMinutes}m Focus • ${uiState.preferences.pomodoroShortBreakMinutes}m Break • ${uiState.preferences.pomodoroCycles} Cycles",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = FocusColors.TextSecondary
-                                        )
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -727,29 +630,27 @@ fun ProfileScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(FocusColors.PrimaryContainer),
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(12.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Security,
-                                        contentDescription = null,
-                                        tint = FocusColors.Primary,
-                                        modifier = Modifier.size(22.dp)
+                                    androidx.compose.foundation.Image(
+                                        painter = androidx.compose.ui.res.painterResource(com.example.R.drawable.ic_focus_shield_app_icon),
+                                        contentDescription = "FocusShield Logo",
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "FocusShield v1.0",
+                                        text = "FocusShield v1.3",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = FocusColors.TextPrimary
                                         )
                                     )
                                     Text(
-                                        text = "Local-First Study & Anti-Distraction Engine for JEE & NEET",
+                                        text = "Secure Study & Anti-Distraction Engine",
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             color = FocusColors.TextSecondary,
                                             fontSize = 12.sp

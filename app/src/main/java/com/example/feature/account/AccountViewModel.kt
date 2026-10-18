@@ -38,7 +38,8 @@ data class AccountUiState(
 class AccountViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val cloudInstallState: CloudInstallState,
-    private val syncGateway: SyncGateway
+    private val syncGateway: SyncGateway,
+    private val preferencesRepository: com.example.data.preferences.FocusPreferencesRepository
 ) : ViewModel() {
 
     private val _busy = MutableStateFlow<AccountBusy?>(null)
@@ -74,7 +75,15 @@ class AccountViewModel @Inject constructor(
         _busy.value = AccountBusy.SIGN_IN
         viewModelScope.launch {
             try {
-                authRepository.signInWithCredential(credential)
+                val state = authRepository.signInWithCredential(credential)
+                if (state is AuthState.Authenticated) {
+                    if (!state.photoUrl.isNullOrBlank()) {
+                        preferencesRepository.updateUserPhotoUri(state.photoUrl)
+                    }
+                    if (state.displayName.isNotBlank()) {
+                        preferencesRepository.updateUserName(state.displayName)
+                    }
+                }
                 syncGateway.requestSync()
                 onSuccess()
             } catch (t: Throwable) {

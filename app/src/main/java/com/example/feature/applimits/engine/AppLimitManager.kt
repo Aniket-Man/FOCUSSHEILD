@@ -701,11 +701,9 @@ class AppLimitManager private constructor(
                 val nowTickElapsed = SystemClock.elapsedRealtime()
                 tickCount++
 
-                val currentElapsed = if (session.isPaused) {
-                    // Parked outside the app: credit nothing, and rebase so the paused interval is
-                    // not added when the user returns (coming back restarts this ticker anyway;
-                    // the rebase covers the pause boundary this tick straddles — at most one
-                    // 500 ms tick of unpaused time, and only ever in the user's favour).
+                val currentElapsed = if (session.isPaused || isBlockedByRunningFocusSession(session.packageName)) {
+                    // Parked outside the app or owned by an active Focus Session / break:
+                    // credit nothing, and rebase so the interval is not added when resumed.
                     lastTickElapsed = nowTickElapsed
                     session.elapsedMillis
                 } else {
@@ -1288,11 +1286,15 @@ class AppLimitManager private constructor(
      */
     private fun isBlockedByRunningFocusSession(packageName: String): Boolean {
         return try {
-            val state = FocusBlockerManager.instance.getCurrentProtectionState(System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            val state = FocusBlockerManager.instance.getCurrentProtectionState(now)
             FocusSessionAppLimitPolicy.sessionOwnsPackage(
                 sessionState = state.sessionState,
                 blockedPackages = state.blockedPackages,
-                packageName = packageName
+                packageName = packageName,
+                isBreakActive = state.isBreakActive && now < state.breakEndsAt,
+                isYouTubeStudyModeEnabled = state.isYouTubeStudyModeEnabled,
+                isBrowserStudyModeEnabled = state.isBrowserStudyModeEnabled
             )
         } catch (_: Exception) {
             false

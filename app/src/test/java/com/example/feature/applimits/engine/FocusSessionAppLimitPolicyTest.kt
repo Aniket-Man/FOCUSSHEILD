@@ -78,4 +78,28 @@ class FocusSessionAppLimitPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `an active break owns the foreground package so app limits do not interrupt breaks`() {
+        assertTrue(
+            FocusSessionAppLimitPolicy.sessionOwnsPackage(
+                sessionState = SessionState.RUNNING,
+                blockedPackages = emptySet(),
+                packageName = "com.instagram.android",
+                isBreakActive = true
+            )
+        )
+    }
+
+    @Test
+    fun `a running session with YouTube Study Mode enabled owns YouTube`() {
+        assertTrue(
+            FocusSessionAppLimitPolicy.sessionOwnsPackage(
+                sessionState = SessionState.RUNNING,
+                blockedPackages = emptySet(),
+                packageName = "com.google.android.youtube",
+                isYouTubeStudyModeEnabled = true
+            )
+        )
+    }
 }

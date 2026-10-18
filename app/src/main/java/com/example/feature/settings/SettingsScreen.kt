@@ -5,9 +5,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -704,7 +707,8 @@ fun SettingsScreen(
                             icon = Icons.Rounded.Login,
                             iconTint = FocusColors.Primary,
                             onClick = onNavigateToAccount,
-                            testTag = "settings_sign_in_row"
+                            testTag = "settings_sign_in_row",
+                            customPainter = painterResource(id = com.example.R.drawable.ic_google_logo)
                         )
                     } else {
                         // --- Auto-save cadence --------------------------------------------
@@ -1071,7 +1075,8 @@ private fun SettingsNavigationRow(
     icon: ImageVector,
     iconTint: Color,
     onClick: () -> Unit,
-    testTag: String = ""
+    testTag: String = "",
+    customPainter: Painter? = null
 ) {
     Box(
         modifier = Modifier
@@ -1091,15 +1096,23 @@ private fun SettingsNavigationRow(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(iconTint.copy(alpha = 0.12f)),
+                    .background(if (customPainter != null) Color.White else iconTint.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (customPainter != null) {
+                    Image(
+                        painter = customPainter,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))

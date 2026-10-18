@@ -22,7 +22,8 @@ data class YouTubeBlockDecision(
     val detectedTitle: String? = null,
     val detectedChannel: String? = null,
     val matchedKeyword: String? = null,
-    val isShorts: Boolean = false
+    val isShorts: Boolean = false,
+    val isAdPlaying: Boolean = false
 ) {
     companion object {
         val ALLOW_NAVIGATION = YouTubeBlockDecision(
@@ -41,10 +42,12 @@ data class YouTubeBlockDecision(
             isShorts = true
         )
 
-        fun approvedChannel(channel: String): YouTubeBlockDecision = YouTubeBlockDecision(
+        fun approvedChannel(channel: String, title: String? = null, isAdPlaying: Boolean = false): YouTubeBlockDecision = YouTubeBlockDecision(
             verdict = YouTubeBlockVerdict.ALLOW,
-            reason = "Approved study channel",
-            detectedChannel = channel
+            reason = if (isAdPlaying) "Ad playing on approved study channel: $channel" else "Approved study channel",
+            detectedTitle = title,
+            detectedChannel = channel,
+            isAdPlaying = isAdPlaying
         )
 
         fun blockedChannel(channel: String?, keyword: String? = null): YouTubeBlockDecision = YouTubeBlockDecision(

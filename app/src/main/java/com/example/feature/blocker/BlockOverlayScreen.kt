@@ -114,7 +114,7 @@ fun BlockOverlayScreen(
         ) {
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Brand mark
+            // Brand mark (white open-book symbol from the FocusShield logo)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -122,8 +122,8 @@ fun BlockOverlayScreen(
                 Icon(
                     imageVector = FocusBrandMark,
                     contentDescription = null,
-                    tint = FocusColors.Primary,
-                    modifier = Modifier.size(26.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
                 )
                 Text(
                     text = "FocusShield",

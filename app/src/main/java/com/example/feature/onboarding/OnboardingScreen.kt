@@ -199,6 +199,8 @@ fun OnboardingScreen(
     // Page roles.
     val page = pagerState.currentPage
     val usesSharedChrome = page == 2
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender // #1E1235
 
     fun goToPage(target: Int) {
         coroutineScope.launch { pagerState.animateScrollToPage(target) }
@@ -208,7 +210,7 @@ fun OnboardingScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("onboarding_screen"),
-        color = FocusColors.Background
+        color = if (page == 0) FocusColors.Background else darkViolet
     ) {
         Column(
             modifier = Modifier
@@ -244,7 +246,7 @@ fun OnboardingScreen(
                             text = "FocusShield",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.ExtraBold,
-                                color = FocusColors.TextPrimary,
+                                color = Color.White,
                                 letterSpacing = 0.5.sp
                             )
                         )
@@ -257,7 +259,7 @@ fun OnboardingScreen(
                         Text(
                             text = "Permissions",
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = FocusColors.Primary,
+                                color = Color.White.copy(alpha = 0.88f),
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -304,7 +306,7 @@ fun OnboardingScreen(
                         onClick = { goToPage(3) },
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = FocusColors.Primary,
+                            containerColor = purple,
                             contentColor = Color.White
                         ),
                         modifier = Modifier
@@ -336,9 +338,6 @@ fun OnboardingScreen(
     }
 }
 
-private val OnboardingAuroraGreen = Color(0xFF7BE04B)
-private val CommitYellow = Color(0xFFF5C518)
-
 /**
  * Final page: the user physically commits to their intention by pressing and holding a button.
  * The deliberate friction — you must hold, not tap — is the point: it turns a throwaway "next"
@@ -346,6 +345,8 @@ private val CommitYellow = Color(0xFFF5C518)
  */
 @Composable
 private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender
     val holdDurationMillis = 1500
     var isHolding by remember { mutableStateOf(false) }
     var committed by remember { mutableStateOf(false) }
@@ -381,12 +382,22 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF171307), Color(0xFF050505))
-                )
-            )
+            .background(darkViolet)
     ) {
+        // Subtle radial aura behind the commitment dial
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .size(360.dp)
+                .offset(y = (-60).dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(purple.copy(alpha = 0.42f), Color.Transparent)
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -401,7 +412,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                 text = "I will use FocusShield to",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     fontSize = 28.sp
                 ),
                 textAlign = TextAlign.Center
@@ -433,12 +444,12 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                 ) {
                     // Track
                     drawCircle(
-                        color = Color.White.copy(alpha = 0.12f),
+                        color = purple.copy(alpha = 0.32f),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10.dp.toPx())
                     )
                     // Progress arc
                     drawArc(
-                        color = CommitYellow,
+                        color = purple,
                         startAngle = -90f,
                         sweepAngle = 360f * fillProgress,
                         useCenter = false,
@@ -454,7 +465,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                         .size(112.dp)
                         .scale(if (isHolding) 1f else idlePulse)
                         .clip(CircleShape)
-                        .background(CommitYellow)
+                        .background(purple)
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -471,7 +482,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                     Icon(
                         imageVector = FocusBrandMark,
                         contentDescription = null,
-                        tint = Color(0xFF1A1503),
+                        tint = Color.White,
                         modifier = Modifier.size(46.dp)
                     )
                 }
@@ -482,8 +493,8 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
             Text(
                 text = if (isHolding) "Keep holding…" else "Tap and hold to commit",
                 style = MaterialTheme.typography.titleMedium.copy(
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontWeight = FontWeight.SemiBold,
                     fontSize = 17.sp
                 )
             )
@@ -721,34 +732,31 @@ private fun OnboardingDistractionShieldPage() {
     var reelsChecked by remember { mutableStateOf(true) }
     var fbChecked by remember { mutableStateOf(true) }
 
-    val purple = FocusColors.Primary
-    val purpleLight = FocusColors.PrimaryLight
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender // #1E1235
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(darkViolet)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Hero: the generated reference is a single flowing layout, not a grid of cards.
+        // Hero card in #6D28D9 on #1E1235 canvas
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
-            color = if (LocalFocusColors.current.isDark) {
-                Color(0xFF12101C)
-            } else {
-                Color(0xFFF8F4FF)
-            },
-            border = BorderStroke(1.dp, purple.copy(alpha = 0.28f))
+            color = purple,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
         ) {
             Column(modifier = Modifier.padding(22.dp)) {
                 Text(
                     text = "PROTECT YOUR FOCUS",
                     style = MaterialTheme.typography.labelLarge.copy(
-                        color = purpleLight,
+                        color = Color.White.copy(alpha = 0.85f),
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.1.sp
                     )
@@ -757,7 +765,7 @@ private fun OnboardingDistractionShieldPage() {
                 Text(
                     text = "Enable Smart\nProtections",
                     style = MaterialTheme.typography.headlineLarge.copy(
-                        color = FocusColors.TextPrimary,
+                        color = Color.White,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 30.sp,
                         lineHeight = 34.sp,
@@ -768,16 +776,16 @@ private fun OnboardingDistractionShieldPage() {
                 Text(
                     text = "Choose the protections you want FocusShield to manage.",
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = FocusColors.TextSecondary,
+                        color = Color.White.copy(alpha = 0.88f),
                         fontSize = 15.sp,
                         lineHeight = 21.sp
                     )
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(purple))
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(purple.copy(alpha = 0.28f)))
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(purple.copy(alpha = 0.18f)))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.42f)))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.25f)))
                 }
             }
         }
@@ -794,7 +802,7 @@ private fun OnboardingDistractionShieldPage() {
             accent = purple
         )
         ProtectionRow(
-            drawableRes = R.drawable.ic_youtube_shorts,
+            drawableRes = R.drawable.ic_youtube_shorts_logo,
             eyebrow = "YOUTUBE",
             title = "Shorts Auto-Dismiss",
             description = "Detect Shorts and automatically leave the endless vertical video feed.",
@@ -803,7 +811,7 @@ private fun OnboardingDistractionShieldPage() {
             accent = purple
         )
         ProtectionRow(
-            drawableRes = R.drawable.ic_instagram_reels,
+            drawableRes = R.drawable.ic_instagram_reels_logo,
             eyebrow = "INSTAGRAM",
             title = "Reels Blocker",
             description = "Block Reels while keeping direct messaging and normal communication available.",
@@ -812,7 +820,7 @@ private fun OnboardingDistractionShieldPage() {
             accent = purple
         )
         ProtectionRow(
-            drawableRes = R.drawable.ic_facebook,
+            drawableRes = R.drawable.ic_facebook_reels_logo,
             eyebrow = "FACEBOOK",
             title = "Feed & Reels Shield",
             description = "Block continuous video feeds and recommended Reels during study time.",
@@ -826,8 +834,8 @@ private fun OnboardingDistractionShieldPage() {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
-            color = FocusColors.EmeraldLight.copy(alpha = if (LocalFocusColors.current.isDark) 0.45f else 0.75f),
-            border = BorderStroke(1.dp, FocusColors.EmeraldSuccess.copy(alpha = 0.35f))
+            color = purple.copy(alpha = 0.25f),
+            border = BorderStroke(1.dp, purple.copy(alpha = 0.65f))
         ) {
             Row(
                 modifier = Modifier.padding(18.dp),
@@ -838,13 +846,13 @@ private fun OnboardingDistractionShieldPage() {
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(FocusColors.EmeraldSuccess.copy(alpha = 0.14f)),
+                        .background(purple),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Security,
                         contentDescription = null,
-                        tint = FocusColors.EmeraldSuccess,
+                        tint = Color.White,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -852,7 +860,7 @@ private fun OnboardingDistractionShieldPage() {
                     Text(
                         text = "100% On-Device Detection",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            color = FocusColors.TextPrimary,
+                            color = Color.White,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -860,7 +868,7 @@ private fun OnboardingDistractionShieldPage() {
                     Text(
                         text = "Detection stays on your device using the Accessibility view hierarchy.",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
+                            color = Color.White.copy(alpha = 0.78f),
                             fontSize = 12.5.sp,
                             lineHeight = 17.sp
                         )
@@ -883,11 +891,12 @@ private fun ProtectionRow(
     onCheckedChange: (Boolean) -> Unit,
     accent: Color
 ) {
+    val darkViolet = FocusColors.OnboardingLavender
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
-        color = FocusColors.SurfaceVariant,
-        border = BorderStroke(1.dp, accent.copy(alpha = if (isChecked) 0.38f else 0.16f))
+        color = accent.copy(alpha = if (isChecked) 0.28f else 0.16f),
+        border = BorderStroke(1.5.dp, accent.copy(alpha = if (isChecked) 0.75f else 0.35f))
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -898,8 +907,8 @@ private fun ProtectionRow(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(17.dp))
-                    .background(accent.copy(alpha = 0.10f))
-                    .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(17.dp)),
+                    .background(darkViolet)
+                    .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(17.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -913,7 +922,7 @@ private fun ProtectionRow(
                 Text(
                     text = eyebrow,
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = accent,
+                        color = Color.White.copy(alpha = 0.78f),
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.9.sp
                     )
@@ -922,7 +931,7 @@ private fun ProtectionRow(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = FocusColors.TextPrimary,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp,
                         lineHeight = 21.sp
@@ -932,7 +941,7 @@ private fun ProtectionRow(
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
+                        color = Color.White.copy(alpha = 0.78f),
                         fontSize = 12.5.sp,
                         lineHeight = 17.sp
                     )
@@ -944,10 +953,10 @@ private fun ProtectionRow(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
-                    uncheckedThumbColor = FocusColors.TextMuted,
-                    uncheckedTrackColor = FocusColors.SurfaceSubtle,
-                    uncheckedBorderColor = FocusColors.CardBorder
+                    checkedTrackColor = accent,
+                    uncheckedThumbColor = Color.White.copy(alpha = 0.65f),
+                    uncheckedTrackColor = darkViolet,
+                    uncheckedBorderColor = accent.copy(alpha = 0.55f)
                 )
             )
         }
@@ -968,10 +977,12 @@ private fun InteractivePlatformShieldCard(
     isChecked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF161820),
-        border = BorderStroke(1.dp, if (isChecked) brandColor.copy(alpha = 0.35f) else FocusColors.CardBorderSubtle),
+        color = purple.copy(alpha = 0.24f),
+        border = BorderStroke(1.dp, if (isChecked) purple else purple.copy(alpha = 0.35f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -983,8 +994,8 @@ private fun InteractivePlatformShieldCard(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(containerBg)
-                    .border(1.dp, brandColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    .background(darkViolet)
+                    .border(1.dp, purple.copy(alpha = 0.55f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -999,7 +1010,7 @@ private fun InteractivePlatformShieldCard(
                     text = badgeTitle,
                     style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary,
+                        color = Color.White,
                         fontSize = 14.5.sp
                     )
                 )
@@ -1009,7 +1020,7 @@ private fun InteractivePlatformShieldCard(
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
+                        color = Color.White.copy(alpha = 0.78f),
                         fontSize = 11.5.sp,
                         lineHeight = 15.sp
                     )
@@ -1021,9 +1032,9 @@ private fun InteractivePlatformShieldCard(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
-                    uncheckedThumbColor = Color(0xFF888888),
-                    uncheckedTrackColor = Color(0xFF222530)
+                    checkedTrackColor = purple,
+                    uncheckedThumbColor = Color.White.copy(alpha = 0.65f),
+                    uncheckedTrackColor = darkViolet
                 )
             )
         }
@@ -1033,10 +1044,6 @@ private fun InteractivePlatformShieldCard(
 /** Marketing copy, not live telemetry. Change the numbers here, in one place. */
 private const val FOCUSING_NOW_COUNT = 4716
 private const val TRUST_LINE = "Trusted by 2M+ students ❤️"
-
-private val AccentGreen = Color(0xFF6FD13B)
-private val BubbleGrey = Color(0xFF2A2C2E)
-private val WhyPillGreen = Color(0xFF13260E)
 
 /**
  * Page 3: sequential permission flow.
@@ -1054,6 +1061,8 @@ private fun OnboardingPermissionsPage(
     onContinue: () -> Unit,
     onSkip: () -> Unit
 ) {
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender
     var whyDialogFor by remember { mutableStateOf<OnboardingPermission?>(null) }
 
     val flow = OnboardingPermission.flow
@@ -1066,10 +1075,10 @@ private fun OnboardingPermissionsPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(darkViolet)
             .testTag("onboarding_permissions_page")
     ) {
-        // Soft green floor glow, matching the reference design.
+        // Soft purple floor glow unifying the #1E1235 and #6D28D9 palette.
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1077,7 +1086,7 @@ private fun OnboardingPermissionsPage(
                 .height(340.dp)
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, AccentGreen.copy(alpha = 0.13f))
+                        listOf(Color.Transparent, purple.copy(alpha = 0.35f))
                     )
                 )
         )
@@ -1097,14 +1106,14 @@ private fun OnboardingPermissionsPage(
                     .fillMaxWidth()
                     .height(7.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.14f))
+                    .background(purple.copy(alpha = 0.28f))
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(fraction = progress.coerceIn(0.04f, 1f))
                         .height(7.dp)
                         .clip(CircleShape)
-                        .background(Color.White)
+                        .background(purple)
                 )
             }
 
@@ -1127,7 +1136,7 @@ private fun OnboardingPermissionsPage(
                 if (index != flow.lastIndex) {
                     HorizontalDivider(
                         thickness = 1.dp,
-                        color = Color.White.copy(alpha = 0.09f)
+                        color = purple.copy(alpha = 0.32f)
                     )
                 }
             }
@@ -1139,8 +1148,8 @@ private fun OnboardingPermissionsPage(
                     onClick = onContinue,
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
+                        containerColor = purple,
+                        contentColor = Color.White
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1160,7 +1169,8 @@ private fun OnboardingPermissionsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(CircleShape)
-                        .background(WhyPillGreen)
+                        .background(purple.copy(alpha = 0.28f))
+                        .border(1.dp, purple.copy(alpha = 0.65f), CircleShape)
                         .clickable { whyDialogFor = activePermission ?: OnboardingPermission.flow.first() }
                         .padding(horizontal = 14.dp, vertical = 13.dp)
                         .testTag("onboarding_why_permission_button"),
@@ -1170,13 +1180,13 @@ private fun OnboardingPermissionsPage(
                         modifier = Modifier
                             .size(27.dp)
                             .clip(CircleShape)
-                            .background(AccentGreen),
+                            .background(purple),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "?",
                             style = MaterialTheme.typography.titleSmall.copy(
-                                color = Color(0xFF0A1A06),
+                                color = Color.White,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp
                             )
@@ -1186,8 +1196,8 @@ private fun OnboardingPermissionsPage(
                     Text(
                         text = "Why should I give this permission?",
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            color = AccentGreen,
-                            fontWeight = FontWeight.Medium,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
                         modifier = Modifier.weight(1f)
@@ -1195,7 +1205,7 @@ private fun OnboardingPermissionsPage(
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                         contentDescription = null,
-                        tint = AccentGreen,
+                        tint = Color.White,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -1206,7 +1216,7 @@ private fun OnboardingPermissionsPage(
             Text(
                 text = TRUST_LINE,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color.White.copy(alpha = 0.38f),
+                    color = Color.White.copy(alpha = 0.72f),
                     fontSize = 13.sp
                 ),
                 textAlign = TextAlign.Center,
@@ -1222,7 +1232,7 @@ private fun OnboardingPermissionsPage(
                 Text(
                     text = if (allMandatoryGranted) "Not now" else "Continue without blocking",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        color = Color.White.copy(alpha = 0.3f),
+                        color = Color.White.copy(alpha = 0.62f),
                         fontWeight = FontWeight.Medium
                     )
                 )
@@ -1233,19 +1243,19 @@ private fun OnboardingPermissionsPage(
     whyDialogFor?.let { permission ->
         AlertDialog(
             onDismissRequest = { whyDialogFor = null },
-            containerColor = Color(0xFF15171A),
+            containerColor = darkViolet,
             icon = {
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(AccentGreen.copy(alpha = 0.16f)),
+                        .background(purple),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.PrivacyTip,
                         contentDescription = null,
-                        tint = AccentGreen,
+                        tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -1265,15 +1275,15 @@ private fun OnboardingPermissionsPage(
                     Text(
                         text = permission.whyItMatters,
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            color = Color.White.copy(alpha = 0.72f),
+                            color = Color.White.copy(alpha = 0.85f),
                             lineHeight = 20.sp
                         )
                     )
                     Text(
                         text = "FocusShield runs fully offline. No servers, no telemetry, nothing leaves your phone.",
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = AccentGreen,
-                            fontWeight = FontWeight.SemiBold
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
                         )
                     )
                 }
@@ -1286,8 +1296,8 @@ private fun OnboardingPermissionsPage(
                     },
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
+                        containerColor = purple,
+                        contentColor = Color.White
                     )
                 ) {
                     Text(text = "Allow", fontWeight = FontWeight.Bold)
@@ -1295,7 +1305,7 @@ private fun OnboardingPermissionsPage(
             },
             dismissButton = {
                 TextButton(onClick = { whyDialogFor = null }) {
-                    Text(text = "Close", color = Color.White.copy(alpha = 0.5f))
+                    Text(text = "Close", color = Color.White.copy(alpha = 0.72f))
                 }
             }
         )
@@ -1310,17 +1320,18 @@ private fun MascotSpeechBubble(
     isComplete: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val purple = FocusColors.OnboardingPurple
     val message = if (isComplete) {
         buildAnnotatedString {
             append("You're all set — ")
-            withStyle(SpanStyle(color = AccentGreen, fontWeight = FontWeight.Bold)) {
+            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold)) {
                 append("time to out-focus everyone else!")
             }
         }
     } else {
         buildAnnotatedString {
             append("Almost there, allow these permissions to ")
-            withStyle(SpanStyle(color = AccentGreen, fontWeight = FontWeight.Bold)) {
+            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold)) {
                 append("focus alongside $FOCUSING_NOW_COUNT people now!")
             }
         }
@@ -1334,7 +1345,8 @@ private fun MascotSpeechBubble(
             modifier = Modifier
                 .size(78.dp)
                 .clip(CircleShape)
-                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+                .background(purple.copy(alpha = 0.28f))
+                .border(2.dp, purple, CircleShape),
             contentAlignment = Alignment.BottomCenter
         ) {
             Image(
@@ -1354,19 +1366,19 @@ private fun MascotSpeechBubble(
                     .offset(x = 4.dp, y = 34.dp)
                     .size(14.dp)
                     .rotate(45f)
-                    .background(BubbleGrey)
+                    .background(purple)
             )
             Box(
                 modifier = Modifier
                     .padding(start = 9.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(BubbleGrey)
+                    .background(purple)
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Text(
                     text = message,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        color = Color.White,
+                        color = Color.White.copy(alpha = 0.92f),
                         fontSize = 17.sp,
                         lineHeight = 24.sp,
                         fontWeight = FontWeight.Medium
@@ -1387,10 +1399,11 @@ private fun PermissionFlowRow(
     isActive: Boolean,
     onAllow: () -> Unit
 ) {
+    val purple = FocusColors.OnboardingPurple
     val titleColor = when {
         isActive -> Color.White
-        isGranted -> Color.White.copy(alpha = 0.42f)
-        else -> Color.White.copy(alpha = 0.26f)
+        isGranted -> Color.White.copy(alpha = 0.62f)
+        else -> Color.White.copy(alpha = 0.38f)
     }
 
     Row(
@@ -1414,7 +1427,7 @@ private fun PermissionFlowRow(
                 Text(
                     text = permission.rationale,
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        color = Color.White.copy(alpha = 0.5f),
+                        color = Color.White.copy(alpha = 0.78f),
                         fontSize = 15.sp
                     )
                 )
@@ -1425,7 +1438,7 @@ private fun PermissionFlowRow(
             isGranted -> Icon(
                 imageVector = Icons.Rounded.CheckCircle,
                 contentDescription = "Granted",
-                tint = AccentGreen,
+                tint = purple,
                 modifier = Modifier.size(24.dp)
             )
 
@@ -1435,8 +1448,8 @@ private fun PermissionFlowRow(
                     onClick = onAllow,
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
+                        containerColor = purple,
+                        contentColor = Color.White
                     ),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         horizontal = 26.dp,
@@ -1501,6 +1514,14 @@ private fun OnboardingGoogleSignInPage(
                     val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
                     val authResult = FirebaseAuth.getInstance().signInWithCredential(authCredential).await()
                     currentUser = authResult.user
+                    val photoUrl = authResult.user?.photoUrl?.toString()
+                    val displayName = authResult.user?.displayName
+                    if (!photoUrl.isNullOrBlank()) {
+                        com.example.FocusShieldApp.instance.preferencesRepository.updateUserPhotoUri(photoUrl)
+                    }
+                    if (!displayName.isNullOrBlank()) {
+                        com.example.FocusShieldApp.instance.preferencesRepository.updateUserName(displayName)
+                    }
                     isLoading = false
                     onContinue()
                 } else {
@@ -1516,24 +1537,17 @@ private fun OnboardingGoogleSignInPage(
         }
     }
 
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender // #1E1235
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0F0E1E),
-                        Color(0xFF0B0914),
-                        Color(0xFF05040A)
-                    )
-                )
-            )
+            .background(darkViolet)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Slow-drifting aurora behind the whole page. Two blobs on independent, prime-ish periods
-        // so the loop never visibly repeats, plus a soft vignette that keeps the headline legible
-        // wherever a blob happens to be bright.
+        // Slow-drifting soft purple aura blobs on #1E1235 canvas
         val drift = rememberInfiniteTransition(label = "signInAurora")
         val blobOneX by drift.animateFloat(
             initialValue = -140f,
@@ -1554,8 +1568,8 @@ private fun OnboardingGoogleSignInPage(
             label = "blobOneY"
         )
         val blobOneAlpha by drift.animateFloat(
-            initialValue = 0.26f,
-            targetValue = 0.46f,
+            initialValue = 0.18f,
+            targetValue = 0.34f,
             animationSpec = infiniteRepeatable(
                 animation = tween(5200, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
@@ -1588,7 +1602,7 @@ private fun OnboardingGoogleSignInPage(
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
-                        listOf(Color(0xFF8B5CF6).copy(alpha = blobOneAlpha), Color.Transparent)
+                        listOf(purple.copy(alpha = blobOneAlpha), Color.Transparent)
                     )
                 )
         )
@@ -1599,18 +1613,7 @@ private fun OnboardingGoogleSignInPage(
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
-                        listOf(Color(0xFF4F46E5).copy(alpha = 0.30f), Color.Transparent)
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.55f to Color(0xFF05040A).copy(alpha = 0.35f),
-                        1f to Color(0xFF05040A).copy(alpha = 0.85f)
+                        listOf(purple.copy(alpha = 0.24f), Color.Transparent)
                     )
                 )
         )
@@ -1626,23 +1629,22 @@ private fun OnboardingGoogleSignInPage(
             // Header Section
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 20.dp)
+                modifier = Modifier.padding(top = 12.dp)
             ) {
                 ShieldHero(
                     isSignedIn = currentUser != null,
                     modifier = Modifier.staggerIn(0)
                 )
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                // One line of copy only. The screen used to carry a headline, a subtitle and three
-                // feature rows; the reassurance is the whole message now.
+                // Minimal reassurance headline
                 Text(
                     text = "Your data is secure and safe",
                     style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
-                        fontSize = 22.sp,
+                        fontSize = 24.sp,
                         letterSpacing = (-0.2).sp
                     ),
                     textAlign = TextAlign.Center,
@@ -1650,7 +1652,7 @@ private fun OnboardingGoogleSignInPage(
                 )
             }
 
-            // Signed-in identity card (only when a Google account is already attached)
+            // Centerpiece Animation / Signed-in Identity Card
             val user = currentUser
             if (user != null) {
                 SignedInCloudCard(
@@ -1659,7 +1661,14 @@ private fun OnboardingGoogleSignInPage(
                     photoUrl = user.photoUrl?.toString(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .staggerIn(240)
+                        .staggerIn(200)
+                )
+            } else {
+                SecurityVaultCenterpieceAnimation(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .staggerIn(200)
                 )
             }
 
@@ -1667,7 +1676,7 @@ private fun OnboardingGoogleSignInPage(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .staggerIn(440)
+                    .staggerIn(360)
                     .padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1675,7 +1684,7 @@ private fun OnboardingGoogleSignInPage(
                 if (errorMessage != null) {
                     Text(
                         text = errorMessage ?: "",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFEF4444)),
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocusColors.BlockedRed),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
@@ -1686,7 +1695,7 @@ private fun OnboardingGoogleSignInPage(
                         onClick = onContinue,
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF8B5CF6),
+                            containerColor = purple,
                             contentColor = Color.White
                         ),
                         modifier = Modifier
@@ -1706,8 +1715,7 @@ private fun OnboardingGoogleSignInPage(
                         )
                     }
                 } else {
-                    // Google-branded pill: a slow specular sweep crosses the surface so the primary
-                    // action reads as the most alive element on a static page.
+                    // Google-branded pill in #6D28D9 with a subtle specular sweep
                     val shimmer = rememberInfiniteTransition(label = "signInShimmer")
                     val sweep by shimmer.animateFloat(
                         initialValue = -1.2f,
@@ -1724,19 +1732,17 @@ private fun OnboardingGoogleSignInPage(
                         enabled = !isLoading,
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White,
-                            contentColor = Color(0xFF1F2937)
+                            containerColor = purple,
+                            contentColor = Color.White
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp)
                             .graphicsLayer {
-                                // Sweep only while idle; a pulsing button behind a spinner reads
-                                // as a stuck control.
                                 shape = RoundedCornerShape(16.dp)
                                 clip = true
                                 alpha = 1f
-                                shadowElevation = if (isLoading) 0f else 14f
+                                shadowElevation = if (isLoading) 0f else 10f
                             }
                             .drawWithContent {
                                 drawContent()
@@ -1747,7 +1753,7 @@ private fun OnboardingGoogleSignInPage(
                                         brush = Brush.linearGradient(
                                             colors = listOf(
                                                 Color.Transparent,
-                                                Color.White.copy(alpha = 0.85f),
+                                                Color.White.copy(alpha = 0.24f),
                                                 Color.Transparent
                                             ),
                                             start = androidx.compose.ui.geometry.Offset(x - travel / 2f, 0f),
@@ -1761,7 +1767,7 @@ private fun OnboardingGoogleSignInPage(
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
-                                color = Color(0xFF8B5CF6),
+                                color = Color.White,
                                 strokeWidth = 2.5.dp
                             )
                             Spacer(modifier = Modifier.width(12.dp))
@@ -1779,17 +1785,16 @@ private fun OnboardingGoogleSignInPage(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(22.dp)
+                                        .size(28.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF4285F4)),
+                                        .background(Color.White)
+                                        .padding(4.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "G",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Black
-                                        )
+                                    Image(
+                                        painter = painterResource(id = com.example.R.drawable.ic_google_logo),
+                                        contentDescription = "Google Logo",
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -1811,7 +1816,8 @@ private fun OnboardingGoogleSignInPage(
                         Text(
                             text = "Skip for now / Continue as Guest",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                color = Color.White.copy(alpha = 0.65f)
+                                color = Color.White.copy(alpha = 0.78f),
+                                fontWeight = FontWeight.SemiBold
                             )
                         )
                     }
@@ -1822,14 +1828,265 @@ private fun OnboardingGoogleSignInPage(
 }
 
 /**
+ * Animated centerpiece filling the middle space of the Sign-In page with a live orbital security
+ * radar, floating encrypted status pills, and ambient sparkles using #6D28D9 and #1E1235.
+ */
+@Composable
+private fun SecurityVaultCenterpieceAnimation(
+    modifier: Modifier = Modifier
+) {
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender
+
+    val infinite = rememberInfiniteTransition(label = "vaultCenterpiece")
+    val orbitAngle by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(10000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "orbitAngle"
+    )
+    val reverseOrbitAngle by infinite.animateFloat(
+        initialValue = 360f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(14000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "reverseOrbitAngle"
+    )
+    val pulseFactor by infinite.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseFactor"
+    )
+    val floatOffset by infinite.animateFloat(
+        initialValue = -6f,
+        targetValue = 6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "floatOffset"
+    )
+
+    Box(
+        modifier = modifier
+            .height(265.dp)
+            .testTag("onboarding_signin_lottie_container"),
+        contentAlignment = Alignment.Center
+    ) {
+        // Ambient looping sparkle backdrop
+        FocusLottieAnimation(
+            rawRes = R.raw.star_sparkle,
+            iterations = com.airbnb.lottie.compose.LottieConstants.IterateForever,
+            speed = 0.85f,
+            modifier = Modifier
+                .size(240.dp)
+                .graphicsLayer { alpha = 0.55f }
+        )
+
+        // Orbital security rings & radar sweep
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier.size(230.dp)
+        ) {
+            val centerOffset = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+            val outerRadius = size.minDimension * 0.46f
+            val middleRadius = size.minDimension * 0.34f
+            val innerRadius = size.minDimension * 0.22f
+
+            // Soft radial core glow
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(purple.copy(alpha = 0.46f), Color.Transparent),
+                    center = centerOffset,
+                    radius = outerRadius * 1.15f
+                ),
+                radius = outerRadius * 1.15f,
+                center = centerOffset
+            )
+
+            // Outer ring
+            drawCircle(
+                color = purple.copy(alpha = 0.35f),
+                radius = outerRadius,
+                center = centerOffset,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+            )
+
+            // Middle ring
+            drawCircle(
+                color = purple.copy(alpha = 0.55f),
+                radius = middleRadius,
+                center = centerOffset,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            )
+
+            // Rotating arc segments on middle ring
+            drawArc(
+                color = Color.White.copy(alpha = 0.78f),
+                startAngle = orbitAngle,
+                sweepAngle = 72f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(
+                    centerOffset.x - middleRadius,
+                    centerOffset.y - middleRadius
+                ),
+                size = androidx.compose.ui.geometry.Size(middleRadius * 2f, middleRadius * 2f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 3.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            )
+            drawArc(
+                color = purple,
+                startAngle = reverseOrbitAngle,
+                sweepAngle = 95f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(
+                    centerOffset.x - outerRadius,
+                    centerOffset.y - outerRadius
+                ),
+                size = androidx.compose.ui.geometry.Size(outerRadius * 2f, outerRadius * 2f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 3.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            )
+
+            // Orbiting satellite nodes
+            val rad1 = Math.toRadians(orbitAngle.toDouble())
+            val node1 = androidx.compose.ui.geometry.Offset(
+                x = centerOffset.x + (outerRadius * kotlin.math.cos(rad1)).toFloat(),
+                y = centerOffset.y + (outerRadius * kotlin.math.sin(rad1)).toFloat()
+            )
+            drawCircle(color = purple, radius = 7.dp.toPx(), center = node1)
+            drawCircle(color = Color.White, radius = 3.5.dp.toPx(), center = node1)
+
+            val rad2 = Math.toRadians((reverseOrbitAngle + 120f).toDouble())
+            val node2 = androidx.compose.ui.geometry.Offset(
+                x = centerOffset.x + (middleRadius * kotlin.math.cos(rad2)).toFloat(),
+                y = centerOffset.y + (middleRadius * kotlin.math.sin(rad2)).toFloat()
+            )
+            drawCircle(color = Color.White, radius = 5.dp.toPx(), center = node2)
+
+            // Inner pulsing shield ring
+            drawCircle(
+                color = purple.copy(alpha = 0.65f),
+                radius = innerRadius * pulseFactor,
+                center = centerOffset,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            )
+        }
+
+        // Prominent looping Security Shield & Cloud Sync Lottie centerpiece
+        FocusLottieAnimation(
+            rawRes = R.raw.lottie_cloud_shield,
+            iterations = com.airbnb.lottie.compose.LottieConstants.IterateForever,
+            speed = 1.0f,
+            modifier = Modifier
+                .size(195.dp)
+                .testTag("onboarding_signin_lottie")
+        )
+
+        // Floating security status pills around the orbit
+        Surface(
+            shape = CircleShape,
+            color = purple.copy(alpha = 0.38f),
+            border = BorderStroke(1.dp, purple.copy(alpha = 0.85f)),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(x = 12.dp, y = (18 + floatOffset).dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Shield,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Protected",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+        }
+
+        Surface(
+            shape = CircleShape,
+            color = purple.copy(alpha = 0.38f),
+            border = BorderStroke(1.dp, purple.copy(alpha = 0.85f)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = (-12).dp, y = (28 - floatOffset).dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Security,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Encrypted",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+        }
+
+        Surface(
+            shape = CircleShape,
+            color = darkViolet.copy(alpha = 0.92f),
+            border = BorderStroke(1.dp, purple),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = (-8 + floatOffset * 0.6f).dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "100% Private & Safe",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+        }
+    }
+}
+
+/**
  * Fades and lifts the annotated content in after [delayMillis].
- *
- * The whole page composes at once, so without this everything arrives as a single flat block at
- * first frame. Call sites pass a different beat and the page assembles itself top-down.
- *
- * Exposed as a modifier rather than a wrapper composable so it can decorate any element — including
- * a `Column` that has children — without forcing an extra nesting level. The animation is driven by
- * a LaunchedEffect keyed on the delay, so it also re-runs when the pager brings this page back.
  */
 @Composable
 private fun Modifier.staggerIn(delayMillis: Int): Modifier {
@@ -1851,15 +2108,14 @@ private fun Modifier.staggerIn(delayMillis: Int): Modifier {
 
 /**
  * The FocusShield shield inside a breathing halo with two sonar rings.
- *
- * Rings expand and fade on a 2.6s loop, phase-offset by 1.3s so exactly one ring is always visible;
- * the halo pulses on a slower, out-of-phase beat so the two never move in lockstep.
  */
 @Composable
 private fun ShieldHero(
     isSignedIn: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val purple = FocusColors.OnboardingPurple
+    val darkViolet = FocusColors.OnboardingLavender
     val pulse = rememberInfiniteTransition(label = "shieldHero")
     val haloScale by pulse.animateFloat(
         initialValue = 0.92f,
@@ -1871,8 +2127,8 @@ private fun ShieldHero(
         label = "haloScale"
     )
     val haloAlpha by pulse.animateFloat(
-        initialValue = 0.30f,
-        targetValue = 0.55f,
+        initialValue = 0.24f,
+        targetValue = 0.48f,
         animationSpec = infiniteRepeatable(
             animation = tween(3400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -1889,33 +2145,33 @@ private fun ShieldHero(
         label = "ring"
     )
 
-    val accent = if (isSignedIn) Color(0xFF34D399) else Color(0xFF8B5CF6)
+    val accent = purple
 
     Box(
-        modifier = modifier.size(148.dp),
+        modifier = modifier.size(136.dp),
         contentAlignment = Alignment.Center
     ) {
         // Sonar ring A
         Box(
             modifier = Modifier
-                .size(148.dp)
+                .size(136.dp)
                 .scale(0.72f + ringProgress * 0.42f)
                 .clip(CircleShape)
-                .border(1.dp, accent.copy(alpha = 0.42f * (1f - ringProgress)), CircleShape)
+                .border(1.5.dp, accent.copy(alpha = 0.55f * (1f - ringProgress)), CircleShape)
         )
         // Sonar ring B, half a cycle behind.
         val ringB = (ringProgress + 0.5f) % 1f
         Box(
             modifier = Modifier
-                .size(148.dp)
+                .size(136.dp)
                 .scale(0.72f + ringB * 0.42f)
                 .clip(CircleShape)
-                .border(1.dp, accent.copy(alpha = 0.42f * (1f - ringB)), CircleShape)
+                .border(1.5.dp, accent.copy(alpha = 0.55f * (1f - ringB)), CircleShape)
         )
         // Breathing halo
         Box(
             modifier = Modifier
-                .size(104.dp)
+                .size(96.dp)
                 .scale(haloScale)
                 .clip(CircleShape)
                 .background(
@@ -1924,20 +2180,20 @@ private fun ShieldHero(
                     )
                 )
         )
-        // Glass disc + mark
+        // Core disc + mark
         Box(
             modifier = Modifier
-                .size(88.dp)
+                .size(82.dp)
                 .scale(haloScale * 0.92f)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.10f))
-                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+                .background(darkViolet)
+                .border(2.dp, accent, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_focus_shield_app_icon),
                 contentDescription = "FocusShield Logo",
-                modifier = Modifier.size(58.dp)
+                modifier = Modifier.size(54.dp)
             )
         }
     }
@@ -1951,6 +2207,7 @@ private fun SignedInCloudCard(
     photoUrl: String?,
     modifier: Modifier = Modifier
 ) {
+    val purple = FocusColors.OnboardingPurple
     val dot = rememberInfiniteTransition(label = "connectedDot")
     val dotAlpha by dot.animateFloat(
         initialValue = 0.45f,
@@ -1966,8 +2223,8 @@ private fun SignedInCloudCard(
         modifier = modifier
             .padding(vertical = 16.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(1.dp, Color(0xFF34D399).copy(alpha = 0.28f), RoundedCornerShape(20.dp))
+            .background(purple.copy(alpha = 0.28f))
+            .border(1.5.dp, purple.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
             .padding(20.dp)
     ) {
         Row(
@@ -1978,7 +2235,7 @@ private fun SignedInCloudCard(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF8B5CF6)),
+                    .background(purple),
                 contentAlignment = Alignment.Center
             ) {
                 if (!photoUrl.isNullOrBlank()) {
@@ -2016,17 +2273,18 @@ private fun SignedInCloudCard(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF10B981).copy(alpha = dotAlpha))
+                            .background(Color.White.copy(alpha = dotAlpha))
                     )
                 }
                 Text(
                     text = email ?: "",
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = Color.White.copy(alpha = 0.6f)
+                        color = Color.White.copy(alpha = 0.78f)
                     )
                 )
             }
         }
     }
 }
+
 

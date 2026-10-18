@@ -30,26 +30,52 @@ class StudyChannelRepository(
 
     init {
         coroutineScope.launch {
+            try {
+                val initialApproved = studyChannelDao.getApprovedChannels()
+                updateCache(initialApproved)
+            } catch (_: Exception) {}
+
             studyChannelDao.getApprovedChannelsFlow().collectLatest { channels ->
-                cachedApprovedChannelIds.clear()
-                cachedApprovedNormalizedNames.clear()
-                channels.forEach { ch ->
-                    if (ch.isApproved) {
-                        val normId = ch.channelId.trim().lowercase(Locale.ROOT)
-                        cachedApprovedChannelIds.add(normId)
-                        val rawHandle = normId.removePrefix("@")
-                        cachedApprovedChannelIds.add(rawHandle)
-                        cachedApprovedChannelIds.add("@$rawHandle")
-                        
-                        cachedApprovedNormalizedNames.add(ch.channelName.trim())
-                        val normName = normalizeChannelName(ch.channelName)
-                        if (normName.isNotBlank()) {
-                            cachedApprovedNormalizedNames.add(normName)
-                        }
-                    }
-                }
+                updateCache(channels)
             }
         }
+    }
+
+    private fun updateCache(channels: List<StudyChannelEntity>) {
+        val newIds = mutableSetOf<String>()
+        val newNames = mutableSetOf<String>()
+        channels.forEach { ch ->
+            if (ch.isApproved) {
+                val normId = ch.channelId.trim().lowercase(Locale.ROOT)
+                newIds.add(normId)
+                val rawHandle = normId.removePrefix("@")
+                newIds.add(rawHandle)
+                newIds.add("@$rawHandle")
+                val cleanAlnumHandle = normalizeChannelName(rawHandle)
+                if (cleanAlnumHandle.isNotBlank()) {
+                    newIds.add(cleanAlnumHandle)
+                    newNames.add(cleanAlnumHandle)
+                }
+
+                val trimmedName = ch.channelName.trim()
+                newNames.add(trimmedName)
+                val normName = normalizeChannelName(trimmedName)
+                if (normName.isNotBlank()) {
+                    newNames.add(normName)
+                    newIds.add(normName)
+                    newIds.add("@$normName")
+                }
+                // Index distinct brand clauses separated by hyphen/pipe/bullet (e.g. "Physics Wallah - Alakh Pandey")
+                val clauses = trimmedName.split(Regex("\\s*[\\-|•·]+\\s*"))
+                    .map { normalizeChannelName(it) }
+                    .filter { it.length >= 4 }
+                newNames.addAll(clauses)
+            }
+        }
+        cachedApprovedChannelIds.clear()
+        cachedApprovedChannelIds.addAll(newIds)
+        cachedApprovedNormalizedNames.clear()
+        cachedApprovedNormalizedNames.addAll(newNames)
     }
 
     /**
@@ -124,6 +150,14 @@ class StudyChannelRepository(
         val normInputName = normalizeChannelName(trimmedName)
         val existing = studyChannelDao.getChannelByChannelId(channelId)
         if (existing != null) {
+            if (!existing.isApproved && isApproved) {
+                studyChannelDao.setApprovalStatus(existing.id, true)
+                try {
+                    val approved = studyChannelDao.getApprovedChannels()
+                    updateCache(approved)
+                } catch (_: Exception) {}
+                return Result.success(existing.copy(isApproved = true))
+            }
             return Result.failure(IllegalStateException("Channel is already added: ${existing.channelName}"))
         }
 
@@ -146,8 +180,20 @@ class StudyChannelRepository(
         )
 
         if (isApproved) {
-            cachedApprovedChannelIds.add(channelId.trim().lowercase(Locale.ROOT))
-            if (normInputName.isNotBlank()) cachedApprovedNormalizedNames.add(normInputName)
+            val normId = channelId.trim().lowercase(Locale.ROOT)
+            cachedApprovedChannelIds.add(normId)
+            val rawHandle = normId.removePrefix("@")
+            cachedApprovedChannelIds.add(rawHandle)
+            cachedApprovedChannelIds.add("@$rawHandle")
+
+            cachedApprovedNormalizedNames.add(trimmedName)
+            if (normInputName.isNotBlank()) {
+                cachedApprovedNormalizedNames.add(normInputName)
+            }
+            val words = trimmedName.split(Regex("[\\s\\-_|•·]+"))
+                .map { normalizeChannelName(it) }
+                .filter { it.length >= 2 }
+            cachedApprovedNormalizedNames.addAll(words)
         }
 
         // Cache logo to local storage and update Room with permanent local URI
@@ -166,6 +212,10 @@ class StudyChannelRepository(
     suspend fun removeChannel(id: String) {
         studyChannelDao.deleteChannelById(id)
         SyncTracker.enqueueDelete(SyncTables.STUDY_CHANNELS, id)
+        try {
+            val approved = studyChannelDao.getApprovedChannels()
+            updateCache(approved)
+        } catch (_: Exception) {}
     }
 
     /**
@@ -192,6 +242,10 @@ class StudyChannelRepository(
      */
     suspend fun toggleChannelApproval(id: String, isApproved: Boolean) {
         studyChannelDao.setApprovalStatus(id, isApproved)
+        try {
+            val approved = studyChannelDao.getApprovedChannels()
+            updateCache(approved)
+        } catch (_: Exception) {}
         // Read back the full row so the reconcile pull never reverts an unpushed toggle.
         val updated = studyChannelDao.getChannelById(id)
         if (updated != null) {
@@ -228,10 +282,30 @@ class StudyChannelRepository(
     }
 
     fun getApprovedChannelIds(): Set<String> {
+        if (cachedApprovedChannelIds.isEmpty()) {
+            try {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                    val approved = studyChannelDao.getApprovedChannels()
+                    if (approved.isNotEmpty()) {
+                        updateCache(approved)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
         return cachedApprovedChannelIds.toSet()
     }
 
     fun getApprovedChannelNames(): Set<String> {
+        if (cachedApprovedNormalizedNames.isEmpty()) {
+            try {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                    val approved = studyChannelDao.getApprovedChannels()
+                    if (approved.isNotEmpty()) {
+                        updateCache(approved)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
         return cachedApprovedNormalizedNames.toSet()
     }
 
