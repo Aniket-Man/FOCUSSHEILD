@@ -713,7 +713,7 @@ fun WebsiteBlockerSheetContent(
                                     onCheckedChange = { viewModel.toggleAutoAdultBlocking(it) },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
-                                        checkedTrackColor = FocusColors.Primary,
+                                        checkedTrackColor = FocusColors.ToggleGreen,
                                         uncheckedThumbColor = textSecondary,
                                         uncheckedTrackColor = searchBg
                                     ),
@@ -1144,7 +1144,7 @@ private fun WebsiteItemCard(
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
+                    checkedTrackColor = FocusColors.ToggleGreen,
                     uncheckedThumbColor = textSecondary,
                     uncheckedTrackColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
                 )

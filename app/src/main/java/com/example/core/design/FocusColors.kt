@@ -289,13 +289,16 @@ object FocusColors {
     val OnboardingPurple = Color(0xFF6D28D9)
     val OnboardingLavender = Color(0xFF1E1235)
 
+    // Universal Toggle Button Green (#31C831)
+    val ToggleGreen = Color(0xFF31C831)
+
     val SwitchColors: androidx.compose.material3.SwitchColors
         @Composable
         get() {
             val isDark = LocalFocusColors.current.isDark
             return androidx.compose.material3.SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = LocalFocusColors.current.primary,
+                checkedTrackColor = ToggleGreen,
                 uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF94A3B8),
                 uncheckedTrackColor = if (isDark) Color(0xFF24242A) else Color(0xFFE2E8F0),
                 uncheckedBorderColor = Color.Transparent,

@@ -287,7 +287,7 @@ fun SettingsScreen(
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = FocusColors.TextOnDark,
-                                        checkedTrackColor = FocusColors.EmeraldSuccess,
+                                        checkedTrackColor = FocusColors.ToggleGreen,
                                         uncheckedThumbColor = FocusColors.TextMuted,
                                         uncheckedTrackColor = FocusColors.SurfaceSubtle
                                     ),
@@ -408,7 +408,7 @@ fun SettingsScreen(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.Primary,
+                                checkedTrackColor = FocusColors.ToggleGreen,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -459,7 +459,7 @@ fun SettingsScreen(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.Primary,
+                                checkedTrackColor = FocusColors.ToggleGreen,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -503,7 +503,7 @@ fun SettingsScreen(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.Primary,
+                                checkedTrackColor = FocusColors.ToggleGreen,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -547,7 +547,7 @@ fun SettingsScreen(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.Primary,
+                                checkedTrackColor = FocusColors.ToggleGreen,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.SurfaceSubtle
                             ),
@@ -769,7 +769,7 @@ fun SettingsScreen(
                                         onCheckedChange = viewModel::updateAutoSaveToCloud,
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = FocusColors.TextOnDark,
-                                            checkedTrackColor = FocusColors.EmeraldSuccess,
+                                            checkedTrackColor = FocusColors.ToggleGreen,
                                             uncheckedThumbColor = FocusColors.TextMuted,
                                             uncheckedTrackColor = FocusColors.SurfaceSubtle
                                         ),

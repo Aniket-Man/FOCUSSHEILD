@@ -2,9 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
+    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
@@ -13,126 +11,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == "aniket4man@gmail.com" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
-      );
-    }
-
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-
-    function isValidUserProfile(data, userId) {
-      return hasRequiredFields(['userId', 'displayName', 'dailyStudyGoalMinutes', 'currentStreak', 'createdAt', 'updatedAt'])
-        && hasOnlyAllowedFields(['userId', 'displayName', 'email', 'dailyStudyGoalMinutes', 'currentStreak', 'createdAt', 'updatedAt', 'role'])
-        && data.userId is string && data.userId == userId
-        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100
-        && (!('email' in data) || (data.email is string && data.email.size() <= 254))
-        && data.dailyStudyGoalMinutes is int && data.dailyStudyGoalMinutes >= 0 && data.dailyStudyGoalMinutes <= 1440
-        && data.currentStreak is int && data.currentStreak >= 0
-        && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
-    }
-
-    function isValidFocusSession(data, userId) {
-      return hasRequiredFields(['id', 'userId', 'mode', 'durationMinutes', 'completedAt', 'createdAt'])
-        && hasOnlyAllowedFields(['id', 'userId', 'mode', 'durationMinutes', 'completedAt', 'createdAt', 'subject', 'topic', 'goal', 'actualDurationMillis', 'completed'])
-        && data.id is string && data.id.size() > 0 && data.id.size() <= 100
-        && data.userId is string && data.userId == userId
-        && data.mode is string && data.mode.size() > 0 && data.mode.size() <= 50
-        && data.durationMinutes is int && data.durationMinutes >= 0 && data.durationMinutes <= 1440
-        && (!('subject' in data) || (data.subject is string && data.subject.size() <= 120))
-        && (!('topic' in data) || (data.topic is string && data.topic.size() <= 120))
-        && (!('goal' in data) || (data.goal is string && data.goal.size() <= 200))
-        && (!('actualDurationMillis' in data) || (data.actualDurationMillis is int && data.actualDurationMillis >= 0))
-        && (!('completed' in data) || data.completed is bool)
-        && data.completedAt is timestamp
-        && data.createdAt is timestamp;
-    }
-
-    function isValidStudyPlan(data, userId) {
-      return hasRequiredFields(['id', 'userId', 'title', 'targetMinutes', 'isCompleted', 'scheduledDate', 'createdAt', 'updatedAt'])
-        && hasOnlyAllowedFields(['id', 'userId', 'title', 'subject', 'targetMinutes', 'isCompleted', 'scheduledDate', 'createdAt', 'updatedAt'])
-        && data.id is string && data.id.size() > 0 && data.id.size() <= 100
-        && data.userId is string && data.userId == userId
-        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
-        && (!('subject' in data) || (data.subject is string && data.subject.size() <= 100))
-        && data.targetMinutes is int && data.targetMinutes > 0 && data.targetMinutes <= 1440
-        && data.isCompleted is bool
-        && data.scheduledDate is string && data.scheduledDate.size() >= 8 && data.scheduledDate.size() <= 30
-        && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
-    }
-
-    function isValidSessionQuote(data) {
-      return hasRequiredFields(['id', 'text', 'author', 'active'])
-        && hasOnlyAllowedFields(['id', 'text', 'author', 'category', 'fontStyle', 'active', 'typingSpeedMs', 'createdAt', 'updatedAt'])
-        && data.id is string && data.id.size() > 0 && data.id.size() <= 120
-        && data.text is string && data.text.size() > 0 && data.text.size() <= 600
-        && data.author is string && data.author.size() > 0 && data.author.size() <= 150
-        && (!('category' in data) || (data.category is string && data.category.size() <= 80))
-        && (!('fontStyle' in data) || (data.fontStyle is string && data.fontStyle in ['editorial', 'calligraphy', 'classic']))
-        && data.active is bool
-        && (!('typingSpeedMs' in data) || (data.typingSpeedMs is int && data.typingSpeedMs >= 8 && data.typingSpeedMs <= 200))
-        && (!('createdAt' in data) || data.createdAt is int || data.createdAt is timestamp)
-        && (!('updatedAt' in data) || data.updatedAt is int || data.updatedAt is timestamp);
-    }
-
-    // ===============================================================
-    // User Rules
-    // ===============================================================
+    // User Profile & Subcollections (Sessions & Study Plans)
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data, userId);
-      allow update: if isOwner(userId)
-        && isValidUserProfile(request.resource.data, userId)
-        && request.resource.data.userId == resource.data.userId
-        && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
-      allow delete: if isOwner(userId);
+      allow read, write: if isOwner(userId);
 
-      match /sessions/{sessionId} {
-        allow get, list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidFocusSession(request.resource.data, userId);
-        allow update: if isOwner(userId)
-          && isValidFocusSession(request.resource.data, userId)
-          && request.resource.data.userId == resource.data.userId
-          && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
-        allow delete: if isOwner(userId);
-      }
-
-      match /study_plans/{planId} {
-        allow get, list: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidStudyPlan(request.resource.data, userId);
-        allow update: if isOwner(userId)
-          && isValidStudyPlan(request.resource.data, userId)
-          && request.resource.data.userId == resource.data.userId
-          && (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt);
-        allow delete: if isOwner(userId);
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
       }
     }
 
-    // ===============================================================
-    // Session Summary Live-Writing Quotes (App + External Admin Website)
-    // ===============================================================
+    // Motivational Session Quotes
     match /session_quotes/{quoteId} {
-      // Allow reading active quotes for the Session Summary screen & external Admin Website
-      allow get, list: if true;
-
-      // Allow initial preload seeding of non-existent quotes or Admin Website creation
-      allow create: if isValidSessionQuote(request.resource.data)
-        && (isAdmin() || !exists(/databases/$(database)/documents/session_quotes/$(quoteId)));
-
-      // Allow external Admin Website updates & deletions
-      allow update: if isValidSessionQuote(request.resource.data) && isAdmin();
-      allow delete: if isAdmin();
+      allow read: if true;
+      allow write: if isSignedIn();
     }
   }
 }

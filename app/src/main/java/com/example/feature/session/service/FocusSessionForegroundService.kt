@@ -402,9 +402,16 @@ class FocusSessionForegroundService : Service() {
             pendingIntentFlags()
         )
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
+
         if (session == null) {
             return NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_focus_notification)
+                .setLargeIcon(largeIcon)
+                .setColor(0xFF6E18E6.toInt())
                 .setContentTitle("FocusShield Active")
                 .setContentText("Distraction protection is running in the background.")
                 .setOngoing(true)
@@ -437,7 +444,7 @@ class FocusSessionForegroundService : Service() {
         val title = when {
             session.isBreakActive -> "☕ Break Active ($subject)"
             session.isPaused -> "⏸️ Session Paused ($subject)"
-            else -> "🛡️ Focus Shield Active ($subject)"
+            else -> "FocusShield Active ($subject)"
         }
 
         val statusDetail = if (session.isAppBlockingEnabled) "App & Shorts Blocker Active" else "Timer Active"
@@ -445,6 +452,8 @@ class FocusSessionForegroundService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(contentText)
             .setSubText(topic)

@@ -333,7 +333,7 @@ fun StrictModeScreen(
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
-                            checkedTrackColor = FocusColors.Primary,
+                            checkedTrackColor = FocusColors.ToggleGreen,
                             uncheckedThumbColor = FocusColors.TextSecondary,
                             uncheckedTrackColor = FocusColors.SurfaceVariant
                         ),
@@ -714,7 +714,7 @@ private fun StrictModeOptionRow(
             enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = FocusColors.Primary,
+                checkedTrackColor = FocusColors.ToggleGreen,
                 uncheckedThumbColor = FocusColors.TextSecondary,
                 uncheckedTrackColor = FocusColors.SurfaceVariant
             ),

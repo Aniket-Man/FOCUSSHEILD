@@ -1369,7 +1369,7 @@ private fun AppLimitConfigBottomSheetContent(
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = FocusColors.TextOnDark,
-                        checkedTrackColor = FocusColors.Primary,
+                        checkedTrackColor = FocusColors.ToggleGreen,
                         uncheckedThumbColor = FocusColors.TextMuted,
                         uncheckedTrackColor = FocusColors.SurfaceSubtle
                     ),
@@ -1657,7 +1657,7 @@ private fun AppLimitCard(
                 },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
+                    checkedTrackColor = FocusColors.ToggleGreen,
                     uncheckedThumbColor = FocusColors.TextMuted,
                     uncheckedTrackColor = FocusColors.SurfaceSubtle
                 )
@@ -1736,7 +1736,7 @@ private fun BlockRowToggleItem(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = FocusColors.Primary,
+                checkedTrackColor = FocusColors.ToggleGreen,
                 uncheckedThumbColor = FocusColors.TextMuted,
                 uncheckedTrackColor = FocusColors.SurfaceSubtle
             ),
@@ -1843,7 +1843,7 @@ private fun ProtectionRowItem(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = FocusColors.Primary,
+                checkedTrackColor = FocusColors.ToggleGreen,
                 uncheckedThumbColor = FocusColors.TextMuted,
                 uncheckedTrackColor = FocusColors.SurfaceSubtle
             )

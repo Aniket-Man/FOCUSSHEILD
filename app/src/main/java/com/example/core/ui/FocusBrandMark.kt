@@ -88,14 +88,16 @@ val FocusBrandMark: ImageVector by lazy {
 
         // 7. Outer book cover frame / base cradle
         path(fill = fillBrush) {
-            moveTo(10.9f, 32.6f)
+            moveTo(10.8f, 32.6f)
             lineTo(7.9f, 92.1f)
-            lineTo(50.0f, 89.2f)
+            lineTo(50.0f, 89.6f)
             lineTo(92.1f, 92.1f)
-            lineTo(89.1f, 32.6f)
-            lineTo(89.9f, 89.1f)
-            lineTo(50.0f, 89.1f)
-            lineTo(10.1f, 89.1f)
+            lineTo(89.2f, 32.6f)
+            lineTo(87.0f, 32.6f)
+            lineTo(89.6f, 89.2f)
+            lineTo(50.0f, 87.2f)
+            lineTo(10.4f, 89.2f)
+            lineTo(13.0f, 32.6f)
             close()
         }
     }.build()

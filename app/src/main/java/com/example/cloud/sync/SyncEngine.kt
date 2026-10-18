@@ -89,15 +89,13 @@ class SyncEngine(
 
         try {
             val userSnap = userDoc.get().await()
-            if (!userSnap.exists()) {
-                profilePayload["createdAt"] = FieldValue.serverTimestamp()
-                userDoc.set(profilePayload).await()
+            val existingCreatedAt = if (userSnap.exists()) userSnap.get("createdAt") else null
+            if (existingCreatedAt != null) {
+                profilePayload["createdAt"] = existingCreatedAt
             } else {
-                userSnap.getTimestamp("createdAt")?.let {
-                    profilePayload["createdAt"] = it
-                }
-                userDoc.set(profilePayload, SetOptions.merge()).await()
+                profilePayload["createdAt"] = FieldValue.serverTimestamp()
             }
+            userDoc.set(profilePayload, SetOptions.merge()).await()
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, userDoc.path)
             throw e

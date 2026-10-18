@@ -32,5 +32,5 @@
     <!-- Outer book cover cradle -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M10.9,32.6 L7.9,92.1 L50.0,89.2 L92.1,92.1 L89.1,32.6 L89.9,89.1 L50.0,89.1 L10.1,89.1 Z" />
+        android:pathData="M10.8,32.6 L7.9,92.1 L50.0,89.6 L92.1,92.1 L89.2,32.6 L87.0,32.6 L89.6,89.2 L50.0,87.2 L10.4,89.2 L13.0,32.6 Z" />
 </vector>

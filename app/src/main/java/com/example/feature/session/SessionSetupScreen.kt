@@ -755,7 +755,7 @@ private fun ProtectionRow(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
+                    checkedTrackColor = FocusColors.ToggleGreen,
                     uncheckedThumbColor = Color.White,
                     uncheckedTrackColor = FocusColors.CardBorder
                 ),

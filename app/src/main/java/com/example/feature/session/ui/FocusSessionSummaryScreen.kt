@@ -851,47 +851,51 @@ private fun FeatureCheckRow(
     detail: String
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f)
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isActive) FocusColors.EmeraldSuccess.copy(alpha = 0.15f)
+                    else FocusColors.TextMuted.copy(alpha = 0.15f)
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isActive) FocusColors.EmeraldSuccess.copy(alpha = 0.15f)
-                        else FocusColors.TextMuted.copy(alpha = 0.15f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isActive) Icons.Rounded.Check else Icons.Rounded.Close,
-                    contentDescription = null,
-                    tint = if (isActive) FocusColors.EmeraldSuccess else FocusColors.TextMuted,
-                    modifier = Modifier.size(12.dp)
-                )
-            }
+            Icon(
+                imageVector = if (isActive) Icons.Rounded.Check else Icons.Rounded.Close,
+                contentDescription = null,
+                tint = if (isActive) FocusColors.EmeraldSuccess else FocusColors.TextMuted,
+                modifier = Modifier.size(13.dp)
+            )
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
                     color = FocusColors.TextPrimary,
-                    fontSize = 13.sp
+                    fontSize = 13.5.sp
+                )
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = if (isActive) FocusColors.TextSecondary else FocusColors.TextMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
                 )
             )
         }
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.labelSmall.copy(
-                color = if (isActive) FocusColors.TextSecondary else FocusColors.TextMuted,
-                fontSize = 11.5.sp
-            )
-        )
     }
 }

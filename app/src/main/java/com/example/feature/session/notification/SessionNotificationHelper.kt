@@ -122,8 +122,14 @@ object SessionNotificationHelper {
         val title = "🚀 Focus Session Started!"
         val message = "Good luck! Shield active for $subject ($topic) for $durationMinutes minutes. You got this!"
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -156,8 +162,14 @@ object SessionNotificationHelper {
         val title = "🎉 Focus Session Complete!"
         val message = "Great job! You finished your $durationMinutes-minute focus session for $subject ($topic)."
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -209,8 +221,14 @@ object SessionNotificationHelper {
             }
         }
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -240,8 +258,14 @@ object SessionNotificationHelper {
         val title = "⏰ Study Break Expired"
         val message = "Your break is complete. Focus Shield is now actively protecting your study session."
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -304,8 +328,14 @@ object SessionNotificationHelper {
         val title = "📚 Hey, now is the time for $subject!"
         val message = "$topic • $startTime – $endTime ($durationMinutes min). Tap to start your focus session now!"
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_STUDY_PLAN)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -355,8 +385,14 @@ object SessionNotificationHelper {
         val title = "⚡ Focus Window Active: ${schedule.title}"
         val message = "${schedule.subjectName} (${schedule.startTime} - ${schedule.endTime}). $autoStartText"
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_STUDY_PLAN)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

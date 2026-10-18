@@ -25,7 +25,7 @@ import com.example.core.sound.FocusAlertSoundManager
  */
 object FocusShieldBlockNotificationHelper {
 
-    const val CHANNEL_ID_BLOCKS = "focus_shield_blocks_v4"
+    const val CHANNEL_ID_BLOCKS = "focus_shield_blocks_v5"
     private const val CHANNEL_NAME_BLOCKS = "FocusShield Warning Alerts"
     private const val CHANNEL_DESCRIPTION_BLOCKS = "Haptic alerts and notifications when distraction content, Shorts, Reels, or adult sites are blocked"
 
@@ -44,6 +44,7 @@ object FocusShieldBlockNotificationHelper {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             try {
                 notificationManager?.deleteNotificationChannel("focus_shield_blocks_v3")
+                notificationManager?.deleteNotificationChannel("focus_shield_blocks_v4")
             } catch (_: Exception) {}
 
             val channel = NotificationChannel(
@@ -226,8 +227,14 @@ object FocusShieldBlockNotificationHelper {
     ) {
         val contentIntent = createContentIntent(context)
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_BLOCKS)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

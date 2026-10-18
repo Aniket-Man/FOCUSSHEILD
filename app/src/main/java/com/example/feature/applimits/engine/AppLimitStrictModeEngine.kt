@@ -122,8 +122,14 @@ class AppLimitStrictModeEngine private constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentTitle("⏰ $appName Time Almost Up")
             .setContentText("You have less than 1 minute left before your $appName limit is reached. Wrap up your task!")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

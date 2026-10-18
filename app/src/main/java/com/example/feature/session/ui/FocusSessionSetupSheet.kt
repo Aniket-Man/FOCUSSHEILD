@@ -1,4 +1,4 @@
-﻿package com.example.feature.session.ui
+package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -868,7 +868,7 @@ private fun DeepFocusSwitchRow(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = FocusColors.Primary,
+                checkedTrackColor = FocusColors.ToggleGreen,
                 uncheckedThumbColor = FocusColors.TextMuted,
                 uncheckedTrackColor = FocusColors.SurfaceVariant
             )

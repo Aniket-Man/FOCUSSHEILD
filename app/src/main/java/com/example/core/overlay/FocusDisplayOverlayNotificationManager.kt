@@ -140,7 +140,7 @@ object FocusDisplayOverlayNotificationManager {
                     // Fallback to stylized Toast if overlay permission is not granted
                     Toast.makeText(
                         context.applicationContext,
-                        "🛡️ FocusShield: $title\n$message",
+                        "FocusShield: $title\n$message",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -149,7 +149,7 @@ object FocusDisplayOverlayNotificationManager {
                 try {
                     Toast.makeText(
                         context.applicationContext,
-                        "🛡️ $title: $message",
+                        "$title: $message",
                         Toast.LENGTH_SHORT
                     ).show()
                 } catch (_: Exception) {}

@@ -744,7 +744,7 @@ private fun MasterShieldCard(
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.Primary,
+                    checkedTrackColor = FocusColors.ToggleGreen,
                     uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
                     uncheckedTrackColor = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
                 ),

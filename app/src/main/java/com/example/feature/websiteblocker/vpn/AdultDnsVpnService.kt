@@ -203,10 +203,16 @@ class AdultDnsVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val largeIcon = android.graphics.BitmapFactory.decodeResource(
+            resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("18+ Content Shield Active")
             .setContentText("Protecting browsing and apps against adult websites")
             .setSmallIcon(R.drawable.ic_focus_notification)
+            .setLargeIcon(largeIcon)
+            .setColor(0xFF6E18E6.toInt())
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

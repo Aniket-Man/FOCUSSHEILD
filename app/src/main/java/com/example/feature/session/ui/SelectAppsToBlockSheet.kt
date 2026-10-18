@@ -414,7 +414,7 @@ fun SelectAppsToBlockSheet(
                             onCheckedChange = { onToggleDistractingMaster(it, allUserAppPackages) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = FocusColors.Primary,
+                                checkedTrackColor = FocusColors.ToggleGreen,
                                 uncheckedThumbColor = FocusColors.TextMuted,
                                 uncheckedTrackColor = FocusColors.Surface
                             )
@@ -496,7 +496,7 @@ fun SelectAppsToBlockSheet(
                                             onCheckedChange = { onToggleAppBlocked(app.packageName, it) },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = Color.White,
-                                                checkedTrackColor = FocusColors.Primary,
+                                                checkedTrackColor = FocusColors.ToggleGreen,
                                                 uncheckedThumbColor = FocusColors.TextMuted,
                                                 uncheckedTrackColor = FocusColors.Surface
                                             )

@@ -975,7 +975,7 @@ private fun ScheduleCardItem(
                     onCheckedChange = onToggle,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
-                        checkedTrackColor = FocusColors.Primary,
+                        checkedTrackColor = FocusColors.ToggleGreen,
                         uncheckedThumbColor = textSecondary,
                         uncheckedTrackColor = if (isDark) Color(0xFF2C2F36) else Color(0xFFE2E8F0)
                     )
