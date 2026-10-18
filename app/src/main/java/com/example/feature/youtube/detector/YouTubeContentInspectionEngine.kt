@@ -95,6 +95,9 @@ data class YouTubeChannelContext(
  * while watching approved study videos.
  */
 object YouTubePlaybackSandbox {
+    private const val NAVIGATION_VERIFICATION_COOLDOWN_MILLIS = 3000L
+    private const val IMMEDIATE_TRANSITION_GUARD_MILLIS = 700L
+
     @Volatile
     var isSandboxActive: Boolean = false
         private set
@@ -115,6 +118,18 @@ object YouTubePlaybackSandbox {
     var enteredSandboxAt: Long = 0L
         private set
 
+    @Volatile
+    var lastExitedVideoTitle: String? = null
+        private set
+
+    @Volatile
+    var lastNavigationTimestamp: Long = 0L
+        private set
+
+    @Volatile
+    var navigationCooldownUntil: Long = 0L
+        private set
+
     fun enterSandbox(channel: ChannelIdentityInfo, title: String?, videoKey: String? = null) {
         isSandboxActive = true
         sandboxedChannel = channel
@@ -131,13 +146,40 @@ object YouTubePlaybackSandbox {
         enteredSandboxAt = 0L
     }
 
-    fun onVideoNavigationOccurred() {
-        // Exit passive sandbox when navigation occurs (new video clicked, screen changed, or tab switched)
+    fun onVideoNavigationOccurred(now: Long = System.currentTimeMillis()) {
+        // Record previous title before exiting passive sandbox so we don't prematurely re-latch
+        // on the old video at 0ms before YouTube loads the newly clicked video's metadata.
+        if (!sandboxedVideoTitle.isNullOrBlank()) {
+            lastExitedVideoTitle = sandboxedVideoTitle
+        }
+        lastNavigationTimestamp = now
+        navigationCooldownUntil = now + NAVIGATION_VERIFICATION_COOLDOWN_MILLIS
         exitSandbox()
     }
 
-    fun onVideoClickedOrChanged() {
-        onVideoNavigationOccurred()
+    fun canEnterSandbox(currentTitle: String?, now: Long = System.currentTimeMillis()): Boolean {
+        if (now < navigationCooldownUntil) {
+            val elapsed = now - lastNavigationTimestamp
+            val prevTitle = lastExitedVideoTitle
+            val hasNewTitleLoaded = !currentTitle.isNullOrBlank() &&
+                (prevTitle.isNullOrBlank() || !currentTitle.equals(prevTitle, ignoreCase = true))
+
+            // Within the immediate transition guard (first 700ms after click), never re-enter sandbox
+            // unless a distinct new video title has already rendered on the watch header.
+            if (elapsed < IMMEDIATE_TRANSITION_GUARD_MILLIS && !hasNewTitleLoaded) {
+                return false
+            }
+            // If the title is still identical to the previous video, wait at least 1600ms to be sure
+            // YouTube isn't mid-transition to a clicked recommendation video.
+            if (!hasNewTitleLoaded && elapsed < 1600L) {
+                return false
+            }
+        }
+        return true
+    }
+
+    fun onVideoClickedOrChanged(now: Long = System.currentTimeMillis()) {
+        onVideoNavigationOccurred(now)
     }
 }
 

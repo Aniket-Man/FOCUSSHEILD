@@ -182,6 +182,52 @@
         }
       },
       "required": ["id", "text", "author", "active", "createdAt", "updatedAt"]
+    },
+    "StudyChannel": {
+      "title": "StudyChannel",
+      "description": "An educational YouTube channel in the user's Study Channels list.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique local/cloud study channel identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "channelId": {
+          "type": "string",
+          "description": "YouTube channel handle (@handle) or UC channel ID."
+        },
+        "channelName": {
+          "type": "string",
+          "description": "Display name of the YouTube channel."
+        },
+        "channelUrl": {
+          "type": "string",
+          "description": "Formatted URL to the YouTube channel."
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "description": "Channel avatar/thumbnail URL."
+        },
+        "isApproved": {
+          "type": "boolean",
+          "description": "Whether this channel is currently approved for YouTube Study Mode."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp."
+        }
+      },
+      "required": ["id", "userId", "channelId", "channelName", "isApproved", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -202,6 +248,12 @@
         "$ref": "#/entities/StudyPlan"
       },
       "description": "Study planner tasks belonging to the user."
+    },
+    "/users/{userId}/study_channels/{channelId}": {
+      "schema": {
+        "$ref": "#/entities/StudyChannel"
+      },
+      "description": "Educational YouTube study channels synced across the user's devices."
     },
     "/session_quotes/{quoteId}": {
       "schema": {

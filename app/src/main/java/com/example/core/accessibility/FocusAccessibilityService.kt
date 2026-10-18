@@ -93,6 +93,7 @@ class FocusAccessibilityService : AccessibilityService() {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                     AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                     AccessibilityEvent.TYPE_VIEW_SCROLLED or
+                    AccessibilityEvent.TYPE_VIEW_CLICKED or
                     AccessibilityEvent.TYPE_WINDOWS_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 80
@@ -155,6 +156,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private var lastBrowserBlockTimestamp: Long = 0L
     private var lastYouTubeBlockTimestamp: Long = 0L
     private var lastYouTubeInspectTimestamp: Long = 0L
+    private var lastYouTubeSandboxCheckTimestamp: Long = 0L
     private var lastTamperCheckTimestamp: Long = 0L
     private var lastSplitScreenCheckTimestamp: Long = 0L
     private var lastFloatingWindowCheckTimestamp: Long = 0L
@@ -162,6 +164,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private var youtubeBackNavigationPending = false
     private var lastBlockedYouTubeVideoKey: String? = null
     private val mainThreadHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val youtubePostClickSweepToken = Any()
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -173,7 +176,8 @@ class FocusAccessibilityService : AccessibilityService() {
         if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
             eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-            eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED
+            eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED &&
+            eventType != AccessibilityEvent.TYPE_VIEW_CLICKED
         ) {
             return
         }
@@ -474,15 +478,37 @@ class FocusAccessibilityService : AccessibilityService() {
                             eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                     val isClickEvent = eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
 
+                    if (isClickEvent || isYouTubeWindowChange) {
+                        com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(now)
+                        YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)
+                        if (isClickEvent) {
+                            scheduleYouTubePostClickVerifications(rawPackageName)
+                        }
+                    }
+
                     // --- SAFE CORNER SANDBOX (PASSIVE MONITORING STATE) ---
                     // Once an approved channel is confirmed during a session, monitoring is moved into a passive state
                     // where expensive node tree walks and continuous text extractions are suspended until a new
                     // video navigation or window transition occurs, preventing UI lag and continuous redundant scans.
                     if (com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive) {
-                        if (isYouTubeWindowChange || isClickEvent) {
-                            // New video navigation or screen transition -> exit passive state to actively re-inspect
-                            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred()
-                        } else {
+                        // Even if YouTube's Litho feed consumes a tap without emitting TYPE_VIEW_CLICKED or
+                        // autoplays into a new video, run a lightweight watch-header title/channel check every 500ms.
+                        var sandboxStillValid = true
+                        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                            (now - lastYouTubeSandboxCheckTimestamp) >= 500L
+                        ) {
+                            lastYouTubeSandboxCheckTimestamp = now
+                            val checkRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                            sandboxStillValid = YouTubeContentBlockEngine.checkSandboxStillValid(
+                                rootNode = checkRoot,
+                                event = event,
+                                approvedChannelIds = protectionState.approvedChannelIds,
+                                approvedChannelNames = protectionState.approvedChannelNames,
+                                currentTime = now
+                            )
+                        }
+
+                        if (sandboxStillValid) {
                             // PASSIVE STATE: Monitoring is suspended for routine scroll, selection, and content change events!
                             val chan = com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
                                 ?: "Approved Channel"
@@ -500,7 +526,7 @@ class FocusAccessibilityService : AccessibilityService() {
                         }
                     }
 
-                    if (!isYouTubeWindowChange && (now - lastYouTubeInspectTimestamp) < 300L) {
+                    if (!isYouTubeWindowChange && !isClickEvent && (now - lastYouTubeInspectTimestamp) < 250L) {
                         return
                     }
                     lastYouTubeInspectTimestamp = now
@@ -891,6 +917,123 @@ class FocusAccessibilityService : AccessibilityService() {
             return true
         }
         return false
+    }
+
+    /**
+     * Schedules delayed verification sweeps after a click inside YouTube so that once YouTube
+     * finishes loading a newly clicked video from the below-player feed (and swapping its watch
+     * header metadata), the new video is guaranteed to be verified even if no further user touches occur.
+     */
+    private fun scheduleYouTubePostClickVerifications(rawPackageName: String) {
+        mainThreadHandler.removeCallbacksAndMessages(youtubePostClickSweepToken)
+        val sweepDelays = longArrayOf(400L, 950L, 1700L, 2600L)
+        for (delayMs in sweepDelays) {
+            androidx.core.os.HandlerCompat.postDelayed(
+                mainThreadHandler,
+                {
+                    try {
+                        val fgPkg = lastForegroundPackage ?: rawPackageName
+                        if (!YouTubeDetectionRules.isYouTubePackage(fgPkg) || youtubeBackNavigationPending) {
+                            return@postDelayed
+                        }
+                        val blockerManager = try { FocusBlockerManager.instance } catch (_: Exception) { null }
+                            ?: return@postDelayed
+                        val sweepNow = System.currentTimeMillis()
+                        val protectionState = blockerManager.getCurrentProtectionState(sweepNow)
+                        val isRunningOrPaused =
+                            protectionState.sessionState.name == "RUNNING" ||
+                            protectionState.sessionState.name == "PAUSED"
+                        val isBreakNow = protectionState.isBreakActive && sweepNow < protectionState.breakEndsAt
+                        if (!isRunningOrPaused || isBreakNow || !protectionState.isYouTubeStudyModeEnabled) {
+                            return@postDelayed
+                        }
+
+                        val rootNode = try { rootInActiveWindow } catch (_: Exception) { null } ?: return@postDelayed
+                        if (com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive) {
+                            val valid = YouTubeContentBlockEngine.checkSandboxStillValid(
+                                rootNode = rootNode,
+                                event = null,
+                                approvedChannelIds = protectionState.approvedChannelIds,
+                                approvedChannelNames = protectionState.approvedChannelNames,
+                                currentTime = sweepNow
+                            )
+                            if (valid) return@postDelayed
+                        }
+
+                        val decision = YouTubeContentBlockEngine.evaluate(
+                            rootNode = rootNode,
+                            event = null,
+                            approvedChannelIds = protectionState.approvedChannelIds,
+                            approvedChannelNames = protectionState.approvedChannelNames,
+                            blockUnknownContent = protectionState.blockUnknownContent,
+                            currentTime = sweepNow
+                        )
+
+                        if (decision.verdict == YouTubeBlockVerdict.ALLOW && !decision.isAdPlaying) {
+                            lastBlockedYouTubeVideoKey = null
+                            dwellTracker()?.onAllowedContent(
+                                channelName = decision.detectedChannel,
+                                videoTitle = decision.detectedTitle
+                            )
+                        } else if (decision.isBlocking) {
+                            mainThreadHandler.removeCallbacksAndMessages(youtubePostClickSweepToken)
+                            dwellTracker()?.flush("verdict ${decision.verdict}")
+                            val youtubeResult = com.example.feature.youtube.domain.YouTubeDetectionResult(
+                                contentType = if (decision.isShorts) {
+                                    com.example.feature.youtube.domain.YouTubeContentType.SHORT
+                                } else {
+                                    com.example.feature.youtube.domain.YouTubeContentType.VIDEO_PLAYBACK
+                                },
+                                channelName = decision.detectedChannel,
+                                channelId = null,
+                                videoTitle = decision.detectedTitle,
+                                isShort = decision.isShorts,
+                                confidence = com.example.feature.youtube.domain.DetectionConfidence.HIGH,
+                                matchedRule = decision.reason
+                            )
+
+                            when (decision.verdict) {
+                                YouTubeBlockVerdict.BLOCK_SHORTS -> {
+                                    val didBlock = handleYouTubeShortsBlocked()
+                                    if (didBlock) {
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
+                                    }
+                                }
+                                YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
+                                YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
+                                    val chan = decision.detectedChannel ?: "Unapproved Channel"
+                                    val videoKey = "${decision.detectedChannel.orEmpty()}|${decision.detectedTitle.orEmpty()}"
+                                    val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode, videoKey)
+                                    if (didBlock) {
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
+                                    }
+                                }
+                                else -> {}
+                            }
+
+                            val protectionDecision = when (decision.verdict) {
+                                YouTubeBlockVerdict.BLOCK_SHORTS -> ProtectionDecision.BLOCK_SHORTS
+                                YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL -> ProtectionDecision.BLOCK_UNAPPROVED_CHANNEL
+                                YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> ProtectionDecision.BLOCK_UNKNOWN_YOUTUBE_CONTENT
+                                else -> ProtectionDecision.BLOCK
+                            }
+
+                            blockerManager.handleBlockedPackage(
+                                packageName = fgPkg,
+                                fallbackAppName = null,
+                                decision = protectionDecision,
+                                youtubeResult = youtubeResult,
+                                matchedKeyword = decision.matchedKeyword
+                            )
+                        }
+                    } catch (_: Exception) {}
+                },
+                youtubePostClickSweepToken,
+                delayMs
+            )
+        }
     }
 
     /**

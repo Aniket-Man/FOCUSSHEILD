@@ -259,8 +259,13 @@ object YouTubeDetectionRules {
     val EXCLUDED_RECOMMENDATION_VIEW_IDS: List<String> = listOf(
         "related_videos_container",
         "related_chip_cloud",
+        "related_results",
+        "watch_next",
         "suggested_videos_list",
         "recommendation_list",
+        "compact_media_item",
+        "video_with_context",
+        "reel_item",
         "comments_container",
         "comment_thread",
         "comment_item",

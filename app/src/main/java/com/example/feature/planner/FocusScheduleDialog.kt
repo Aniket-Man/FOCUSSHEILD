@@ -152,19 +152,20 @@ fun FocusScheduleDialog(
     }
     val selectedDays = remember { mutableStateListOf<String>().apply { addAll(initialSelectedDays) } }
 
-    val isDark = LocalFocusColors.current.isDark
+    val palette = LocalFocusColors.current
+    val isDark = palette.isDark
 
-    // Theme adaptive color tokens
-    val bgColor = if (isDark) Color(0xFF000000) else Color(0xFFFFFFFF)
-    val cardBg = if (isDark) Color(0xFF16181D) else Color(0xFFF1F5F9)
-    val cardBorder = if (isDark) Color(0xFF26282E) else Color(0xFFE2E8F0)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val dividerColor = if (isDark) Color(0xFF23262E) else Color(0xFFE2E8F0)
-    val saveBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val saveBtnText = if (isDark) Color.Black else Color.White
+    // Theme adaptive color tokens unified with whole-app Daylight and Late-Night palettes
+    val bgColor = palette.background
+    val cardBg = palette.surface
+    val cardBorder = palette.cardBorderSubtle
+    val textPrimary = palette.textPrimary
+    val textSecondary = palette.textSecondary
+    val dividerColor = palette.cardBorder
+    val saveBtnBg = palette.primary
+    val saveBtnText = Color.White
     val switchTrackChecked = FocusColors.ToggleGreen
-    val switchTrackUnchecked = if (isDark) Color(0xFF2C2F36) else Color(0xFFCBD5E1)
+    val switchTrackUnchecked = palette.surfaceVariant
 
     Dialog(
         onDismissRequest = onDismiss,

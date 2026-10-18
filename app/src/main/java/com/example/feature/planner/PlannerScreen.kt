@@ -124,21 +124,22 @@ fun PlannerScreen(
         }
     }
 
-    val isDark = LocalFocusColors.current.isDark
+    val palette = LocalFocusColors.current
+    val isDark = palette.isDark
 
-    // Adaptive color tokens
-    val bgColor = if (isDark) Color(0xFF0D0E11) else Color(0xFFF8FAFC)
-    val cardBg = if (isDark) Color(0xFF16181D) else Color(0xFFFFFFFF)
-    val cardBorder = if (isDark) Color(0xFF26282E) else Color(0xFFE2E8F0)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val pillBg = if (isDark) Color(0xFF1E2024) else Color(0xFFF1F5F9)
-    val pillBorder = if (isDark) Color(0xFF2E3138) else Color(0xFFE2E8F0)
-    val selectedDayBg = if (isDark) Color(0xFF1E4620) else Color(0xFFDCFCE7)
-    val selectedDayBorder = if (isDark) Color(0xFF2A612D) else Color(0xFF86EFAC)
-    val selectedDayText = if (isDark) Color(0xFF86EFAC) else Color(0xFF15803D)
-    val floatingBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val floatingBtnText = if (isDark) Color.Black else Color.White
+    // Adaptive color tokens unified with FocusShield Daylight & Late-Night Study themes
+    val bgColor = palette.background
+    val cardBg = palette.surface
+    val cardBorder = palette.cardBorderSubtle
+    val textPrimary = palette.textPrimary
+    val textSecondary = palette.textSecondary
+    val pillBg = palette.surfaceVariant
+    val pillBorder = palette.cardBorder
+    val selectedDayBg = palette.primaryContainer
+    val selectedDayBorder = palette.primary
+    val selectedDayText = palette.primary
+    val floatingBtnBg = palette.primary
+    val floatingBtnText = Color.White
 
     var selectedDate by remember { mutableStateOf(Date()) }
     var isSuggestedExpanded by remember { mutableStateOf(true) }
@@ -147,7 +148,14 @@ fun PlannerScreen(
     var editingSchedule by remember { mutableStateOf<FocusScheduleEntity?>(null) }
     var scheduleToDelete by remember { mutableStateOf<FocusScheduleEntity?>(null) }
 
-    val dismissedSuggestions = remember { mutableStateListOf<String>() }
+    val plannerPrefs = remember(plannerContext) {
+        plannerContext.getSharedPreferences("planner_dismissed_presets", android.content.Context.MODE_PRIVATE)
+    }
+    val dismissedSuggestions = remember {
+        mutableStateListOf<String>().apply {
+            addAll(plannerPrefs.getStringSet("dismissed_ids", emptySet()) ?: emptySet())
+        }
+    }
 
     // Presets: Morning Study, Afternoon Study, Night Study
     val suggestedPresets = remember {
@@ -584,6 +592,7 @@ fun PlannerScreen(
                                     textSecondary = textSecondary,
                                     onDismiss = {
                                         dismissedSuggestions.add(preset.id)
+                                        plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
                                     },
                                     onAdd = {
                                         viewModel.addFocusSchedule(
@@ -602,6 +611,7 @@ fun PlannerScreen(
                                             blockNotifications = false
                                         )
                                         dismissedSuggestions.add(preset.id)
+                                        plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
                                     }
                                 )
                             }
@@ -793,9 +803,10 @@ private fun SuggestedScheduleCard(
     onAdd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val addBtnBg = if (isDark) Color(0xFF2A2D33) else Color(0xFFE2E8F0)
-    val addBtnText = if (isDark) Color.White else Color(0xFF0F172A)
-    val closeBtnBg = if (isDark) Color(0xFF22242A) else Color(0xFFF1F5F9)
+    val palette = LocalFocusColors.current
+    val addBtnBg = palette.primaryContainer
+    val addBtnText = palette.primary
+    val closeBtnBg = palette.surfaceVariant
 
     Card(
         modifier = modifier
@@ -909,8 +920,9 @@ private fun ScheduleCardItem(
     onStartSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val iconBg = if (isDark) Color(0xFF1E4620) else Color(0xFFDCFCE7)
-    val iconTint = if (isDark) Color(0xFF86EFAC) else Color(0xFF15803D)
+    val palette = LocalFocusColors.current
+    val iconBg = palette.primaryContainer
+    val iconTint = palette.primary
     val scheduleEmoji = remember(schedule.startTime) {
         getEmojiForTime(schedule.startTime)
     }
@@ -977,7 +989,7 @@ private fun ScheduleCardItem(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = FocusColors.ToggleGreen,
                         uncheckedThumbColor = textSecondary,
-                        uncheckedTrackColor = if (isDark) Color(0xFF2C2F36) else Color(0xFFE2E8F0)
+                        uncheckedTrackColor = palette.surfaceVariant
                     )
                 )
             }

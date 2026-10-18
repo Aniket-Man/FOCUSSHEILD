@@ -44,9 +44,8 @@ object YouTubeNodeExtractor {
     )
 
     private val WATCH_CONTAINER_VIEW_IDS = listOf(
-        "$YT:id/watch_panel",
-        "$YT:id/watch_swipey_item",
         "$YT:id/watch_header_layout",
+        "$YT:id/watch_panel",
         "$YT:id/watch_layout"
     )
 
@@ -76,11 +75,18 @@ object YouTubeNodeExtractor {
         "$YT:id/subscription_notification_toggle_button"
     )
 
+    private val WATCH_HEADER_TITLE_VIEW_IDS = listOf(
+        "$YT:id/watch_title_text",
+        "$YT:id/watch_metadata_title",
+        "$YT:id/title_and_badge",
+        "$YT:id/headline_title"
+    )
+
     private val TITLE_VIEW_IDS = listOf(
         "$YT:id/watch_title_text",
         "$YT:id/watch_metadata_title",
-        "$YT:id/video_title",
-        "$YT:id/compact_media_item_headline",
+        "$YT:id/title_and_badge",
+        "$YT:id/headline_title",
         "$YT:id/title"
     )
 
@@ -379,11 +385,32 @@ object YouTubeNodeExtractor {
 
     /**
      * Extracts the title of the video currently on the watch page.
+     * Strictly prioritizes dedicated watch header title views and ignores recommendation cards.
      */
     fun extractVideoTitle(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
+        val strictHeaderTitle = findFirstMatching(rootNode, WATCH_HEADER_TITLE_VIEW_IDS) { node ->
+            if (isInsideExcludedContainer(node)) return@findFirstMatching null
+            val text = node.text?.toString()?.trim() ?: node.contentDescription?.toString()?.trim()
+            if (!text.isNullOrBlank() && text.length >= 3) text else null
+        }
+        if (strictHeaderTitle != null) return strictHeaderTitle
+
         return findFirstMatching(rootNode, TITLE_VIEW_IDS) { node ->
+            if (isInsideExcludedContainer(node)) return@findFirstMatching null
             val text = node.text?.toString()?.trim()
+            if (!text.isNullOrBlank() && text.length >= 3) text else null
+        }
+    }
+
+    /**
+     * Extracts the strict watch-header video title (never falling back to generic title IDs).
+     */
+    fun extractWatchHeaderTitle(rootNode: AccessibilityNodeInfo?): String? {
+        if (rootNode == null) return null
+        return findFirstMatching(rootNode, WATCH_HEADER_TITLE_VIEW_IDS) { node ->
+            if (isInsideExcludedContainer(node)) return@findFirstMatching null
+            val text = node.text?.toString()?.trim() ?: node.contentDescription?.toString()?.trim()
             if (!text.isNullOrBlank() && text.length >= 3) text else null
         }
     }
@@ -464,10 +491,111 @@ object YouTubeNodeExtractor {
                     return true
                 }
             }
+            val desc = current.contentDescription?.toString() ?: ""
+            if (desc.contains(" - Go to channel - ", ignoreCase = true) ||
+                desc.endsWith("- play video", ignoreCase = true)
+            ) {
+                return true
+            }
+            if (depth in 1..2) {
+                // Check if this container has an "Action menu" or "- play video" sibling indicating a feed video card
+                val childCount = current.childCount
+                if (childCount in 2..12) {
+                    var hasActionMenu = false
+                    var hasPlayVideo = false
+                    var hasSubscribeButton = false
+                    for (i in 0 until childCount) {
+                        val sibling = try { current.getChild(i) } catch (_: Exception) { null } ?: continue
+                        val sDesc = sibling.contentDescription?.toString()?.trim() ?: ""
+                        val sRes = sibling.viewIdResourceName ?: ""
+                        if (sDesc.equals("Action menu", ignoreCase = true)) {
+                            hasActionMenu = true
+                        }
+                        if (sDesc.contains(" - Go to channel - ", ignoreCase = true) ||
+                            sDesc.endsWith("- play video", ignoreCase = true)
+                        ) {
+                            hasPlayVideo = true
+                        }
+                        if (sDesc.startsWith("Subscribe to ", ignoreCase = true) ||
+                            sDesc.startsWith("Subscribed to ", ignoreCase = true) ||
+                            sRes.contains("subscribe_button", ignoreCase = true)
+                        ) {
+                            hasSubscribeButton = true
+                        }
+                    }
+                    if ((hasActionMenu || hasPlayVideo) && !hasSubscribeButton) {
+                        return true
+                    }
+                }
+            }
             current = try { current.parent } catch (_: Exception) { null }
             depth++
         }
         return false
+    }
+
+    /**
+     * When the user clicks a video card in the below-player recommendation feed (or search/home feed),
+     * extracts the clicked video's (channelName, videoTitle) directly from the clicked AccessibilityEvent
+     * if YouTube's accessibility card label ("<Title> - <Duration> - Go to channel - <Channel> - <Views> - <Time> - play video")
+     * is present on the clicked node or its immediate parent/children.
+     */
+    fun extractClickedVideoCardIdentity(event: AccessibilityEvent?): Pair<String?, String?> {
+        if (event == null || event.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            return null to null
+        }
+        try {
+            val eventDesc = event.contentDescription?.toString()?.trim() ?: ""
+            val eventText = event.text?.joinToString(" ") { it?.toString()?.trim() ?: "" }?.trim() ?: ""
+
+            // Ignore clicks on overflow menu, pause/play controls, collapse, etc.
+            val ignoredControlLabels = listOf(
+                "Action menu", "More actions", "Pause video", "Play video", "Pause", "Play",
+                "Expand", "Collapse", "Close", "Navigate up", "Share", "Like", "Dislike", "Save"
+            )
+            if (ignoredControlLabels.any { eventDesc.equals(it, ignoreCase = true) || eventText.equals(it, ignoreCase = true) }) {
+                return null to null
+            }
+
+            val candidates = mutableListOf<String>()
+            if (eventDesc.isNotBlank()) candidates.add(eventDesc)
+            if (eventText.isNotBlank()) candidates.add(eventText)
+
+            val source = try { event.source } catch (_: Exception) { null }
+            if (source != null) {
+                source.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                source.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                for (i in 0 until minOf(source.childCount, 8)) {
+                    val child = try { source.getChild(i) } catch (_: Exception) { null } ?: continue
+                    child.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                    child.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                }
+                val parent = try { source.parent } catch (_: Exception) { null }
+                if (parent != null) {
+                    parent.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                    for (i in 0 until minOf(parent.childCount, 8)) {
+                        val sibling = try { parent.getChild(i) } catch (_: Exception) { null } ?: continue
+                        sibling.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
+                    }
+                }
+            }
+
+            for (raw in candidates) {
+                val marker = " - Go to channel - "
+                val idx = raw.indexOf(marker, ignoreCase = true)
+                if (idx >= 0) {
+                    val beforeMarker = raw.substring(0, idx).trim()
+                    val afterMarker = raw.substring(idx + marker.length).trim()
+                    val channelPart = afterMarker.substringBefore(" - ").trim()
+                    val cleanedChannel = cleanChannelName(channelPart)
+                    val titlePart = beforeMarker.substringBeforeLast(" - ").trim().ifEmpty { beforeMarker }
+                    if (!cleanedChannel.isNullOrBlank()) {
+                        return cleanedChannel to titlePart.takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return null to null
     }
 
     /**
@@ -692,8 +820,14 @@ object YouTubeNodeExtractor {
      */
     private fun extractHandleFromWatchSubtree(rootNode: AccessibilityNodeInfo): String? {
         val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
-        val searchRoot = watchContainer ?: rootNode
+        if (watchContainer != null) {
+            val fromContainer = scanSubtreeForHandle(watchContainer)
+            if (fromContainer != null) return fromContainer
+        }
+        return scanSubtreeForHandle(rootNode)
+    }
 
+    private fun scanSubtreeForHandle(searchRoot: AccessibilityNodeInfo): String? {
         var visited = 0
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
         queue.add(searchRoot to 0)
@@ -742,7 +876,14 @@ object YouTubeNodeExtractor {
      */
     private fun extractChannelFromWatchPlayer(rootNode: AccessibilityNodeInfo): String? {
         val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
-        val searchRoot = watchContainer ?: rootNode
+        if (watchContainer != null) {
+            val fromContainer = scanSubtreeForWatchChannel(watchContainer)
+            if (fromContainer != null) return fromContainer
+        }
+        return scanSubtreeForWatchChannel(rootNode)
+    }
+
+    private fun scanSubtreeForWatchChannel(searchRoot: AccessibilityNodeInfo): String? {
         val candidates = mutableListOf<String>()
         var found = false
 

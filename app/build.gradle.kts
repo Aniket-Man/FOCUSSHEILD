@@ -36,9 +36,10 @@ android {
     applicationId = "com.aistudio.focusshield.krtjfp"
     minSdk = 24
     targetSdk = 35
+    multiDexEnabled = true
     // Bumped by hand per release — never per build.
-    versionCode = 4
-    versionName = "1.3.0"
+    versionCode = 5
+    versionName = "1.4.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

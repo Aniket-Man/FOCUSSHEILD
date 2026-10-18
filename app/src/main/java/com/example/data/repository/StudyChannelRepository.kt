@@ -78,6 +78,13 @@ class StudyChannelRepository(
         cachedApprovedNormalizedNames.addAll(newNames)
     }
 
+    suspend fun refreshApprovedCache() {
+        try {
+            val approved = studyChannelDao.getApprovedChannels()
+            updateCache(approved)
+        } catch (_: Exception) {}
+    }
+
     /**
      * Resolves and normalizes a user-entered URL, handle, or plain channel name into an authoritative channelId and formatted URL.
      */
@@ -152,11 +159,17 @@ class StudyChannelRepository(
         if (existing != null) {
             if (!existing.isApproved && isApproved) {
                 studyChannelDao.setApprovalStatus(existing.id, true)
+                val updated = existing.copy(isApproved = true)
+                SyncTracker.enqueueUpsert(
+                    SyncTables.STUDY_CHANNELS,
+                    updated.id,
+                    CloudJson.studyChannelToJson(updated).toString()
+                )
                 try {
                     val approved = studyChannelDao.getApprovedChannels()
                     updateCache(approved)
                 } catch (_: Exception) {}
-                return Result.success(existing.copy(isApproved = true))
+                return Result.success(updated)
             }
             return Result.failure(IllegalStateException("Channel is already added: ${existing.channelName}"))
         }

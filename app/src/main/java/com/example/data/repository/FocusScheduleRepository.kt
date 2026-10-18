@@ -43,45 +43,28 @@ class FocusScheduleRepository(
         data class Rejected(val reason: String) : SaveResult
     }
 
-    suspend fun initializeDefaultSchedulesIfEmpty() {
-        if (dao.getScheduleCount() == 0) {
-            val defaultSchedules = listOf(
-                FocusScheduleEntity(
-                    title = "Morning Deep Work",
-                    daysOfWeek = "MON,TUE,WED,THU,FRI",
-                    startTime = "09:00",
-                    endTime = "11:30",
-                    isEnabled = true,
-                    isAutoStartSession = true,
-                    mode = "TIMER",
-                    subjectName = "Mathematics & Physics",
-                    colorHex = "#4F46E5"
-                ),
-                FocusScheduleEntity(
-                    title = "Afternoon Focus Window",
-                    daysOfWeek = "MON,TUE,WED,THU,FRI",
-                    startTime = "14:00",
-                    endTime = "16:00",
-                    isEnabled = true,
-                    isAutoStartSession = true,
-                    mode = "POMODORO",
-                    subjectName = "General Study",
-                    colorHex = "#059669"
-                )
-            )
-            for (sch in defaultSchedules) {
-                dao.insertSchedule(sch)
-                SyncTracker.enqueueUpsert(
-                    SyncTables.FOCUS_SCHEDULES,
-                    sch.id,
-                    CloudJson.focusScheduleToJson(sch).toString()
-                )
-            }
-            context?.let { ctx ->
-                val enabled = dao.getEnabledSchedules()
-                FocusScheduleAlarmScheduler.rescheduleAllSchedules(ctx, enabled)
+    suspend fun clearPreloadedDefaultSchedules() {
+        val all = try {
+            dao.getAllSchedules()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        for (sch in all) {
+            val isPreloadedDefault =
+                (sch.title == "Morning Deep Work" && sch.subjectName == "Mathematics & Physics" && sch.startTime == "09:00" && sch.endTime == "11:30") ||
+                (sch.title == "Afternoon Focus Window" && sch.subjectName == "General Study" && sch.startTime == "14:00" && sch.endTime == "16:00")
+            if (isPreloadedDefault) {
+                dao.deleteScheduleById(sch.id)
+                SyncTracker.enqueueDelete(SyncTables.FOCUS_SCHEDULES, sch.id)
+                context?.let { ctx ->
+                    FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, sch.id)
+                }
             }
         }
+    }
+
+    suspend fun initializeDefaultSchedulesIfEmpty() {
+        clearPreloadedDefaultSchedules()
     }
 
     suspend fun addSchedule(schedule: FocusScheduleEntity): SaveResult {

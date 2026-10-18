@@ -217,6 +217,21 @@ class StudyPlanRepository(
                 SyncTracker.enqueueDelete(SyncTables.STUDY_PLANS, id)
             }
         }
+        val allPlans = try {
+            studyPlanDao.getAllPlans()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        for (plan in allPlans) {
+            val isLegacyPreloaded = plan.id.startsWith("default-plan") ||
+                (plan.subjectName == "Physics" && plan.topicName == "Electrostatics" && plan.startTime == "08:00" && plan.endTime == "10:00") ||
+                (plan.subjectName == "Chemistry" && plan.topicName == "Organic Chemistry" && plan.startTime == "10:30" && plan.endTime == "12:00") ||
+                (plan.subjectName == "Mathematics" && plan.topicName == "Calculus" && plan.startTime == "14:00" && plan.endTime == "15:30")
+            if (isLegacyPreloaded) {
+                studyPlanDao.deletePlanById(plan.id)
+                SyncTracker.enqueueDelete(SyncTables.STUDY_PLANS, plan.id)
+            }
+        }
     }
 
     suspend fun ensureTodayPlansExist(): List<StudyPlanEntity> {

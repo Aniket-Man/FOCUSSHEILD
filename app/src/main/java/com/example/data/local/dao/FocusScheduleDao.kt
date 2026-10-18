@@ -13,6 +13,9 @@ interface FocusScheduleDao {
     @Query("SELECT * FROM focus_schedules ORDER BY startTime ASC")
     fun getAllSchedulesFlow(): Flow<List<FocusScheduleEntity>>
 
+    @Query("SELECT * FROM focus_schedules ORDER BY startTime ASC")
+    suspend fun getAllSchedules(): List<FocusScheduleEntity>
+
     @Query("SELECT * FROM focus_schedules WHERE isEnabled = 1")
     suspend fun getEnabledSchedules(): List<FocusScheduleEntity>
 

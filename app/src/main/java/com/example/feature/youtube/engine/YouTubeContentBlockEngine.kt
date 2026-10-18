@@ -54,8 +54,101 @@ object YouTubeContentBlockEngine {
     private var lastApprovedChannel: String? = null
 
     @Volatile
+    private var lastClickOrNavigationAt: Long = 0L
+
+    @Volatile
+    private var pendingClickedChannel: String? = null
+
+    @Volatile
+    private var pendingClickedTitle: String? = null
+
+    @Volatile
+    private var pendingClickedAt: Long = 0L
+
+    @Volatile
     var isCurrentlyOnApprovedWatchPage: Boolean = false
         private set
+
+    /**
+     * Notifies the block engine that the user clicked or navigated inside YouTube.
+     * Clears latched approval state so a newly clicked video from the below-player feed
+     * must be freshly verified rather than inheriting the previous video's approval.
+     */
+    fun onUserNavigationOrClick(
+        event: AccessibilityEvent? = null,
+        currentTime: Long = System.currentTimeMillis()
+    ) {
+        lastApprovedVideoKey = null
+        lastApprovedChannel = null
+        lastClickOrNavigationAt = currentTime
+        currentVideoFirstSeenAt = currentTime
+
+        val (clickedChannel, clickedTitle) = YouTubeNodeExtractor.extractClickedVideoCardIdentity(event)
+        if (!clickedChannel.isNullOrBlank()) {
+            pendingClickedChannel = clickedChannel
+            pendingClickedTitle = clickedTitle
+            pendingClickedAt = currentTime
+        }
+    }
+
+    /**
+     * Lightweight periodic check invoked while [YouTubePlaybackSandbox] is active.
+     * Ensures that if a user taps a Litho recommendation card (which may not emit TYPE_VIEW_CLICKED)
+     * or if autoplay transitions to a new video, the sandbox exits immediately whenever:
+     *  - Shorts opens,
+     *  - The watch page is exited,
+     *  - The strict watch-header video title changes to a different video, or
+     *  - An unapproved channel appears in the active watch header.
+     *
+     * Scrolling down the recommendation feed hides the watch header (returning null/empty for strict
+     * watch header signals while recommendation cards are excluded), so scrolling stays 100% uninterrupted.
+     */
+    fun checkSandboxStillValid(
+        rootNode: AccessibilityNodeInfo?,
+        event: AccessibilityEvent?,
+        approvedChannelIds: Set<String>,
+        approvedChannelNames: Set<String>,
+        currentTime: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (rootNode == null) return true
+
+        if (YouTubeNodeExtractor.detectShorts(rootNode, event)) {
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+            onUserNavigationOrClick(event, currentTime)
+            return false
+        }
+
+        if (!YouTubeNodeExtractor.detectWatchPage(rootNode)) {
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+            onUserNavigationOrClick(event, currentTime)
+            return false
+        }
+
+        val strictHeaderTitle = YouTubeNodeExtractor.extractWatchHeaderTitle(rootNode)
+        val sandboxedTitle = com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedVideoTitle
+        if (!strictHeaderTitle.isNullOrBlank() &&
+            !sandboxedTitle.isNullOrBlank() &&
+            !strictHeaderTitle.equals(sandboxedTitle, ignoreCase = true)
+        ) {
+            // A different video title is now rendered in the active watch header!
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+            onUserNavigationOrClick(event, currentTime)
+            return false
+        }
+
+        val identity = YouTubeNodeExtractor.extractChannelIdentity(rootNode)
+        if (identity.isIdentifiable) {
+            val isApproved = isChannelIdentityApproved(identity, approvedChannelIds, approvedChannelNames)
+            if (!isApproved) {
+                // Positively identified an unapproved channel in the watch header!
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+                onUserNavigationOrClick(event, currentTime)
+                return false
+            }
+        }
+
+        return true
+    }
 
     /**
      * Evaluates the current YouTube screen and returns the block decision.
@@ -69,6 +162,15 @@ object YouTubeContentBlockEngine {
         blockUnknownContent: Boolean = true,
         currentTime: Long = System.currentTimeMillis()
     ): YouTubeBlockDecision {
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val (clickedChan, clickedTitle) = YouTubeNodeExtractor.extractClickedVideoCardIdentity(event)
+            if (!clickedChan.isNullOrBlank()) {
+                pendingClickedChannel = clickedChan
+                pendingClickedTitle = clickedTitle
+                pendingClickedAt = currentTime
+            }
+        }
+
         if (rootNode == null) return YouTubeBlockDecision.ALLOW_NAVIGATION
 
         // 1. SHORTS: every short is blocked instantly, regardless of channel or content.
@@ -112,6 +214,14 @@ object YouTubeContentBlockEngine {
         if (title != null) lastSeenVideoTitle = title
         trackVideo(title, currentTime)
 
+        // Check if we are still in the first 600ms after a click and the watch header still shows the OLD video's title
+        val prevTitleBeforeClick = com.example.feature.youtube.detector.YouTubePlaybackSandbox.lastExitedVideoTitle
+        val isStillShowingOldVideoImmediatelyAfterClick =
+            (currentTime - lastClickOrNavigationAt) < 600L &&
+            !prevTitleBeforeClick.isNullOrBlank() &&
+            !title.isNullOrBlank() &&
+            title.equals(prevTitleBeforeClick, ignoreCase = true)
+
         val isHandleApproved = !identity.channelHandle.isNullOrBlank() &&
                 isChannelApproved(identity.channelHandle, approvedChannelIds, approvedChannelNames)
         val isNameApproved = !identity.channelName.isNullOrBlank() &&
@@ -119,15 +229,34 @@ object YouTubeContentBlockEngine {
         val isFallbackApproved = !fallbackChannel.isNullOrBlank() &&
                 isChannelApproved(fallbackChannel, approvedChannelIds, approvedChannelNames)
 
-        val hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank()
-        val isPositivelyApproved = isHandleApproved || isNameApproved || isFallbackApproved
+        var hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank()
+        var isPositivelyApproved = isHandleApproved || isNameApproved || isFallbackApproved
 
-        // 3.1 ACTIVE SESSION LATCH & SAFE PLAYBACK SANDBOX: If this specific video was already verified and approved,
-        // or the Safe Playback Sandbox is active, keep it approved while metadata, scrolling, or mid-roll ads
-        // temporarily occlude the watch header.
-        // However, if a new unapproved channel is positively identified on screen, exit sandbox and never override it.
+        // If the user just clicked a video card whose channel was extracted from the click event:
+        //  - If the clicked card is from an UNAPPROVED channel, block it once the transition begins (>= 150ms)
+        //    even if the watch header is still rendering or briefly holding the old video's header.
+        val clickedChan = pendingClickedChannel
+        val clickedAge = currentTime - pendingClickedAt
+        if (!clickedChan.isNullOrBlank() && clickedAge in 150L..4500L) {
+            val isClickedChanApproved = isChannelApproved(clickedChan, approvedChannelIds, approvedChannelNames)
+            if (!isClickedChanApproved && (isStillShowingOldVideoImmediatelyAfterClick || !hasPositiveChannelIdentification)) {
+                pendingClickedChannel = null
+                pendingClickedTitle = null
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                isCurrentlyOnApprovedWatchPage = false
+                return YouTubeBlockDecision.blockedChannel(clickedChan)
+            }
+        }
+        if (hasPositiveChannelIdentification && !isStillShowingOldVideoImmediatelyAfterClick) {
+            pendingClickedChannel = null
+            pendingClickedTitle = null
+        }
+
+        // 3.1 ACTIVE SESSION LATCH & SAFE PLAYBACK SANDBOX:
+        // Only latch when NOT inside the post-click transition cooldown window.
+        val isInPostClickCooldown = currentTime < com.example.feature.youtube.detector.YouTubePlaybackSandbox.navigationCooldownUntil
         val isSandboxActiveForPlayback = com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive
-        val isLatchedApproved = !hasPositiveChannelIdentification && (
+        val isLatchedApproved = !hasPositiveChannelIdentification && !isInPostClickCooldown && (
             (lastApprovedVideoKey != null && title != null && currentVideoKey == lastApprovedVideoKey) ||
             isSandboxActiveForPlayback
         )
@@ -141,16 +270,13 @@ object YouTubeContentBlockEngine {
             isLatchedApproved -> lastApprovedChannel ?: lastSeenChannelName ?: com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
             else -> null
         }
-        if (displayChannel != null) {
+        if (displayChannel != null && !isStillShowingOldVideoImmediatelyAfterClick) {
             lastSeenChannelName = displayChannel
         }
 
         // 3.2 SMART AD DETECTION & HANDLING RULES:
-        // - If an ad is playing on an APPROVED channel: ALLOW the ad to run so the video can play after the ad.
-        // - If an ad is playing and the channel is already identified as UNAPPROVED: STOP and step back immediately.
-        // - If a pre-roll ad temporarily hides channel metadata: ALLOW the ad until the channel is identified.
         if (isAd) {
-            if (approved) {
+            if (approved && !isStillShowingOldVideoImmediatelyAfterClick) {
                 lastApprovedVideoKey = currentVideoKey
                 lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
                 isCurrentlyOnApprovedWatchPage = true
@@ -159,7 +285,7 @@ object YouTubeContentBlockEngine {
                     title = title,
                     isAdPlaying = true
                 )
-            } else if (hasPositiveChannelIdentification) {
+            } else if (hasPositiveChannelIdentification && !isPositivelyApproved) {
                 // Ad is playing on a positively identified UNAPPROVED channel -> stop ad & step back immediately!
                 isCurrentlyOnApprovedWatchPage = false
                 return YouTubeBlockDecision.blockedChannel(displayChannel ?: "Unapproved Channel")
@@ -182,18 +308,25 @@ object YouTubeContentBlockEngine {
 
         // 3.3 NORMAL VIDEO PLAYBACK (No Ad):
         if (approved) {
-            lastApprovedVideoKey = currentVideoKey
-            lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
-            isCurrentlyOnApprovedWatchPage = true
-            com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
-                channel = com.example.feature.youtube.detector.ChannelIdentityInfo(
-                    channelName = lastApprovedChannel,
-                    channelHandle = identity.channelHandle
-                ),
-                title = title ?: lastSeenVideoTitle
-            )
+            // Only enter the passive Safe Playback Sandbox when positively approved AND outside the
+            // immediate post-click transition guard (or after the new video title has loaded).
+            val canEnterSandboxNow = isPositivelyApproved &&
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.canEnterSandbox(title, currentTime)
+
+            if (canEnterSandboxNow) {
+                lastApprovedVideoKey = currentVideoKey
+                lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
+                isCurrentlyOnApprovedWatchPage = true
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
+                    channel = com.example.feature.youtube.detector.ChannelIdentityInfo(
+                        channelName = lastApprovedChannel,
+                        channelHandle = identity.channelHandle
+                    ),
+                    title = title ?: lastSeenVideoTitle
+                )
+            }
             return YouTubeBlockDecision.approvedChannel(
-                channel = lastApprovedChannel ?: "Approved Channel",
+                channel = displayChannel ?: lastApprovedChannel ?: "Approved Channel",
                 title = title,
                 isAdPlaying = false
             )
