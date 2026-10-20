@@ -25,6 +25,7 @@ import com.example.feature.rewards.domain.RewardBadge
 import com.example.feature.session.domain.FocusSession
 import com.example.feature.session.domain.SessionState
 import com.example.feature.session.engine.FocusSessionManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -116,6 +118,7 @@ private data class HomeDataBundle(
     val todaySummary: TodayStudySummary,
     val weeklySummary: PeriodAnalyticsSummary,
     val todayPlans: List<StudyPlanEntity>,
+    val focusSchedules: List<FocusScheduleEntity>,
     val claimedRewardIds: Set<String>,
     val userPhotoUri: String?,
     val userAvatarPreset: String,
@@ -137,12 +140,14 @@ class HomeViewModel(
         analyticsRepository.todaySummaryFlow,
         analyticsRepository.getPeriodAnalyticsFlow(AnalyticsPeriod.LAST_7_DAYS),
         studyPlanRepository.getTodayPlansFlow(),
+        app.focusScheduleRepository.allSchedules,
         app.preferencesRepository.preferencesFlow
-    ) { today, weekly, plans, prefs ->
+    ) { today, weekly, plans, schedules, prefs ->
         HomeDataBundle(
             todaySummary = today,
             weeklySummary = weekly,
             todayPlans = plans,
+            focusSchedules = schedules,
             claimedRewardIds = prefs.claimedRewardIds,
             userPhotoUri = prefs.userPhotoUri,
             userAvatarPreset = prefs.userAvatarPreset,
@@ -154,14 +159,65 @@ class HomeViewModel(
         val pendingBadge = RewardBadge.ALL_BADGES.firstOrNull { badge ->
             badge.isUnlocked(allTimeMillis) && !bundle.claimedRewardIds.contains(badge.id)
         }
+
+        // Sync Today's Plan directly from the Planner's active schedules for today (merged with any existing today plan rows)
+        val nowMillis = System.currentTimeMillis()
+        val todayDayAbbr = java.text.SimpleDateFormat("EEE", java.util.Locale.ENGLISH)
+            .format(java.util.Date(nowMillis)).uppercase(java.util.Locale.ENGLISH)
+        val todayDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date(nowMillis))
+        val existingById = bundle.todayPlans.associateBy { it.id }
+
+        val schedulePlansForToday = bundle.focusSchedules.filter { entity ->
+            if (!entity.isEnabled) return@filter false
+            if (!entity.repeatEnabled && entity.scheduledDateMillis > 0L) {
+                val schedDateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                    .format(java.util.Date(entity.scheduledDateMillis))
+                schedDateStr == todayDateStr
+            } else {
+                val days = entity.daysOfWeek.uppercase(java.util.Locale.ENGLISH)
+                days.contains(todayDayAbbr) || days.contains("DAILY") || days.isEmpty() ||
+                    (days.contains("MON - FRI") && (todayDayAbbr in listOf("MON", "TUE", "WED", "THU", "FRI"))) ||
+                    (days.contains("WEEKENDS") && (todayDayAbbr in listOf("SAT", "SUN")))
+            }
+        }.map { schedule ->
+            val existing = existingById[schedule.id]
+            val startMins = StudyPlanRepository.parseTimeToMinutes(schedule.startTime)
+            val endMins = StudyPlanRepository.parseTimeToMinutes(schedule.endTime)
+            val durationMins = StudyPlanRepository.calculateDurationMinutes(startMins, endMins)
+            val isComp = existing?.isCompleted == true
+            StudyPlanEntity(
+                id = schedule.id,
+                subjectId = schedule.subjectName.lowercase().replace(" ", "_"),
+                subjectName = schedule.subjectName.ifBlank { schedule.title },
+                topicName = schedule.title,
+                plannedDurationMinutes = durationMins,
+                targetDate = nowMillis,
+                dateString = todayDateStr,
+                startTime = schedule.startTime,
+                endTime = schedule.endTime,
+                startMinutes = startMins,
+                endMinutes = endMins,
+                isCompleted = isComp,
+                status = if (isComp) "COMPLETED" else "PLANNED",
+                colorHex = schedule.colorHex,
+                notes = schedule.description,
+                createdAt = schedule.createdAt
+            )
+        }
+
+        val scheduleIds = schedulePlansForToday.map { it.id }.toSet()
+        val unifiedTodayPlans = (schedulePlansForToday + bundle.todayPlans.filter { it.id !in scheduleIds })
+            .sortedBy { it.startMinutes }
+
         // Overlap detection
-        val overlaps = StudyPlanRepository.detectOverlaps(bundle.todayPlans)
+        val overlaps = StudyPlanRepository.detectOverlaps(unifiedTodayPlans)
         val overlappingIds = overlaps.flatMap { listOf(it.first.id, it.second.id) }.toSet()
 
         var totalPlannedMins = 0
         var totalCompletedMins = 0
 
-        val mappedPlans = bundle.todayPlans.map { plan ->
+        val mappedPlans = unifiedTodayPlans.map { plan ->
             totalPlannedMins += plan.plannedDurationMinutes
             if (plan.isCompleted) {
                 totalCompletedMins += plan.plannedDurationMinutes
@@ -245,7 +301,7 @@ class HomeViewModel(
             userAvatarPreset = bundle.userAvatarPreset,
             userName = bundle.userName
         )
-    }.distinctUntilChanged()
+    }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     val uiState: StateFlow<HomeUiState> = combine(
         sessionManager.activeSession,
@@ -332,7 +388,27 @@ class HomeViewModel(
 
     fun togglePlanCompletion(planId: String, isCompleted: Boolean) {
         viewModelScope.launch {
-            studyPlanRepository.togglePlanCompletion(planId, isCompleted)
+            val existing = studyPlanRepository.getPlanById(planId)
+            if (existing != null) {
+                studyPlanRepository.togglePlanCompletion(planId, isCompleted)
+            } else {
+                val schedule = focusSchedules.value.firstOrNull { it.id == planId }
+                if (schedule != null) {
+                    val subjectId = schedule.subjectName.lowercase().replace(" ", "_")
+                    studyPlanRepository.updatePlan(
+                        id = schedule.id,
+                        subjectId = subjectId,
+                        subjectName = schedule.subjectName.ifBlank { schedule.title },
+                        topicName = schedule.title,
+                        startTime = schedule.startTime,
+                        endTime = schedule.endTime,
+                        targetDate = System.currentTimeMillis(),
+                        colorHex = schedule.colorHex,
+                        notes = schedule.description,
+                        isCompleted = isCompleted
+                    )
+                }
+            }
         }
     }
 
@@ -387,6 +463,7 @@ class HomeViewModel(
     fun deleteStudyPlan(planId: String) {
         viewModelScope.launch {
             studyPlanRepository.deletePlan(planId)
+            app.focusScheduleRepository.deleteSchedule(planId)
         }
     }
 

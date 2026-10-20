@@ -133,6 +133,19 @@ class BreakManager(
     }
 
     /**
+     * Updates the active break's elapsed duration so StateFlow observers receive
+     * a new structural snapshot on each timer tick.
+     */
+    fun updateProgress(now: Long = currentTimeProvider()): ManualBreakInfo? {
+        val current = _activeBreak.value ?: return null
+        if (!current.isActive) return null
+        val elapsed = current.calculateElapsedBreakMillis(now)
+        val updated = current.copy(actualDurationMillis = elapsed)
+        _activeBreak.value = updated
+        return updated
+    }
+
+    /**
      * Resets active break state.
      */
     fun reset() {

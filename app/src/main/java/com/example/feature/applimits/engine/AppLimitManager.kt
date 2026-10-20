@@ -465,19 +465,13 @@ class AppLimitManager private constructor(
      * Called by Accessibility Service whenever the foreground window package changes.
      */
     fun onForegroundPackageChanged(packageName: String) {
-        // The floating blocker has no activity lifecycle of its own: dismissing it when the
-        // limited app it belongs to leaves the foreground is the only thing that stops the
-        // full-screen scrim from sitting on top of the launcher or another app. The service
-        // filters FocusShield's own package out before this is reached, so the overlay's own
-        // window events can never hide it. Checked before the tracking filter below so
-        // launchers, SystemUI and IMEs also dismiss it — leaving to Home is the common case.
-        if (packageName.isNotBlank()) {
-            AppLimitFloatingOverlayManager.onForegroundPackageChanged(packageName)
-        }
-
         if (!AppLimitPackageFilter.shouldTrackForeground(packageName)) {
             return
         }
+
+        // Dismiss the floating blocker only when the user switches to a real tracked foreground
+        // package (including the Home launcher or another app), never on transient SystemUI or IME events.
+        AppLimitFloatingOverlayManager.onForegroundPackageChanged(packageName)
 
         val previous = currentForegroundPackage
         currentForegroundPackage = packageName

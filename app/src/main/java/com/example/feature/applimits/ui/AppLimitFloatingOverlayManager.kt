@@ -46,6 +46,8 @@ object AppLimitFloatingOverlayManager {
 
     @Volatile
     private var showingPackageName: String? = null
+    @Volatile
+    private var showingMode: AppLimitOverlayMode? = null
 
     val isShowing: Boolean
         get() = overlayView != null
@@ -56,12 +58,15 @@ object AppLimitFloatingOverlayManager {
     /**
      * Called from [AppLimitManager.onForegroundPackageChanged]. The overlay has no activity
      * lifecycle, so this is the only thing that dismisses it when the limited app it belongs
-     * to leaves the foreground (Home, app switch, SystemUI, IME) instead of letting the
-     * full-screen scrim sit on top of whatever comes next. Returning to the limited app
-     * re-raises it through the accessibility gate.
+     * to leaves the foreground (Home, app switch) instead of letting the full-screen scrim sit
+     * on top of whatever comes next. Transient system windows (SystemUI, android, IMEs) are
+     * ignored so status/nav bar or keyboard events never prematurely dismiss the blocker.
      */
     fun onForegroundPackageChanged(packageName: String) {
         val showing = showingPackageName ?: return
+        if (!com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(packageName)) {
+            return
+        }
         if (packageName != showing) {
             Log.i(TAG, "Foreground is now $packageName; dismissing floating blocker for $showing")
             hideOverlay()
@@ -83,12 +88,12 @@ object AppLimitFloatingOverlayManager {
         onResult: ((Boolean) -> Unit)? = null
     ) {
         mainHandler.post {
-            // If already showing for this package, keep it
-            if (overlayView != null && showingPackageName == packageName) {
+            // If already showing for this package with the exact same mode, keep it
+            if (overlayView != null && showingPackageName == packageName && showingMode == mode) {
                 onResult?.invoke(true)
                 return@post
             }
-            // If showing for another package, remove previous first. This must be the
+            // If showing for another package (or different mode), remove previous first. This must be the
             // synchronous removal, NOT hideOverlay(): that posts its removal to this very
             // queue, so it would run after the new view below is added and tear it down
             // again — the blocker flashed for one frame and then vanished on every launch.
@@ -124,7 +129,8 @@ object AppLimitFloatingOverlayManager {
                 if (addViewSafely(wm, view, context)) {
                     overlayView = view
                     showingPackageName = packageName
-                    Log.i(TAG, "Floating App Limit overlay presented for $appName ($packageName)")
+                    showingMode = mode
+                    Log.i(TAG, "Floating App Limit overlay presented for $appName ($packageName) [mode=$mode]")
                     onResult?.invoke(true)
                 } else {
                     onResult?.invoke(false)
@@ -155,6 +161,7 @@ object AppLimitFloatingOverlayManager {
         overlayView = null
         windowManager = null
         showingPackageName = null
+        showingMode = null
         try {
             wm?.removeView(view)
             Log.i(TAG, "Floating App Limit overlay removed for $pkg")
@@ -173,6 +180,7 @@ object AppLimitFloatingOverlayManager {
         overlayView = null
         windowManager = null
         showingPackageName = null
+        showingMode = null
     }
 
     private fun addViewSafely(wm: WindowManager, view: View, context: Context): Boolean {

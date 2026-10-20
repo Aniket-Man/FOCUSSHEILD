@@ -33,11 +33,13 @@ import com.example.feature.analytics.domain.YouTubeStudyStats
 import com.example.feature.rewards.domain.RewardBadge
 import com.example.feature.rewards.domain.StudyStamp
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Locale
@@ -184,7 +186,7 @@ class AnalyticsRepository(
                 badgeUnlockTimes = badgeUnlockTimes
             )
         }
-    }
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Real-time period analytics summary stream based on selected period tab.
@@ -223,7 +225,7 @@ class AnalyticsRepository(
                 allSessions = allSessions,
                 prefs = prefs
             )
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     private fun buildPeriodSummary(

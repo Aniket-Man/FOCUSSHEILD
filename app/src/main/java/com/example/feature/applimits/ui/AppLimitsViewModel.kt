@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,6 +69,8 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _isLoadingApps = MutableStateFlow(false)
     val isLoadingApps: StateFlow<Boolean> = _isLoadingApps.asStateFlow()
 
+    private val iconCache = java.util.concurrent.ConcurrentHashMap<String, Drawable>()
+
     val uiState: StateFlow<AppLimitsUiState> = combine(
         appLimitRepository.getAllLimitsFlow(),
         appLimitRepository.getUsageForDateFlow(appLimitRepository.getTodayDateString())
@@ -103,8 +106,8 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (isReached) reachedCount++
             }
 
-            val iconDrawable = try {
-                pm.getApplicationIcon(limit.packageName)
+            val iconDrawable = iconCache[limit.packageName] ?: try {
+                pm.getApplicationIcon(limit.packageName)?.also { iconCache[limit.packageName] = it }
             } catch (e: Exception) {
                 null
             }
@@ -135,7 +138,7 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
             reachedLimitsCount = reachedCount,
             isLoading = false
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.IO).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = AppLimitsUiState(isLoading = true)

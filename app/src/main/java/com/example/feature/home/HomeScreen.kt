@@ -315,35 +315,31 @@ fun HomeScreen(
                             )
                         )
 
-                        // Solid purple Pill Button "+ Add Study"
-                        Box(
+                        // Subtle Planner Sync Badge / Link (Add Study button removed as Today's Plan syncs from Planner)
+                        Surface(
+                            shape = CircleShape,
+                            color = FocusColors.Primary.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, FocusColors.Primary.copy(alpha = 0.3f)),
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(FocusColors.Primary)
-                                .clickable {
-                                    editingPlan = null
-                                    showAddEditDialog = true
-                                }
-                                .padding(horizontal = 14.dp, vertical = 7.dp)
-                                .testTag("add_study_plan_button"),
-                            contentAlignment = Alignment.Center
+                                .clickable { onNavigateToPlannerTab() }
                         ) {
                             Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Add,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector = Icons.Rounded.CalendarToday,
+                                    contentDescription = "Open Planner",
+                                    tint = FocusColors.Primary,
+                                    modifier = Modifier.size(13.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Add Study",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
+                                    text = "Planner",
+                                    color = FocusColors.Primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
                                 )
                             }
                         }
@@ -402,8 +398,7 @@ fun HomeScreen(
                                             onStartPlanSession(planItem)
                                         },
                                         onEditClick = {
-                                            editingPlan = planItem
-                                            showAddEditDialog = true
+                                            onNavigateToPlannerTab()
                                         },
                                         onDeleteClick = {
                                             planToDelete = planItem
@@ -446,7 +441,7 @@ fun HomeScreen(
                                     )
                                 )
                                 Text(
-                                    text = "Tap Add Study above or open the Planner to schedule your focus blocks",
+                                    text = "Tap here to open the Planner and schedule your focus blocks for today",
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextSecondary,
                                         textAlign = TextAlign.Center

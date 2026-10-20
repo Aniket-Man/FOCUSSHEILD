@@ -132,7 +132,11 @@ class StudyPlanRepository(
             notes = notes,
             createdAt = existing?.createdAt ?: System.currentTimeMillis()
         )
-        studyPlanDao.updatePlan(plan)
+        if (existing == null) {
+            studyPlanDao.insertPlan(plan)
+        } else {
+            studyPlanDao.updatePlan(plan)
+        }
         SyncTracker.enqueueUpsert(
             SyncTables.STUDY_PLANS,
             plan.id,

@@ -379,12 +379,15 @@ class FocusSessionManager(
             SessionMode.POMODORO -> pomodoroEngine.resume(now)
         }
 
+        _sessionState.value = SessionState.RUNNING
         _activeSession.update {
             it?.copy(
+                state = SessionState.RUNNING,
                 manualBreak = null,
                 totalBreakDurationMillis = (it.totalBreakDurationMillis + addedBreakDuration)
             )
         }
+        syncStateFromEngines(now)
         return endedBreak
     }
 
@@ -570,7 +573,7 @@ class FocusSessionManager(
      * Computes the authoritative values from engines and updates the state flow.
      */
     fun syncStateFromEngines(now: Long = currentTimeProvider()) {
-        val current = _activeSession.value ?: return
+        var current = _activeSession.value ?: return
 
         // Check if an active break expired naturally
         if (breakManager.isBreakActive) {
@@ -583,16 +586,18 @@ class FocusSessionManager(
                     SessionMode.POMODORO -> pomodoroEngine.resume(now)
                 }
 
-                _activeSession.update {
-                    it?.copy(
-                        manualBreak = null,
-                        totalBreakDurationMillis = (it.totalBreakDurationMillis + expiredBreak.actualDurationMillis)
-                    )
-                }
+                _sessionState.value = SessionState.RUNNING
+                val resumed = current.copy(
+                    state = SessionState.RUNNING,
+                    manualBreak = null,
+                    totalBreakDurationMillis = (current.totalBreakDurationMillis + expiredBreak.actualDurationMillis)
+                )
+                _activeSession.value = resumed
+                current = resumed
                 onNotificationEvent?.invoke(SessionNotificationEvent.BreakExpired)
             } else {
-                // Break still actively counting down
-                val activeBreak = breakManager.activeBreak.value
+                // Break still actively counting down — update elapsed progress so StateFlow emits!
+                val activeBreak = breakManager.updateProgress(now)
                 _activeSession.update {
                     it?.copy(manualBreak = activeBreak)
                 }

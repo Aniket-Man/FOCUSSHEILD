@@ -71,15 +71,15 @@ fun FocusNavGraph(
     onOpenUpdatesHandled: () -> Unit = {},
     homeViewModel: HomeViewModel = viewModel(),
     sessionViewModel: SessionViewModel = viewModel(),
-    historyViewModel: HistoryViewModel = viewModel(),
-    analyticsViewModel: AnalyticsViewModel = viewModel(),
+    historyViewModel: HistoryViewModel? = null,
+    analyticsViewModel: AnalyticsViewModel? = null,
     settingsViewModel: SettingsViewModel = viewModel(),
-    blockedAppsViewModel: BlockedAppsViewModel = viewModel(),
-    appLimitsViewModel: AppLimitsViewModel = viewModel(),
-    websiteBlockerViewModel: WebsiteBlockerViewModel = viewModel(),
-    studyChannelsViewModel: StudyChannelsViewModel = hiltViewModel(),
-    accountViewModel: AccountViewModel = hiltViewModel(),
-    updateViewModel: UpdateViewModel = hiltViewModel()
+    blockedAppsViewModel: BlockedAppsViewModel? = null,
+    appLimitsViewModel: AppLimitsViewModel? = null,
+    websiteBlockerViewModel: WebsiteBlockerViewModel? = null,
+    studyChannelsViewModel: StudyChannelsViewModel? = null,
+    accountViewModel: AccountViewModel? = null,
+    updateViewModel: UpdateViewModel? = null
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
@@ -177,9 +177,6 @@ fun FocusNavGraph(
     ) {
         // 1. HOME / FOCUS TAB
         composable(Screen.Home.route) {
-            // Same state object the Profile "New Updates" row reads, so the bell dot and the Profile
-            // dot can never disagree (prompt.txt §7: one central update state, not two).
-            val showUpdateDot by updateViewModel.showDot.collectAsStateWithLifecycle()
             HomeScreen(
                 viewModel = homeViewModel,
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
@@ -231,8 +228,9 @@ fun FocusNavGraph(
 
         // 3. STATS TAB
         composable(Screen.StatsDetail.route) {
+            val resolvedAnalyticsVm = analyticsViewModel ?: viewModel()
             AnalyticsScreen(
-                viewModel = analyticsViewModel,
+                viewModel = resolvedAnalyticsVm,
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
                 onTabSelected = { tab ->
                     handleBottomTabNavigation(tab, navController)
@@ -242,8 +240,9 @@ fun FocusNavGraph(
 
         // 4. BLOCKS TAB
         composable(Screen.Blocks.route) {
+            val resolvedAppLimitsVm = appLimitsViewModel ?: viewModel()
             BlocksScreen(
-                appLimitsViewModel = appLimitsViewModel,
+                appLimitsViewModel = resolvedAppLimitsVm,
                 settingsViewModel = settingsViewModel,
                 onTabSelected = { tab ->
                     handleBottomTabNavigation(tab, navController)
@@ -254,6 +253,8 @@ fun FocusNavGraph(
 
         // 5. PROFILE & SETTINGS HUB
         composable(Screen.Profile.route) {
+            val resolvedAccountVm = accountViewModel ?: hiltViewModel()
+            val resolvedUpdateVm = updateViewModel ?: hiltViewModel()
             ProfileScreen(
                 settingsViewModel = settingsViewModel,
                 onNavigateBack = { navController.popBackStack() },
@@ -262,17 +263,18 @@ fun FocusNavGraph(
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToAccount = { navController.navigate(Screen.Account.route) },
                 onNavigateToRewards = { navController.navigate(Screen.Rewards.route) },
-                accountViewModel = accountViewModel,
+                accountViewModel = resolvedAccountVm,
                 onNavigateToOnboarding = { navController.navigate(Screen.Onboarding.route) },
-                updateViewModel = updateViewModel,
+                updateViewModel = resolvedUpdateVm,
                 onNavigateToUpdates = { navController.navigate(Screen.Update.route) }
             )
         }
 
         // SUB-SCREEN: SESSIONS HISTORY
         composable(Screen.SessionsHistory.route) {
+            val resolvedHistoryVm = historyViewModel ?: viewModel()
             SessionsHistoryScreen(
-                viewModel = historyViewModel,
+                viewModel = resolvedHistoryVm,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) }
             )
@@ -392,8 +394,9 @@ fun FocusNavGraph(
 
         // SUB-SCREEN: BLOCKED APPS
         composable(Screen.BlockedApps.route) {
+            val resolvedBlockedAppsVm = blockedAppsViewModel ?: viewModel()
             BlockedAppsScreen(
-                viewModel = blockedAppsViewModel,
+                viewModel = resolvedBlockedAppsVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -409,40 +412,45 @@ fun FocusNavGraph(
 
         // SUB-SCREEN: APPROVED STUDY CHANNELS
         composable(Screen.StudyChannels.route) {
+            val resolvedStudyChannelsVm = studyChannelsViewModel ?: hiltViewModel()
             StudyChannelsScreen(
-                viewModel = studyChannelsViewModel,
+                viewModel = resolvedStudyChannelsVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
 
         // SUB-SCREEN: WEBSITE & BROWSER BLOCKER
         composable(Screen.WebsiteBlocker.route) {
+            val resolvedWebsiteBlockerVm = websiteBlockerViewModel ?: viewModel()
             WebsiteBlockerScreen(
-                viewModel = websiteBlockerViewModel,
+                viewModel = resolvedWebsiteBlockerVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
 
         // SUB-SCREEN: APP LIMITS DASHBOARD
         composable(Screen.AppLimits.route) {
+            val resolvedAppLimitsVm = appLimitsViewModel ?: viewModel()
             AppLimitsDashboardScreen(
-                viewModel = appLimitsViewModel,
+                viewModel = resolvedAppLimitsVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
 
         // SUB-SCREEN: ACCOUNT & CLOUD BACKUP (optional; local-first until the user signs in)
         composable(Screen.Account.route) {
+            val resolvedAccountVm = accountViewModel ?: hiltViewModel()
             AccountScreen(
-                accountViewModel = accountViewModel,
+                accountViewModel = resolvedAccountVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
 
         // SUB-SCREEN: APP UPDATE (GitHub Releases APK updater)
         composable(Screen.Update.route) {
+            val resolvedUpdateVm = updateViewModel ?: hiltViewModel()
             UpdateScreen(
-                viewModel = updateViewModel,
+                viewModel = resolvedUpdateVm,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

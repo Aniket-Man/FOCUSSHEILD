@@ -218,7 +218,9 @@ class FocusAccessibilityService : AccessibilityService() {
             // package) and the very next window-state change corrects any exotic mismatch.
             val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                     eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
-            if (isWindowStateChange || lastForegroundPackage == null) {
+            val isTrackedPackageSwitch = rawPackageName != lastForegroundPackage &&
+                    com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName)
+            if (isWindowStateChange || lastForegroundPackage == null || isTrackedPackageSwitch) {
                 if (lastForegroundPackage != null &&
                     YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage) &&
                     !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
@@ -226,7 +228,11 @@ class FocusAccessibilityService : AccessibilityService() {
                     YouTubeContentBlockEngine.reset()
                     dwellTracker()?.flush("left YouTube")
                 }
-                lastForegroundPackage = rawPackageName
+                if (com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName) ||
+                    isWindowStateChange
+                ) {
+                    lastForegroundPackage = rawPackageName
+                }
 
                 // Focus-blocker's verified retry loop stops when the user has left the blocked
                 // app. This signal is deliberately unfiltered (unlike the app-limit call below):
@@ -522,11 +528,13 @@ class FocusAccessibilityService : AccessibilityService() {
                                 channelName = chan,
                                 videoTitle = videoTitle
                             )
+                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
                             return
                         }
                     }
 
                     if (!isYouTubeWindowChange && !isClickEvent && (now - lastYouTubeInspectTimestamp) < 250L) {
+                        evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
                         return
                     }
                     lastYouTubeInspectTimestamp = now
@@ -645,9 +653,11 @@ class FocusAccessibilityService : AccessibilityService() {
             } else {
                 com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                 homeFeedPopupDismissed = false
-                if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && blockerManager != null) {
+                if (blockerManager != null &&
+                    (isWindowStateChange || isTrackedPackageSwitch || eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+                ) {
                     // 3. Standard Focus Session App Blocking flow (Priority 1)
-                    val decision = blockerManager.evaluateProtection(rawPackageName)
+                    val decision = blockerManager.evaluateProtection(rawPackageName, now = now)
                     if (decision == ProtectionDecision.BLOCK) {
                         Log.i(tag, "Distraction app detected in Focus Session: $rawPackageName. Enforcing FocusShield block.")
                         blockerManager.handleBlockedPackage(

@@ -280,7 +280,16 @@ class FocusBlockerManager private constructor(
 
     /** Called by the accessibility service on foreground window changes (see that call site). */
     fun onForegroundPackageChanged(packageName: String) {
-        currentForegroundPackage = packageName
+        val normalized = packageName.trim()
+        if (normalized.isBlank()) return
+        val lower = normalized.lowercase()
+        val isOwnApp = normalized == appContext.packageName ||
+                lower.startsWith("com.example") ||
+                lower.startsWith("com.aistudio.focusshield")
+        if (!isOwnApp && !com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(normalized)) {
+            return
+        }
+        currentForegroundPackage = normalized
     }
 
     /**

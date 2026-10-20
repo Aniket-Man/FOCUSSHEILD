@@ -88,6 +88,15 @@ class FocusSessionForegroundService : Service() {
     @Volatile
     private var isForeground = false
 
+    private val cachedLargeIcon by lazy {
+        android.graphics.BitmapFactory.decodeResource(
+            resources,
+            R.drawable.ic_focus_shield_app_icon
+        )
+    }
+
+    private var lastNotifiedSignature: String? = null
+
     companion object {
         const val CHANNEL_ID = "focus_foreground_service"
         const val CHANNEL_NAME = "Focus Session & Blocker Status"
@@ -387,6 +396,17 @@ class FocusSessionForegroundService : Service() {
 
     private fun updateNotification(session: FocusSession?) {
         if (!isForeground) return
+        val signature = if (session == null) {
+            "null"
+        } else {
+            val breakSec = (session.manualBreak?.calculateRemainingMillis(System.currentTimeMillis()) ?: 0L) / 1000L
+            val remSec = session.remainingDurationMillis / 1000L
+            val elapSec = session.elapsedDurationMillis / 1000L
+            "${session.id}|${session.state}|${session.isBreakActive}|$breakSec|$remSec|$elapSec|${session.pomodoroPhase}|${session.currentCycle}"
+        }
+        if (signature == lastNotifiedSignature) return
+        lastNotifiedSignature = signature
+
         val notification = buildForegroundNotification(session)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         notificationManager?.notify(NOTIFICATION_ID, notification)
@@ -402,10 +422,7 @@ class FocusSessionForegroundService : Service() {
             pendingIntentFlags()
         )
 
-        val largeIcon = android.graphics.BitmapFactory.decodeResource(
-            resources,
-            R.drawable.ic_focus_shield_app_icon
-        )
+        val largeIcon = cachedLargeIcon
 
         if (session == null) {
             return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -423,21 +440,26 @@ class FocusSessionForegroundService : Service() {
         val subject = session.subject.ifBlank { "Study Session" }
         val topic = session.topic.ifBlank { "Focus" }
 
-        val timeFormatted = when (session.mode) {
-            SessionMode.TIMER -> {
-                TimeFormatter.formatDigital(session.remainingDurationMillis, alwaysShowHours = true)
-            }
-            SessionMode.POMODORO -> {
-                val phaseLabel = when (session.pomodoroPhase) {
-                    PomodoroPhase.FOCUS -> "Focus (${session.currentCycle}/${session.totalCycles})"
-                    PomodoroPhase.SHORT_BREAK -> "Short Break"
-                    PomodoroPhase.LONG_BREAK -> "Long Break"
-                    null -> "Focus"
+        val timeFormatted = if (session.isBreakActive && session.manualBreak != null) {
+            val breakRem = session.manualBreak.calculateRemainingMillis(System.currentTimeMillis())
+            "Break: ${TimeFormatter.formatDigital(breakRem, alwaysShowHours = false)} remaining"
+        } else {
+            when (session.mode) {
+                SessionMode.TIMER -> {
+                    TimeFormatter.formatDigital(session.remainingDurationMillis, alwaysShowHours = true)
                 }
-                "$phaseLabel: ${TimeFormatter.formatDigital(session.remainingDurationMillis, alwaysShowHours = false)}"
-            }
-            SessionMode.STOPWATCH -> {
-                "${TimeFormatter.formatDigital(session.elapsedDurationMillis, alwaysShowHours = true)} (Elapsed)"
+                SessionMode.POMODORO -> {
+                    val phaseLabel = when (session.pomodoroPhase) {
+                        PomodoroPhase.FOCUS -> "Focus (${session.currentCycle}/${session.totalCycles})"
+                        PomodoroPhase.SHORT_BREAK -> "Short Break"
+                        PomodoroPhase.LONG_BREAK -> "Long Break"
+                        null -> "Focus"
+                    }
+                    "$phaseLabel: ${TimeFormatter.formatDigital(session.remainingDurationMillis, alwaysShowHours = false)}"
+                }
+                SessionMode.STOPWATCH -> {
+                    "${TimeFormatter.formatDigital(session.elapsedDurationMillis, alwaysShowHours = true)} (Elapsed)"
+                }
             }
         }
 

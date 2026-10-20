@@ -38,9 +38,35 @@ class BlockOverlayActivity : ComponentActivity() {
             visibleInstance != null && visiblePackageName == packageName
     }
 
+    private val blockedPackageState = androidx.compose.runtime.mutableStateOf<String?>(null)
+    private val appNameState = androidx.compose.runtime.mutableStateOf("Distraction App")
+    private val blockDecisionState = androidx.compose.runtime.mutableStateOf("BLOCK")
+    private val channelNameState = androidx.compose.runtime.mutableStateOf<String?>(null)
+    private val videoTitleState = androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    private fun applyIntentExtras(sourceIntent: Intent?) {
+        val i = sourceIntent ?: return
+        blockedPackageState.value = i.getStringExtra(EXTRA_BLOCKED_PACKAGE)
+        appNameState.value = i.getStringExtra(EXTRA_BLOCKED_APP_NAME) ?: "Distraction App"
+        blockDecisionState.value = i.getStringExtra(EXTRA_BLOCK_DECISION) ?: "BLOCK"
+        channelNameState.value = i.getStringExtra(EXTRA_CHANNEL_NAME)
+        videoTitleState.value = i.getStringExtra(EXTRA_VIDEO_TITLE)
+        if (visibleInstance === this) {
+            visiblePackageName = blockedPackageState.value
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        MediaPauseHelper.pauseMedia(this)
+        applyIntentExtras(intent)
+    }
+
     override fun onResume() {
         super.onResume()
-        visiblePackageName = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE)
+        applyIntentExtras(intent)
+        visiblePackageName = blockedPackageState.value
         visibleInstance = this
     }
 
@@ -66,6 +92,7 @@ class BlockOverlayActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         MediaPauseHelper.pauseMedia(this)
+        applyIntentExtras(intent)
 
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -78,13 +105,13 @@ class BlockOverlayActivity : ComponentActivity() {
             }
         })
 
-        val blockedPackage = intent.getStringExtra(EXTRA_BLOCKED_PACKAGE)
-        val appName = intent.getStringExtra(EXTRA_BLOCKED_APP_NAME) ?: "Distraction App"
-        val blockDecision = intent.getStringExtra(EXTRA_BLOCK_DECISION) ?: "BLOCK"
-        val channelName = intent.getStringExtra(EXTRA_CHANNEL_NAME)
-        val videoTitle = intent.getStringExtra(EXTRA_VIDEO_TITLE)
-
         setContent {
+            val blockedPackage = blockedPackageState.value
+            val appName = appNameState.value
+            val blockDecision = blockDecisionState.value
+            val channelName = channelNameState.value
+            val videoTitle = videoTitleState.value
+
             FocusShieldTheme {
                 if (blockDecision == "BLOCK_FLOATING_WINDOW") {
                     FloatingWindowBlockOverlayScreen(
@@ -92,10 +119,10 @@ class BlockOverlayActivity : ComponentActivity() {
                         blockedPackageName = blockedPackage,
                         onReturnToSession = {
                             val returnIntent = Intent(this, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        }
-                        startActivity(returnIntent)
-                        finish()
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            }
+                            startActivity(returnIntent)
+                            finish()
                         }
                     )
                 } else {
