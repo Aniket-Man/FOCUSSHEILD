@@ -1,10 +1,9 @@
 package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -79,7 +78,6 @@ import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
-import com.example.core.util.InstalledAppsProvider.toImageBitmap
 import com.example.feature.session.SpecialAppOption
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -133,8 +131,11 @@ fun SelectAppsToBlockSheet(
         val limitEntities = try { com.example.FocusShieldApp.instance.appLimitRepository.getAllLimits() } catch (e: Exception) { emptyList() }
         val limitPkgs = limitEntities.filter { it.isEnabled }.map { it.packageName }.toSet()
 
-        installedBrowsers = InstalledAppsProvider.getInstalledBrowsers(context)
-        installedUserApps = InstalledAppsProvider.getInstalledUserApps(context, limitPkgs)
+        // One off-main-thread pass for both inventories (the provider also avoids querying the
+        // browser list twice). Icons arrive already rasterised; the UI only draws the bitmaps.
+        val snapshot = InstalledAppsProvider.getInstalledAppsSnapshot(context, limitPkgs)
+        installedBrowsers = snapshot.browsers
+        installedUserApps = snapshot.userApps
 
         // Ensure any app with active limit is selected in blockedAppPackages
         limitPkgs.forEach { pkg ->
@@ -295,8 +296,10 @@ fun SelectAppsToBlockSheet(
 
                         AnimatedVisibility(
                             visible = isSpecialAppsExpanded,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
+                            // Fade only: animating expand/shrink re-measures the whole sheet every
+                            // frame while the launcher icons settle, which is visible as a stutter.
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(120))
                         ) {
                             Column {
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -348,9 +351,10 @@ fun SelectAppsToBlockSheet(
                                                 modifier = Modifier.padding(start = 8.dp)
                                             ) {
                                                 installedBrowsers.forEach { browser ->
-                                                    if (browser.icon != null) {
+                                                    val browserIcon = browser.iconBitmap
+                                                    if (browserIcon != null) {
                                                         Image(
-                                                            bitmap = browser.icon.toImageBitmap(),
+                                                            bitmap = browserIcon,
                                                             contentDescription = browser.appName,
                                                             modifier = Modifier
                                                                 .size(24.dp)
@@ -423,8 +427,10 @@ fun SelectAppsToBlockSheet(
 
                     AnimatedVisibility(
                         visible = isDistractingExpanded,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
+                        // Fade only — see the Special Apps section above. This one holds the full
+                        // installed-app list, so a height animation is especially expensive.
+                        enter = fadeIn(tween(150)),
+                        exit = fadeOut(tween(120))
                     ) {
                         Column {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -438,6 +444,7 @@ fun SelectAppsToBlockSheet(
                             } else {
                                 filteredUserApps.forEach { app ->
                                     val isBlocked = blockedAppPackages.contains(app.packageName)
+                                    val appIcon = app.iconBitmap
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -449,9 +456,9 @@ fun SelectAppsToBlockSheet(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.weight(1f)
                                         ) {
-                                            if (app.icon != null) {
+                                            if (appIcon != null) {
                                                 Image(
-                                                    bitmap = app.icon.toImageBitmap(),
+                                                    bitmap = appIcon,
                                                     contentDescription = app.appName,
                                                     modifier = Modifier
                                                         .size(36.dp)

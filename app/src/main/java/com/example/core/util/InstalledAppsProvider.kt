@@ -12,6 +12,8 @@ import android.net.Uri
 import android.os.Build
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 data class InstalledAppItem(
@@ -22,6 +24,12 @@ data class InstalledAppItem(
     val isBrowser: Boolean = false,
     val isSystemApp: Boolean = false,
     val hasAppLimit: Boolean = false
+)
+
+/** One package-manager pass for both browser and launcher inventories. */
+data class InstalledAppsSnapshot(
+    val browsers: List<InstalledAppItem>,
+    val userApps: List<InstalledAppItem>
 )
 
 object InstalledAppsProvider {
@@ -62,8 +70,46 @@ object InstalledAppsProvider {
 
     /**
      * Dynamically queries all browser applications installed on the user's phone.
+     *
+     * Suspends on [Dispatchers.IO]: resolving every browser, loading its label and rasterising its
+     * icon is hundreds of package-manager calls and bitmap allocations. Running that on the main
+     * thread while the setup sheet was being laid out was one of the largest sources of jank.
      */
-    fun getInstalledBrowsers(context: Context): List<InstalledAppItem> {
+    suspend fun getInstalledBrowsers(context: Context): List<InstalledAppItem> =
+        withContext(Dispatchers.IO) { queryInstalledBrowsers(context.applicationContext) }
+
+    /**
+     * Dynamically queries user installed apps (or launcher apps) on the device, off the main thread.
+     */
+    suspend fun getInstalledUserApps(
+        context: Context,
+        limitAppPackages: Set<String> = emptySet()
+    ): List<InstalledAppItem> = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        val knownBrowserPackages = queryInstalledBrowsers(appContext).map { it.packageName }.toSet()
+        queryInstalledUserApps(appContext, limitAppPackages, knownBrowserPackages)
+    }
+
+    /**
+     * Loads both inventories with a single browser query so the setup sheet does the work once.
+     */
+    suspend fun getInstalledAppsSnapshot(
+        context: Context,
+        limitAppPackages: Set<String> = emptySet()
+    ): InstalledAppsSnapshot = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        val browsers = queryInstalledBrowsers(appContext)
+        InstalledAppsSnapshot(
+            browsers = browsers,
+            userApps = queryInstalledUserApps(
+                context = appContext,
+                limitAppPackages = limitAppPackages,
+                knownBrowserPackages = browsers.mapTo(mutableSetOf()) { it.packageName }
+            )
+        )
+    }
+
+    private fun queryInstalledBrowsers(context: Context): List<InstalledAppItem> {
         val pm = context.packageManager
         val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
 
@@ -101,12 +147,10 @@ object InstalledAppsProvider {
         return browserApps.sortedBy { it.appName.lowercase() }
     }
 
-    /**
-     * Dynamically queries user installed apps (or launcher apps) on the device.
-     */
-    fun getInstalledUserApps(
+    private fun queryInstalledUserApps(
         context: Context,
-        limitAppPackages: Set<String> = emptySet()
+        limitAppPackages: Set<String>,
+        knownBrowserPackages: Set<String>
     ): List<InstalledAppItem> {
         val pm = context.packageManager
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
@@ -124,7 +168,6 @@ object InstalledAppsProvider {
             emptyList()
         }
 
-        val knownBrowserPackages = getInstalledBrowsers(context).map { it.packageName }.toSet()
         val userApps = mutableListOf<InstalledAppItem>()
         val seenPackages = mutableSetOf<String>()
 

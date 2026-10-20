@@ -153,49 +153,44 @@ fun HomeScreen(
             // The floating bottom dock is drawn as an overlay, so content extends behind it,
             // while the clearance padding ensures the final items rest above the dock.
             contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp + 48.dp),
-            verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
+            // 10dp between items; the four sections above Today's Plan add another 10dp so their
+            // original 20dp rhythm is unchanged, while plan rows keep the tighter 10dp spacing.
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // 1. Header (Logo, Brand, Slogan, Quick Theme Switcher, Notifications, Avatar)
             item {
-                FocusHeader(
-                    photoUri = uiState.userPhotoUri,
-                    avatarPresetId = uiState.userAvatarPreset,
-                    // The bell always opens the update section. Gating it on showUpdateDot made the
-                    // button inert whenever nothing was pending, which reads as a broken tap; the
-                    // update screen already renders a truthful "up to date" state.
-                    onNotificationClick = onNavigateToUpdate,
-                    onProfileClick = onNavigateToProfile,
-                    onThemeToggle = { viewModel.toggleThemeMode() },
-                    showNotificationDot = showUpdateDot,
-                    showProfileDot = showUpdateDot
-                )
-            }
-
-            // 2. Focus Session Banner Card (purple gradient card)
-            item {
-                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
-                    FocusSessionCard(
-                        isActive = uiState.isSessionActive,
-                        timeString = uiState.timeRemainingString,
-                        subjectName = uiState.activeSubject,
-                        subtitleText = uiState.pomodoroCycleText ?: if (uiState.isSessionActive) "${uiState.activeTopic} • Active" else null,
-                        isPaused = uiState.isPaused,
-                        onTogglePause = { viewModel.toggleSessionPause() },
-                        onCardClick = {
-                            if (uiState.isSessionActive) {
-                                onNavigateToActiveSession()
-                            } else {
-                                showFocusSetupSheet = true
-                            }
-                        },
-                        onStartSessionClick = { showFocusSetupSheet = true }
+                Box(modifier = Modifier.padding(bottom = 10.dp)) {
+                    FocusHeader(
+                        photoUri = uiState.userPhotoUri,
+                        avatarPresetId = uiState.userAvatarPreset,
+                        // The bell always opens the update section. Gating it on showUpdateDot made the
+                        // button inert whenever nothing was pending, which reads as a broken tap; the
+                        // update screen already renders a truthful "up to date" state.
+                        onNotificationClick = onNavigateToUpdate,
+                        onProfileClick = onNavigateToProfile,
+                        onThemeToggle = { viewModel.toggleThemeMode() },
+                        showNotificationDot = showUpdateDot,
+                        showProfileDot = showUpdateDot
                     )
                 }
             }
 
+            // 2. Focus Session Banner Card (purple gradient card)
+            item {
+                HomeSessionSection(
+                    viewModel = viewModel,
+                    onNavigateToActiveSession = onNavigateToActiveSession,
+                    onStartSession = { showFocusSetupSheet = true }
+                )
+            }
+
             // 3. Two Stats Cards Row: Today's Study & Phone Usage
             item {
-                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 10.dp)
+                ) {
                     StudyAndUsageStatsRow(
                         studyTime = uiState.todayStudyTime,
                         progressPercentage = uiState.todayProgressPercentage,
@@ -211,6 +206,7 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
+                        .padding(bottom = 10.dp)
                 ) {
                     Text(
                         text = "Quick Actions",
@@ -293,7 +289,11 @@ fun HomeScreen(
             }
 
             // 5. Today's Plan Section
-            item {
+            //
+            // Only the section header/summary is one item; every plan row is its own lazy item.
+            // Previously the whole list lived inside a single Column item, so it was composed and
+            // measured in full on every dashboard update.
+            item(key = "today_plan_header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -384,71 +384,37 @@ fun HomeScreen(
                             }
                         }
                     }
+                }
+            }
 
-                    // Plan Items List
-                    if (uiState.studyPlan.isNotEmpty()) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            uiState.studyPlan.forEach { planItem ->
-                                androidx.compose.runtime.key(planItem.id) {
-                                    StudyPlanRow(
-                                        item = planItem,
-                                        onStartClick = {
-                                            onStartPlanSession(planItem)
-                                        },
-                                        onEditClick = {
-                                            onNavigateToPlannerTab()
-                                        },
-                                        onDeleteClick = {
-                                            planToDelete = planItem
-                                        },
-                                        onToggleComplete = {
-                                            viewModel.togglePlanCompletion(planItem.id, !planItem.isCompleted)
-                                        }
-                                    )
-                                }
+            if (uiState.studyPlan.isEmpty()) {
+                item(key = "today_plan_empty") {
+                    TodayPlanEmptyState(
+                        onNavigateToPlannerTab = onNavigateToPlannerTab,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            } else {
+                items(
+                    items = uiState.studyPlan,
+                    key = { plan -> "today_plan_${plan.id}" }
+                ) { planItem ->
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        StudyPlanRow(
+                            item = planItem,
+                            onStartClick = {
+                                onStartPlanSession(planItem)
+                            },
+                            onEditClick = {
+                                onNavigateToPlannerTab()
+                            },
+                            onDeleteClick = {
+                                planToDelete = planItem
+                            },
+                            onToggleComplete = {
+                                viewModel.togglePlanCompletion(planItem.id, !planItem.isCompleted)
                             }
-                        }
-                    } else {
-                        // Empty state card for Today's Plan
-                        Surface(
-                            shape = FocusShapes.card,
-                            color = FocusColors.Surface,
-                            border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onNavigateToPlannerTab() }
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CalendarToday,
-                                    contentDescription = null,
-                                    tint = FocusColors.TextMuted,
-                                    modifier = Modifier.size(32.dp)
-                                )
-                                Text(
-                                    text = "No study plans for today",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        color = FocusColors.TextPrimary,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                )
-                                Text(
-                                    text = "Tap here to open the Planner and schedule your focus blocks for today",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary,
-                                        textAlign = TextAlign.Center
-                                    )
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             }
@@ -571,6 +537,89 @@ fun HomeScreen(
             onRevealed = { sessionViewModel.onScratchCardRevealed() },
             onDismiss = { sessionViewModel.dismissScratchCard() }
         )
+    }
+}
+
+/**
+ * The live session banner, and the only composable that observes [HomeViewModel.sessionUiState].
+ *
+ * Keeping the collection here means the 500 ms ticker invalidates this card alone; the dashboard
+ * above and below it is not recomposed while a session runs.
+ */
+@Composable
+private fun HomeSessionSection(
+    viewModel: HomeViewModel,
+    onNavigateToActiveSession: () -> Unit,
+    onStartSession: () -> Unit
+) {
+    val session by viewModel.sessionUiState.collectAsStateWithLifecycle()
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = FocusSpacing.screenHorizontal)
+            .padding(bottom = 10.dp)
+    ) {
+        FocusSessionCard(
+            isActive = session.isSessionActive,
+            timeString = session.timeRemainingString,
+            subjectName = session.subject,
+            subtitleText = session.pomodoroCycleText
+                ?: if (session.isSessionActive) "${session.topic} • Active" else null,
+            isPaused = session.isPaused,
+            onTogglePause = { viewModel.toggleSessionPause() },
+            onCardClick = {
+                if (session.isSessionActive) {
+                    onNavigateToActiveSession()
+                } else {
+                    onStartSession()
+                }
+            },
+            onStartSessionClick = onStartSession
+        )
+    }
+}
+
+@Composable
+private fun TodayPlanEmptyState(
+    onNavigateToPlannerTab: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = FocusShapes.card,
+        color = FocusColors.Surface,
+        border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onNavigateToPlannerTab() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CalendarToday,
+                contentDescription = null,
+                tint = FocusColors.TextMuted,
+                modifier = Modifier.size(32.dp)
+            )
+            Text(
+                text = "No study plans for today",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    color = FocusColors.TextPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+            Text(
+                text = "Tap here to open the Planner and schedule your focus blocks for today",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = FocusColors.TextSecondary,
+                    textAlign = TextAlign.Center
+                )
+            )
+        }
     }
 }
 

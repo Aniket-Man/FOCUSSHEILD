@@ -2,14 +2,12 @@ package com.example.feature.session.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,14 +64,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
-import com.example.core.util.InstalledAppsProvider.toImageBitmap
 import com.example.data.model.SessionMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.feature.session.SessionSetupState
@@ -218,18 +214,22 @@ fun FocusSessionSetupSheet(
         AnimatedContent(
             targetState = activeSubView,
             transitionSpec = {
-                if (targetState == SetupSubView.MAIN && initialState != SetupSubView.MAIN) {
-                    // When returning to MAIN, slide down (exit up)
-                    slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) togetherWith
-                        slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300))
-                } else if (targetState != SetupSubView.MAIN && initialState == SetupSubView.MAIN) {
-                    // When leaving MAIN, slide up from bottom
-                    slideInVertically(tween(300)) { it / 4 } + fadeIn(tween(300)) togetherWith
-                        slideOutVertically(tween(300)) { -it / 4 } + fadeOut(tween(300))
+                // Never animate the sheet's size here. AnimatedContent defaults to a SizeTransform,
+                // so every page change re-measured the whole 84%-height sheet frame by frame.
+                // Moving between a sub-page and MAIN keeps a short slide; sub-page to sub-page is
+                // a plain cross-fade.
+                if (targetState == SetupSubView.MAIN || initialState == SetupSubView.MAIN) {
+                    ContentTransform(
+                        targetContentEnter = slideInVertically(tween(220)) { it / 6 } + fadeIn(tween(220)),
+                        initialContentExit = slideOutVertically(tween(180)) { -it / 6 } + fadeOut(tween(180)),
+                        sizeTransform = null
+                    )
                 } else {
-                    // Between non-MAIN views, cross-fade
-                    fadeIn(tween(250)) + expandVertically(tween(250)) togetherWith
-                        fadeOut(tween(250)) + shrinkVertically(tween(250))
+                    ContentTransform(
+                        targetContentEnter = fadeIn(tween(160)),
+                        initialContentExit = fadeOut(tween(120)),
+                        sizeTransform = null
+                    )
                 }
             },
             contentKey = { it },
@@ -616,10 +616,10 @@ private fun FocusSetupMainContent(
 
                             // Browser / Chrome Icon
                             if (installedBrowsers.isNotEmpty()) {
-                                val browserIcon = installedBrowsers.first().icon
+                                val browserIcon = installedBrowsers.first().iconBitmap
                                 if (browserIcon != null) {
                                     Image(
-                                        bitmap = browserIcon.toImageBitmap(),
+                                        bitmap = browserIcon,
                                         contentDescription = null,
                                         modifier = Modifier
                                             .size(22.dp)
@@ -718,8 +718,10 @@ private fun FocusSetupMainContent(
 
                 AnimatedVisibility(
                     visible = setupState.isDeepFocusExpanded,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
+                    // Fade only: expanding/collapsing seven switch rows re-measured the sheet on
+                    // every frame. The content still fades, but the layout settles immediately.
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(120))
                 ) {
                     Column {
                         Spacer(modifier = Modifier.height(16.dp))

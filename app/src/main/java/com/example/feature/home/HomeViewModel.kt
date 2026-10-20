@@ -50,15 +50,26 @@ private val DEFAULT_QUICK_ACTIONS = listOf(
 private val DEFAULT_WEEKLY_BARS = listOf(0.04f, 0.04f, 0.04f, 0.04f, 0.04f, 0.04f, 0.04f)
 private val DEFAULT_WEEKLY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
 
+/**
+ * State of the live session banner only.
+ *
+ * Kept apart from [HomeUiState] on purpose: the session ticker updates twice a second, and when the
+ * countdown lived in the dashboard state every tick invalidated the whole Home screen — header,
+ * quick actions, stats and plan list included. Only the banner composable observes this flow now,
+ * so a running second repaints the clock and nothing else.
+ */
 @Immutable
-data class HomeUiState(
+data class HomeSessionUiState(
     val isSessionActive: Boolean = false,
     val isPaused: Boolean = false,
-    val timeRemainingString: String = "01:00:00",
-    val activeSubject: String = "Physics",
-    val activeTopic: String = "Electrostatics",
-    val activeMode: SessionMode = SessionMode.TIMER,
-    val pomodoroCycleText: String? = null,
+    val timeRemainingString: String = "00:00:00",
+    val subject: String = "Physics",
+    val topic: String = "Electrostatics",
+    val pomodoroCycleText: String? = null
+)
+
+@Immutable
+data class HomeUiState(
     val todayStudyTime: String = "0m",
     val todayProgressPercentage: Int = 0,
     val streakDays: Int = 0,
@@ -303,12 +314,16 @@ class HomeViewModel(
         )
     }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
-    val uiState: StateFlow<HomeUiState> = combine(
+    /**
+     * Live banner state. Collected only by the session card, so the 500 ms ticker no longer
+     * recomposes the rest of the dashboard.
+     */
+    val sessionUiState: StateFlow<HomeSessionUiState> = combine(
         sessionManager.activeSession,
-        sessionManager.sessionState,
-        processedDataFlow
-    ) { activeSession: FocusSession?, sessionState: SessionState, processed: HomeProcessedData ->
-        val isActive = activeSession != null && (sessionState == SessionState.RUNNING || sessionState == SessionState.PAUSED)
+        sessionManager.sessionState
+    ) { activeSession: FocusSession?, sessionState: SessionState ->
+        val isActive = activeSession != null &&
+            (sessionState == SessionState.RUNNING || sessionState == SessionState.PAUSED)
 
         val displayTime = if (activeSession != null) {
             TimeFormatter.formatDisplayTime(
@@ -322,45 +337,56 @@ class HomeViewModel(
             "${activeSession.pomodoroPhase?.label ?: "Focus"} • Cycle ${activeSession.currentCycle} of ${activeSession.totalCycles}"
         } else null
 
-        HomeUiState(
+        HomeSessionUiState(
             isSessionActive = isActive,
             isPaused = sessionState == SessionState.PAUSED,
             timeRemainingString = displayTime,
-            activeSubject = activeSession?.subject ?: "Physics",
-            activeTopic = activeSession?.topic ?: "Electrostatics",
-            activeMode = activeSession?.mode ?: SessionMode.TIMER,
-            pomodoroCycleText = pomodoroText,
-            todayStudyTime = processed.todayStudyTime,
-            todayProgressPercentage = processed.todayProgressPercentage,
-            streakDays = processed.streakDays,
-            weeklyBars = processed.weeklyBars,
-            weeklyBarLabels = processed.weeklyBarLabels,
-            quickActions = DEFAULT_QUICK_ACTIONS,
-            studyPlan = processed.mappedPlans,
-            statistics = processed.statistics,
-            totalPlannedTime = processed.totalPlannedTime,
-            totalCompletedTime = processed.totalCompletedTime,
-            remainingPlanTime = processed.remainingPlanTime,
-            planCompletionPercentage = processed.planCompletionPercentage,
-            hasOverlapWarnings = processed.hasOverlapWarnings,
-            overlapCount = processed.overlapCount,
-            totalScreenTime = processed.totalScreenTime,
-            hasUsagePermission = processed.hasUsagePermission,
-            allTimeStudyTime = processed.allTimeStudyTime,
-            allTimeStudyTimeMillis = processed.allTimeStudyTimeMillis,
-            allTimeSessionCount = processed.allTimeSessionCount,
-            todayCompletedSessionCount = processed.todayCompletedSessionCount,
-            focusToScreenRatioPercentage = processed.focusToScreenRatioPercentage,
-            pendingRewardBadge = processed.pendingRewardBadge,
-            userPhotoUri = processed.userPhotoUri,
-            userAvatarPreset = processed.userAvatarPreset,
-            userName = processed.userName
+            subject = activeSession?.subject ?: "Physics",
+            topic = activeSession?.topic ?: "Electrostatics",
+            pomodoroCycleText = pomodoroText
         )
-    }.stateIn(
+    }.distinctUntilChanged().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = HomeUiState(isSessionActive = false)
+        initialValue = HomeSessionUiState()
     )
+
+    val uiState: StateFlow<HomeUiState> = processedDataFlow
+        .map { processed ->
+            HomeUiState(
+                todayStudyTime = processed.todayStudyTime,
+                todayProgressPercentage = processed.todayProgressPercentage,
+                streakDays = processed.streakDays,
+                weeklyBars = processed.weeklyBars,
+                weeklyBarLabels = processed.weeklyBarLabels,
+                quickActions = DEFAULT_QUICK_ACTIONS,
+                studyPlan = processed.mappedPlans,
+                statistics = processed.statistics,
+                totalPlannedTime = processed.totalPlannedTime,
+                totalCompletedTime = processed.totalCompletedTime,
+                remainingPlanTime = processed.remainingPlanTime,
+                planCompletionPercentage = processed.planCompletionPercentage,
+                hasOverlapWarnings = processed.hasOverlapWarnings,
+                overlapCount = processed.overlapCount,
+                totalScreenTime = processed.totalScreenTime,
+                hasUsagePermission = processed.hasUsagePermission,
+                allTimeStudyTime = processed.allTimeStudyTime,
+                allTimeStudyTimeMillis = processed.allTimeStudyTimeMillis,
+                allTimeSessionCount = processed.allTimeSessionCount,
+                todayCompletedSessionCount = processed.todayCompletedSessionCount,
+                focusToScreenRatioPercentage = processed.focusToScreenRatioPercentage,
+                pendingRewardBadge = processed.pendingRewardBadge,
+                userPhotoUri = processed.userPhotoUri,
+                userAvatarPreset = processed.userAvatarPreset,
+                userName = processed.userName
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = HomeUiState()
+        )
 
     val blockedApps: StateFlow<List<BlockedAppEntity>> = app.blockedAppRepository.allBlockedApps
         .stateIn(
