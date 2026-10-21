@@ -68,6 +68,28 @@ class AppLimitReentryGateTest {
     }
 
     @Test
+    fun `a slow teardown never turns continued app events into a re-entry`() {
+        gate.onBlockerDismissed(limited)
+
+        // A previous implementation disarmed on elapsed time alone after 1.5 s. On a slow device
+        // the home transition can take longer than that, and the next teardown event from the
+        // limited app was then mistaken for a fresh entry and raised the blocker over Home.
+        repeat(10_000) {
+            gate.onForegroundPackage(limited)
+            assertTrue(gate.isArmedFor(limited))
+        }
+    }
+
+    @Test
+    fun `reading the gate never mutates suppression state`() {
+        gate.onBlockerDismissed(limited)
+
+        repeat(1_000) { assertTrue(gate.isArmedFor(limited)) }
+
+        assertTrue("isArmedFor must be a pure read", gate.isArmedFor(limited))
+    }
+
+    @Test
     fun `a genuine re-entry restores normal enforcement`() {
         gate.onBlockerDismissed(limited)
         gate.onForegroundPackage(launcher)

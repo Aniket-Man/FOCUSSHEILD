@@ -28,7 +28,9 @@ import org.robolectric.annotation.Config
  * ordinary show/hide round-trip the gate depends on.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+// A plain Application keeps the production FocusShieldApp from booting Firebase/Firestore in a
+// unit test; its background SQLite worker raced these tests and failed opening a temp DB.
+@Config(sdk = [34], application = android.app.Application::class)
 class AppLimitFloatingOverlayManagerTest {
 
     private lateinit var context: Context
@@ -194,6 +196,29 @@ class AppLimitFloatingOverlayManagerTest {
 
         assertTrue(containsText(root, "10 mins"))
         assertFalse(containsText(root, "20 mins"))
+    }
+
+    @Test
+    fun `the exact remaining allowance is offered as a max choice`() {
+        show(remainingDailyMinutes = 12, dailyLimitMinutes = 15)
+        val root = currentOverlayView()
+
+        assertTrue(
+            "12 minutes left should be selectable, not just the standard choices below it",
+            containsText(root, "12m (Max)")
+        )
+    }
+
+    @Test
+    fun `one minute left does not offer a two minute choice`() {
+        show(remainingDailyMinutes = 1, dailyLimitMinutes = 15)
+        val root = currentOverlayView()
+
+        assertTrue(containsText(root, "1 min"))
+        assertFalse(
+            "the engine would have clamped a 2 minute choice to the remaining minute",
+            containsText(root, "2 mins")
+        )
     }
 
     @Test

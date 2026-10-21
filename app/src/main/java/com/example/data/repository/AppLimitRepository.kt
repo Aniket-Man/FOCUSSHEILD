@@ -96,7 +96,9 @@ class AppLimitRepository(
                     com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(it)
                 }
             } else {
-                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
+                // Disabling is not a delete: keep the configuration and its usage history, but
+                // retire the live session/timer/overlay state that belonged to the disabled limit.
+                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDisabled(packageName)
             }
         } catch (_: Exception) {}
     }

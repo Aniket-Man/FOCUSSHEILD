@@ -513,19 +513,11 @@ fun AppLimitOverlayScreen(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Dynamic options based on actual remaining daily minutes (2 / 5 / 10 / 20 mins)
+                // Shared with the floating overlay so both blockers offer exactly the same
+                // choices for the same remaining allowance.
                 val durationOptions = remember(actualRemainingDailyMinutes) {
-                    if (actualRemainingDailyMinutes <= 1) {
-                        listOf(1)
-                    } else if (actualRemainingDailyMinutes < 5) {
-                        listOf(minOf(2, actualRemainingDailyMinutes), actualRemainingDailyMinutes).distinct()
-                    } else if (actualRemainingDailyMinutes < 10) {
-                        listOf(2, 5, actualRemainingDailyMinutes).distinct()
-                    } else if (actualRemainingDailyMinutes < 20) {
-                        listOf(2, 5, 10, actualRemainingDailyMinutes).distinct()
-                    } else {
-                        listOf(2, 5, 10, 20)
-                    }
+                    com.example.feature.applimits.engine.AppLimitDurationOptions
+                        .forRemainingMinutes(actualRemainingDailyMinutes)
                 }
 
                 if (durationOptions.size == 4) {

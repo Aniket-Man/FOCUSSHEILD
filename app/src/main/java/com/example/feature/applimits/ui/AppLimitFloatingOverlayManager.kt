@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.example.R
+import com.example.feature.applimits.engine.AppLimitDurationOptions
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
 import com.example.feature.applimits.engine.AppLimitStrictModeEngine
@@ -64,7 +65,11 @@ object AppLimitFloatingOverlayManager {
      */
     fun onForegroundPackageChanged(packageName: String) {
         val showing = showingPackageName ?: return
-        if (!com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(packageName)) {
+        val filter = com.example.feature.applimits.engine.AppLimitPackageFilter
+        // FocusShield's own package is not tracked as a session-movement package, but it is a
+        // real foreground change for the blocker: leaving the limited app for the shield must
+        // remove the scrim, otherwise it can sit on top of the shield's own UI.
+        if (!filter.shouldTrackForeground(packageName) && !filter.isOwnApp(packageName)) {
             return
         }
         if (packageName != showing) {
@@ -144,6 +149,13 @@ object AppLimitFloatingOverlayManager {
 
     fun hideOverlay() {
         mainHandler.post { removeCurrentView() }
+    }
+
+    /** Removes the blocker only if it belongs to [packageName], leaving another app's alone. */
+    fun hideOverlayFor(packageName: String) {
+        mainHandler.post {
+            if (showingPackageName == packageName) removeCurrentView()
+        }
     }
 
     /**
@@ -330,7 +342,11 @@ object AppLimitFloatingOverlayManager {
 
         // --- Prompt ---
         val promptText = TextView(context).apply {
-            text = "How long do you want to use?"
+            text = if (mode == AppLimitOverlayMode.SESSION_COMPLETE) {
+                "Time's up! Choose time to continue or exit"
+            } else {
+                "How long do you want to use?"
+            }
             textSize = 14f
             setTextColor(Color.parseColor("#E2E8F0"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -340,10 +356,12 @@ object AppLimitFloatingOverlayManager {
         sheet.addView(promptText)
 
         if (!isExhausted) {
-            // --- Duration options in a 2-column grid (2 / 5 / 10 / 20 mins) ---
-            val options = listOf(2, 5, 10, 20)
-                .filter { it <= remainingDailyMinutes.coerceAtLeast(2) }
-                .ifEmpty { listOf(remainingDailyMinutes.coerceAtLeast(1)) }
+            // Options are derived from the *actual* remaining allowance, using the same policy
+            // as the activity blocker. The previous fixed grid filtered against
+            // `remaining.coerceAtLeast(2)`, so one minute left still offered "2 mins", and no
+            // allowance at all fell through to a bogus "1 min" choice that the engine clamped to
+            // zero and immediately re-blocked.
+            val options = AppLimitDurationOptions.forRemainingMinutes(remainingDailyMinutes)
 
             options.chunked(2).forEachIndexed { index, row ->
                 val durationRow = LinearLayout(context).apply {
@@ -355,7 +373,13 @@ object AppLimitFloatingOverlayManager {
                 }
                 for (mins in row) {
                     durationRow.addView(
-                        durationButton(context, packageName, appName, mins),
+                        durationButton(
+                            context = context,
+                            packageName = packageName,
+                            appName = appName,
+                            minutes = mins,
+                            isMaxChoice = mins == remainingDailyMinutes && remainingDailyMinutes < 20
+                        ),
                         LinearLayout.LayoutParams(0, dp(56), 1f).apply {
                             leftMargin = dp(6)
                             rightMargin = dp(6)
@@ -480,8 +504,24 @@ object AppLimitFloatingOverlayManager {
                 ).show()
                 return@launch
             }
+            // Await the bypass write before leaving. The old code fired it into a detached
+            // coroutine and immediately removed the blocker, so the accessibility gate could
+            // re-read the still-unbypassed row and block the app again.
+            val bypassed = try {
+                AppLimitManager.instance.leaveBlockForToday(packageName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to turn off limit for $packageName", e)
+                false
+            }
+            if (!bypassed) {
+                Toast.makeText(
+                    context,
+                    "Couldn't turn off $appName's limit. Please try again.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
             hideOverlay()
-            AppLimitManager.instance.leaveBlockForToday(packageName)
             Log.i(TAG, "Limit for $appName ($packageName) turned off for today by the user")
             goHome(context)
         }
@@ -680,10 +720,15 @@ object AppLimitFloatingOverlayManager {
         context: Context,
         packageName: String,
         appName: String,
-        minutes: Int
+        minutes: Int,
+        isMaxChoice: Boolean
     ): View {
         return TextView(context).apply {
-            text = "$minutes mins"
+            text = when {
+                minutes == 1 -> "1 min"
+                isMaxChoice -> "${minutes}m (Max)"
+                else -> "$minutes mins"
+            }
             textSize = 15f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -696,13 +741,31 @@ object AppLimitFloatingOverlayManager {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                hideOverlay()
-                AppLimitManager.instance.startTemporarySession(
-                    packageName = packageName,
-                    appName = appName,
-                    durationMinutes = minutes
-                )
-                // User remains right here in the limited app!
+                overlayScope.launch {
+                    // Keep the blocker on screen until the session is actually registered.
+                    // Hiding it first and starting asynchronously let the app be usable with no
+                    // session (and no blocker) during the gap.
+                    val started = try {
+                        AppLimitManager.instance.startTemporarySession(
+                            packageName = packageName,
+                            appName = appName,
+                            durationMinutes = minutes
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start $minutes minute session for $packageName", e)
+                        false
+                    }
+                    if (started) {
+                        hideOverlay()
+                        // User remains right here in the limited app.
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "This limit changed. Close and reopen $appName to try again.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
         }
     }
@@ -753,6 +816,10 @@ object AppLimitFloatingOverlayManager {
 
     /** Opens the FocusShield app itself (strict-mode upsell, "Try now"). */
     private fun openFocusShield(context: Context) {
+        // This blocker is a non-focusable accessibility overlay; it would otherwise stay on top
+        // of the FocusShield screen it is opening. Dismiss it before the activity starts rather
+        // than waiting for a foreground event that the overlay itself complicates.
+        hideOverlay()
         try {
             val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
             if (intent == null) {

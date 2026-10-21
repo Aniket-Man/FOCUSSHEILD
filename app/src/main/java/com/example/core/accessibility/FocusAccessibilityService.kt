@@ -185,10 +185,8 @@ class FocusAccessibilityService : AccessibilityService() {
         val rawPackageName = event.packageName?.toString() ?: return
         if (rawPackageName.isBlank()) return
 
-        val isOwnApp = rawPackageName == packageName ||
-                rawPackageName == applicationContext.packageName ||
-                rawPackageName.startsWith("com.example") ||
-                rawPackageName.startsWith("com.aistudio.focusshield")
+        val isOwnApp = com.example.feature.applimits.engine.AppLimitPackageFilter
+            .isOwnApp(rawPackageName)
 
         if (isOwnApp) {
             if (lastForegroundPackage != null &&
@@ -200,6 +198,25 @@ class FocusAccessibilityService : AccessibilityService() {
             lastForegroundPackage = rawPackageName
             com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
             homeFeedPopupDismissed = false
+            // Keep the app-limit engine's foreground model honest, but only when FocusShield is
+            // genuinely the active window. Our floating blocker is a non-focusable accessibility
+            // overlay: it can emit events carrying our package while the limited app is still the
+            // active window behind it. Treating those as "the user opened FocusShield" would hide
+            // the blocker the moment it appeared. The active root tells the two apart.
+            val activeWindowPackage = try {
+                rootInActiveWindow?.packageName?.toString()
+            } catch (_: Exception) {
+                null
+            }
+            if (activeWindowPackage != null &&
+                com.example.feature.applimits.engine.AppLimitPackageFilter.isOwnApp(activeWindowPackage)
+            ) {
+                try {
+                    AppLimitManager.instance.onForegroundPackageChanged(rawPackageName)
+                } catch (_: Exception) {
+                    // Manager not initialized yet (early service bind) — nothing to pause.
+                }
+            }
             return
         }
 
@@ -765,7 +782,12 @@ class FocusAccessibilityService : AccessibilityService() {
                                 packageName = appLimitDecision.packageName,
                                 appName = appLimitDecision.appName,
                                 mode = AppLimitOverlayMode.DAILY_LIMIT_REACHED,
-                                usedMinutes = appLimitDecision.dailyLimitMinutes,
+                                // Actual time spent, not the configured limit: the blocker's
+                                // "Spent today" card was pinned to the limit regardless of how
+                                // much over it the user actually was (milliseconds can carry
+                                // past the limit before the gate fires).
+                                usedMinutes = (appLimitDecision.usedDailyMillis / 60000L)
+                                    .toInt().coerceAtLeast(0),
                                 remainingDailyMinutes = 0,
                                 dailyLimitMinutes = appLimitDecision.dailyLimitMinutes,
                                 emergencyUsesCount = appLimitDecision.emergencyUsesCount,
@@ -798,11 +820,19 @@ class FocusAccessibilityService : AccessibilityService() {
         val foregroundPackage = root?.packageName?.toString()
         if (foregroundPackage.isNullOrBlank()) return
 
-        val isOwnApp = foregroundPackage == packageName ||
-                foregroundPackage == applicationContext.packageName ||
-                foregroundPackage.startsWith("com.example") ||
-                foregroundPackage.startsWith("com.aistudio.focusshield")
-        if (isOwnApp) return
+        val isOwnApp = com.example.feature.applimits.engine.AppLimitPackageFilter
+            .isOwnApp(foregroundPackage)
+        if (isOwnApp) {
+            // Seed the engine's foreground model too: if the service reconnects while FocusShield
+            // is open during a session, the session must start parked, not keep ticking behind
+            // our own UI.
+            try {
+                AppLimitManager.instance.onForegroundPackageChanged(foregroundPackage)
+            } catch (_: Exception) {
+                // Manager not initialized yet — nothing to park.
+            }
+            return
+        }
 
         Log.i(tag, "Service connected with $foregroundPackage in the foreground; running the app-limit gate once")
 

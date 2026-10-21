@@ -31,8 +31,8 @@ object AppLimitPackageFilter {
      */
     fun shouldTrackForeground(pkg: String): Boolean {
         if (pkg.isBlank()) return false
+        if (isOwnApp(pkg)) return false
         val lower = pkg.lowercase()
-        if (isOwnApp(lower)) return false
         return lower != "android" &&
                 !lower.contains("inputmethod") &&
                 !lower.contains("keyboard") &&
@@ -61,7 +61,13 @@ object AppLimitPackageFilter {
      * FocusShield itself. The applicationId (`com.aistudio.focusshield...`) is covered by
      * the same prefixes as the namespace, so both observers agree on "our own screen" even
      * though neither can see the other's context.
+     *
+     * Public because the foreground observer needs to distinguish "our own screen" (pause the
+     * session clock, dismiss the blocker) from the transient shells that must be ignored.
      */
-    private fun isOwnApp(lower: String): Boolean =
-        lower.startsWith("com.example") || lower.startsWith("com.aistudio.focusshield")
+    fun isOwnApp(pkg: String): Boolean {
+        if (pkg.isBlank()) return false
+        val lower = pkg.lowercase()
+        return lower.startsWith("com.example") || lower.startsWith("com.aistudio.focusshield")
+    }
 }

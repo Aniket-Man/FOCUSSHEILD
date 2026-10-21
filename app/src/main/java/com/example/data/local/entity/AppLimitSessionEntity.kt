@@ -25,5 +25,5 @@ data class AppLimitSessionEntity(
     val selectedDurationMillis: Long,
     val actualUsedMillis: Long,
     val isEmergency: Boolean = false,
-    val endReason: String // "USER_LEFT_APP", "TIMER_EXPIRED", "DAILY_LIMIT_REACHED", "SESSION_INTERRUPTED", "EMERGENCY_STARTED", "APP_BLOCKED", "STRICT_LIMIT_REACHED"
+    val endReason: String // "USER_LEFT_APP", "TIMER_EXPIRED", "DAILY_LIMIT_REACHED", "SESSION_INTERRUPTED", "EMERGENCY_STARTED", "APP_BLOCKED", "STRICT_LIMIT_REACHED", "LIMIT_DISABLED", "LIMIT_DELETED"
 )

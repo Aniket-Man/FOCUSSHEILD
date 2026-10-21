@@ -293,15 +293,51 @@ class AppLimitManager private constructor(
     }
 
     fun onLimitSaved(limit: AppLimitEntity) {
-        enabledLimits = if (limit.isEnabled) {
-            enabledLimits + (limit.packageName to limit)
+        if (limit.isEnabled) {
+            enabledLimits = enabledLimits + (limit.packageName to limit)
         } else {
-            enabledLimits - limit.packageName
+            forgetLimit(limit.packageName, "LIMIT_DISABLED")
         }
     }
 
     fun onLimitDeleted(packageName: String) {
+        forgetLimit(packageName, "LIMIT_DELETED")
+    }
+
+    fun onLimitDisabled(packageName: String) {
+        forgetLimit(packageName, "LIMIT_DISABLED")
+    }
+
+    /**
+     * Drops every piece of live state tied to a limit that no longer exists (or is disabled).
+     *
+     * `removeLimitPermanently()` had the right cleanup — stop the timer, drop the persisted
+     * snapshot, retire the gate and pending blocker requests — but normal disable/delete never
+     * called it. The result was that turning a limit off mid-session left the session ticking and
+     * its "time's up" blocker able to force-launch over whatever the user was doing, while the
+     * floating overlay and retry loop kept working from a limit that was already gone.
+     */
+    private fun forgetLimit(packageName: String, reason: String) {
         enabledLimits = enabledLimits - packageName
+        limitBlockRecordedAt.remove(packageName)
+        reentryGate.clear(packageName)
+        lastOverlayLaunchPerPackage.remove(packageName)
+        pendingOverlayIntents.remove(packageName)
+        overlayLaunchJobs.remove(packageName)?.cancel()
+        AppLimitFloatingOverlayManager.hideOverlayFor(packageName)
+        AppLimitOverlayActivity.dismissIfShowingFor(packageName)
+
+        val session = _activeSession.value
+        if (session?.packageName == packageName) {
+            _activeSession.value = null
+            stopTicker()
+            clearPersistedSession()
+            if (currentForegroundPackage == packageName) currentForegroundPackage = null
+            if (session.elapsedMillis > 0L) {
+                scope.launch { saveSessionRecord(session, session.elapsedMillis, reason) }
+            }
+        }
+        Log.i(tag, "Dropped live app-limit state for $packageName ($reason)")
     }
 
     fun getLimit(packageName: String): AppLimitEntity? {
@@ -423,6 +459,7 @@ class AppLimitManager private constructor(
                 packageName = packageName,
                 appName = limit.appName,
                 dailyLimitMinutes = dailyLimitMinutes,
+                usedDailyMillis = accumulatedUsed,
                 emergencyUsesCount = usage?.emergencyUsesCount ?: 0,
                 emergencyUsesAllowed = limit.emergencyUsesAllowed,
                 isStrict = isStrict,
@@ -462,9 +499,44 @@ class AppLimitManager private constructor(
     }
 
     /**
+     * The user is looking at FocusShield itself, not at the limited app.
+     *
+     * A running session must be parked: the ticker is supposed to credit only time actually spent
+     * inside the limited app. The floating blocker is dismissed as well, otherwise it can sit on
+     * top of the shield when the user follows the strict-mode upsell while a blocker is open.
+     * The foreground marker moves to our own package so the overlay retry loop stops launching a
+     * blocker over FocusShield; opening the limited app again re-arms it normally.
+     */
+    private fun onFocusShieldForeground(packageName: String) {
+        currentForegroundPackage = packageName
+        AppLimitFloatingOverlayManager.onForegroundPackageChanged(packageName)
+
+        val session = _activeSession.value ?: return
+        if (session.isPaused) return
+
+        val now = System.currentTimeMillis()
+        Log.d(tag, "FocusShield is foreground; pausing session for ${session.appName}")
+        _activeSession.update { current ->
+            if (current?.id != session.id || current.isPaused) current
+            else current.copy(isPaused = true, lastPauseTimestamp = now)
+        }
+        persistActiveSession()
+    }
+
+    /**
      * Called by Accessibility Service whenever the foreground window package changes.
      */
     fun onForegroundPackageChanged(packageName: String) {
+        // FocusShield's own screens are excluded from the movement filter (an IME or a system
+        // shell must not move the session clock), but opening the shield is a real exit from the
+        // limited app. Before this branch existed the accessibility service returned early for
+        // our own package, so the session kept counting while the user was in FocusShield — they
+        // came back with less time than they had left, or with the session already expired.
+        if (AppLimitPackageFilter.isOwnApp(packageName)) {
+            onFocusShieldForeground(packageName)
+            return
+        }
+
         if (!AppLimitPackageFilter.shouldTrackForeground(packageName)) {
             return
         }
@@ -528,41 +600,104 @@ class AppLimitManager private constructor(
 
     /**
      * Starts a new temporary usage session chosen by the user.
+     *
+     * Suspending and returning the outcome is deliberate. The old fire-and-forget version set a
+     * provisional session, then clamped it to the real daily allowance from a background coroutine
+     * while the blocker was already stepping aside. A user who picked 10 minutes with 3 minutes of
+     * allowance left was reopened into the app and only *then* had their session shortened (or,
+     * with no allowance, started a zero-length session that instantly re-blocked). Callers now
+     * await the verdict before reopening the app, and a limit that was disabled or deleted while
+     * the prompt was on screen cannot start a session at all.
      */
-    fun startTemporarySession(
+    suspend fun startTemporarySession(
         packageName: String,
         appName: String,
         durationMinutes: Int,
         isEmergency: Boolean = false
-    ) {
-        val durationMillis = durationMinutes * 60 * 1000L
-        val limit = enabledLimits[packageName]
-        val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
+    ): Boolean {
+        if (durationMinutes <= 0) return false
 
-        // 1. Synchronously set active session in memory immediately so no window-change race condition occurs
-        val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, packageName)
-        val systemUsage = usageResult.usageMillis
+        val session = withContext(Dispatchers.IO) {
+            // Fresh row, never the cache: the overlay can outlive the limit it was built for.
+            val limit = try {
+                appLimitRepository.getLimitByPackage(packageName)
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to read limit for $packageName before starting a session: ${e.message}")
+                null
+            } ?: return@withContext null
+            if (!limit.isEnabled) {
+                Log.i(tag, "Not starting a session for $packageName: its limit is disabled")
+                return@withContext null
+            }
 
-        // Log diagnostic comparison for debugging (especially for YouTube)
-        if (packageName == "com.google.android.youtube") {
-            DeviceUsageStatsHelper.logDiagnosticComparison(appContext, packageName)
-        }
+            val todayDate = appLimitRepository.getTodayDateString()
+            val usage = try {
+                appLimitRepository.getUsage(packageName, todayDate)
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to read usage for $packageName; using system stats: ${e.message}")
+                null
+            }
+            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, packageName)
+            val systemUsage = when (usageResult.status) {
+                UsageResult.UsageStatus.VALID -> usageResult.usageMillis
+                // Permission denied / query failure: the database is the only usable fallback.
+                // The old code used usageResult.usageMillis unconditionally, so a failed query
+                // looked like zero usage and the session was never clamped to the real allowance.
+                else -> null
+            }
+            val dbUsage = usage?.usedMillis ?: 0L
+            val usedMillis = systemUsage ?: dbUsage
 
-        val initialSession = ActiveAppUsageSession(
-            packageName = packageName,
-            appName = appName,
-            startedAt = System.currentTimeMillis(),
-            selectedDurationMillis = durationMillis,
-            elapsedMillis = 0L,
-            isEmergency = isEmergency,
-            dailyLimitMinutes = dailyLimitMinutes,
-            initialDailyUsedMillis = systemUsage,
-            isStrict = limit?.isStrictOverride ?: false,
-            isPaused = false,
-            totalPausedMillis = 0L,
-            lastPauseTimestamp = 0L
-        )
-        _activeSession.value = initialSession
+            val dailyLimitMinutes = limit.dailyLimitMinutes
+            val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
+            val dailyRemainingMillis = (dailyLimitMillis - usedMillis).coerceAtLeast(0L)
+            val requestedMillis = durationMinutes * 60 * 1000L
+            val actualDurationMillis = if (isEmergency) {
+                requestedMillis
+            } else {
+                minOf(requestedMillis, dailyRemainingMillis)
+            }
+            if (actualDurationMillis <= 0L) {
+                Log.i(tag, "Not starting a session for $packageName: no daily allowance left")
+                return@withContext null
+            }
+
+            if (systemUsage != null && systemUsage > dbUsage) {
+                try {
+                    appLimitRepository.syncSystemUsage(
+                        packageName = packageName,
+                        appName = limit.appName,
+                        systemUsageMillis = systemUsage,
+                        dateString = todayDate
+                    )
+                } catch (e: Exception) {
+                    Log.w(tag, "Failed to sync usage for $packageName: ${e.message}")
+                }
+            }
+
+            if (packageName == "com.google.android.youtube") {
+                DeviceUsageStatsHelper.logDiagnosticComparison(appContext, packageName)
+            }
+
+            ActiveAppUsageSession(
+                packageName = packageName,
+                appName = limit.appName.ifBlank { appName },
+                startedAt = System.currentTimeMillis(),
+                selectedDurationMillis = actualDurationMillis,
+                elapsedMillis = 0L,
+                isEmergency = isEmergency,
+                dailyLimitMinutes = dailyLimitMinutes,
+                initialDailyUsedMillis = usedMillis,
+                isStrict = limit.isStrictOverride,
+                isPaused = false,
+                totalPausedMillis = 0L,
+                lastPauseTimestamp = 0L
+            )
+        } ?: return false
+
+        // Publish before returning so the caller may reopen the app immediately; there is no
+        // window-change race in which the limit gate could see the app without its session.
+        _activeSession.value = session
         currentForegroundPackage = packageName
         lastForegroundTimestamp = System.currentTimeMillis()
         // A duration was chosen, so any earlier "dismissed by closing the app" suppression for
@@ -570,35 +705,12 @@ class AppLimitManager private constructor(
         reentryGate.clear(packageName)
         persistActiveSession()
         startTicker()
-
-        // 2. Asynchronously sync precise daily usage remaining from database and system stats
-        scope.launch {
-            val todayDate = appLimitRepository.getTodayDateString()
-            val usage = appLimitRepository.getUsage(packageName, todayDate)
-            val dbUsedMillis = usage?.usedMillis ?: 0L
-            // Trust the OS-level usage as source of truth
-            val usedMillis = systemUsage
-
-            if (systemUsage != dbUsedMillis) {
-                appLimitRepository.syncSystemUsage(packageName, appName, systemUsage, todayDate)
-            }
-
-            val dailyRemaining = (dailyLimitMinutes * 60 * 1000L - usedMillis).coerceAtLeast(0L)
-            val actualDuration = if (isEmergency) durationMillis else minOf(durationMillis, dailyRemaining)
-
-            _activeSession.update { current ->
-                if (current != null && current.packageName == packageName) {
-                    current.copy(
-                        selectedDurationMillis = actualDuration,
-                        initialDailyUsedMillis = usedMillis
-                    )
-                } else {
-                    current
-                }
-            }
-            persistActiveSession()
-            Log.i(tag, "Started temporary usage session for $appName: $durationMinutes min ($actualDuration ms, isEmergency=$isEmergency)")
-        }
+        Log.i(
+            tag,
+            "Started temporary usage session for ${session.appName}: $durationMinutes min " +
+                "(${session.selectedDurationMillis} ms, isEmergency=$isEmergency)"
+        )
+        return true
     }
 
     /**
@@ -620,22 +732,33 @@ class AppLimitManager private constructor(
                 // cache entry could grant (or refuse) a pass after the user edited the limit
                 // (issue #49, C4).
                 val limit = appLimitRepository.getLimitByPackage(packageName)
-                val allowedCount = limit?.emergencyUsesAllowed ?: 1
-                if (currentCount >= allowedCount) {
-                    Log.w(tag, "Emergency uses exhausted for $packageName (count: $currentCount, allowed: $allowedCount)")
+                if (limit == null || !limit.isEnabled) {
+                    Log.w(tag, "Not granting an emergency pass for $packageName: its limit is gone")
                     false
                 } else {
-                    // Increment emergency count
-                    appLimitRepository.setEmergencyUsesCount(packageName, todayDate, currentCount + 1)
-
-                    // Start 5-minute session
-                    startTemporarySession(
-                        packageName = packageName,
-                        appName = appName,
-                        durationMinutes = 5,
-                        isEmergency = true
-                    )
-                    true
+                    val allowedCount = limit.emergencyUsesAllowed
+                    if (currentCount >= allowedCount) {
+                        Log.w(tag, "Emergency uses exhausted for $packageName (count: $currentCount, allowed: $allowedCount)")
+                        false
+                    } else {
+                        // Spend the pass first so two simultaneous taps cannot both pass the
+                        // count check, then put it back if the session itself cannot start.
+                        appLimitRepository.setEmergencyUsesCount(packageName, todayDate, currentCount + 1)
+                        val sessionStarted = startTemporarySession(
+                            packageName = packageName,
+                            appName = appName,
+                            durationMinutes = 5,
+                            isEmergency = true
+                        )
+                        if (!sessionStarted) {
+                            runCatching {
+                                appLimitRepository.setEmergencyUsesCount(packageName, todayDate, currentCount)
+                            }.onFailure {
+                                Log.e(tag, "Failed to refund emergency pass for $packageName: ${it.message}")
+                            }
+                        }
+                        sessionStarted
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Failed to start emergency session for $packageName: ${e.message}")
@@ -647,30 +770,41 @@ class AppLimitManager private constructor(
 
     /**
      * Bypasses the limit for the rest of today.
+     *
+     * Suspends until the bypass row is actually written. Callers reopen the limited app right
+     * after this, and the old fire-and-forget version finished the blocker before the write
+     * landed: the accessibility gate could re-evaluate in that window, see no bypass, and raise a
+     * fresh blocker over the app that was just declared allowed. Returns false if the write
+     * failed, so the UI can keep the blocker up instead of silently reopening the app.
      */
-    fun leaveBlockForToday(packageName: String) {
-        scope.launch {
+    suspend fun leaveBlockForToday(packageName: String): Boolean {
+        return try {
             val todayDate = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, todayDate, true)
             reentryGate.clear(packageName)
-            _activeSession.value = null
-            stopTicker()
-            clearPersistedSession()
+            // Only retire the live session if it belongs to this app. Turning off app B for
+            // today while a (paused) session for app A exists must not end A's session.
+            if (_activeSession.value?.packageName == packageName) {
+                _activeSession.value = null
+                stopTicker()
+                clearPersistedSession()
+            }
             Log.i(tag, "App $packageName bypassed for the rest of today")
+            true
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to bypass app $packageName for today: ${e.message}")
+            false
         }
     }
 
     /**
-     * Permanently deletes the app limit configuration.
+     * Permanently deletes the app limit configuration. The repository's delete path already
+     * retires the live session/overlay state through [onLimitDeleted]; this wrapper keeps the
+     * historical entry point for callers that only have a package name.
      */
     fun removeLimitPermanently(packageName: String) {
         scope.launch {
             appLimitRepository.deleteLimit(packageName)
-            enabledLimits = enabledLimits - packageName
-            reentryGate.clear(packageName)
-            _activeSession.value = null
-            stopTicker()
-            clearPersistedSession()
             Log.i(tag, "App limit for $packageName permanently removed")
         }
     }
@@ -811,7 +945,10 @@ class AppLimitManager private constructor(
                 stopTicker()
                 clearPersistedSession()
                 clearOverlayDebounce(session.packageName)
-                if (raiseBlocker) {
+                // A limit that was disabled or deleted while its session ran must not be
+                // resurrected by the failure path either. Ask the cache (which is updated
+                // synchronously by onLimitDisabled/onLimitDeleted) before force-launching.
+                if (raiseBlocker && isPackageLimited(session.packageName)) {
                     launchOverlay(
                         packageName = session.packageName,
                         appName = session.appName,
@@ -837,11 +974,20 @@ class AppLimitManager private constructor(
         // Clear debounce timestamp so the next foreground change re-checks the limit immediately
         clearOverlayDebounce(session.packageName)
 
+        // The limit can be disabled or deleted while its session is running. The session timer
+        // and the persisted snapshot are already gone above; do not force the "time's up"
+        // blocker over the user for a limit they just turned off. The fresh row is the same one
+        // the gate uses, so this decision cannot disagree with it.
+        val limit = appLimitRepository.getLimitByPackage(session.packageName)
+        if (limit == null || !limit.isEnabled) {
+            Log.i(tag, "Session for ${session.appName} expired but its limit is no longer enabled; not raising a blocker")
+            return
+        }
+
         // 1. Pause media immediately (overlay will be displayed directly over the app without minimizing to home first)
         MediaPauseHelper.pauseMedia(appContext)
 
         // 2. Query updated total daily usage from system and database
-        val limit = appLimitRepository.getLimitByPackage(session.packageName)
         val todayDate = appLimitRepository.getTodayDateString()
         val usage = appLimitRepository.getUsage(session.packageName, todayDate)
         val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(appContext, session.packageName)
@@ -853,7 +999,7 @@ class AppLimitManager private constructor(
             else -> dbUsage
         }
 
-        val dailyLimitMinutes = limit?.dailyLimitMinutes ?: 60
+        val dailyLimitMinutes = limit.dailyLimitMinutes
         val dailyLimitMillis = dailyLimitMinutes * 60 * 1000L
 
         // Display minutes floor the *remaining millis* (issue #27, item 6; issue #49, C2): the
@@ -875,12 +1021,12 @@ class AppLimitManager private constructor(
             remainingDailyMinutes = remainingDailyMinutes,
             dailyLimitMinutes = dailyLimitMinutes,
             emergencyUsesCount = usage?.emergencyUsesCount ?: 0,
-            emergencyUsesAllowed = limit?.emergencyUsesAllowed ?: 1,
+            emergencyUsesAllowed = limit.emergencyUsesAllowed,
             // Fresh value from the limit row fetched above, not the flag captured when the
             // session started: strict mode toggled mid-session must take effect at expiry, or a
             // blocker built from the stale session flag silently downgrades to non-strict.
-            isStrict = limit?.isStrictOverride ?: session.isStrict,
-            streakDays = limit?.streakDays ?: 0,
+            isStrict = limit.isStrictOverride,
+            streakDays = limit.streakDays,
             forceLaunch = true
         )
     }
@@ -1352,6 +1498,8 @@ sealed interface AppLimitDecision {
         val packageName: String,
         val appName: String,
         val dailyLimitMinutes: Int,
+        /** Actual usage for today, so the blocker's "Spent today" card is not just the limit. */
+        val usedDailyMillis: Long = dailyLimitMinutes * 60_000L,
         val emergencyUsesCount: Int,
         val emergencyUsesAllowed: Int = 1,
         val isStrict: Boolean,

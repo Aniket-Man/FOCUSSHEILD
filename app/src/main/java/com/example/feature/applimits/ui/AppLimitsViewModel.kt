@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -256,22 +255,15 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
     fun toggleLimit(packageName: String, isEnabled: Boolean) {
         viewModelScope.launch {
             val limit = appLimitRepository.getLimitByPackage(packageName)
-            val todayDate = appLimitRepository.getTodayDateString()
-            val usage = appLimitRepository.getUsage(packageName, todayDate)
-            // Use UsageStatsManager as source of truth for actual usage
-            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(app, packageName)
-            val usedMillis = when (usageResult.status) {
-                com.example.core.util.UsageResult.UsageStatus.VALID -> usageResult.usageMillis
-                else -> (usage?.usedMillis ?: 0L)
-            }
-            val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
-            val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 
-            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
-            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
-
-            if (!isEnabled && isStrict) {
-                _strictLockMessage.value = "Strict Mode Active: ${limit?.appName ?: "App"} limit is locked and cannot be disabled."
+            // Only the per-app strict override locks a limit. `isStrictModeDefault` is the
+            // Focus Session preference (the default for a new study session); it has nothing to
+            // do with app limits, but it used to be OR-ed in here and in the three actions below.
+            // The effect was that enabling that session preference silently froze every app
+            // limit — disable, delete, unlock and reset all refused without any per-app strict
+            // icon in the UI to explain why.
+            if (!isEnabled && limit?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: ${limit.appName} limit is locked and cannot be disabled."
                 return@launch
             }
             appLimitRepository.setLimitEnabled(packageName, isEnabled)
@@ -281,22 +273,9 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
     fun deleteLimit(packageName: String) {
         viewModelScope.launch {
             val limit = appLimitRepository.getLimitByPackage(packageName)
-            val todayDate = appLimitRepository.getTodayDateString()
-            val usage = appLimitRepository.getUsage(packageName, todayDate)
-            // Use UsageStatsManager as source of truth for actual usage
-            val usageResult = DeviceUsageStatsHelper.getTodayAppUsageResult(app, packageName)
-            val usedMillis = when (usageResult.status) {
-                com.example.core.util.UsageResult.UsageStatus.VALID -> usageResult.usageMillis
-                else -> (usage?.usedMillis ?: 0L)
-            }
-            val emergencyUsesCount = usage?.emergencyUsesCount ?: 0
-            val isExhausted = (limit != null && usedMillis >= limit.dailyLimitMinutes * 60000L && emergencyUsesCount >= limit.emergencyUsesAllowed)
 
-            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
-            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
-
-            if (isStrict) {
-                _strictLockMessage.value = "Strict Mode Active: You cannot delete ${limit?.appName ?: "this"} app limit while Strict Mode is active."
+            if (limit?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: You cannot delete ${limit.appName} app limit while Strict Mode is active."
                 return@launch
             }
             appLimitRepository.deleteLimit(packageName)
@@ -307,14 +286,12 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
     fun unlockForToday(packageName: String) {
         viewModelScope.launch {
             val limit = appLimitRepository.getLimitByPackage(packageName)
-            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
-            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
 
             // Strict mode's whole promise is that today's limit cannot be waived from this menu.
             // Without this guard a single tap set isBypassedForToday and the manager honours the
             // bypass unconditionally, silently defeating strict mode.
-            if (isStrict) {
-                _strictLockMessage.value = "Strict Mode Active: ${limit?.appName ?: "App"} cannot be unlocked for today."
+            if (limit?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: ${limit.appName} cannot be unlocked for today."
                 return@launch
             }
             appLimitRepository.setBypassedForToday(packageName, appLimitRepository.getTodayDateString(), true)
@@ -324,13 +301,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
     fun resetTodayUsage(packageName: String) {
         viewModelScope.launch {
             val limit = appLimitRepository.getLimitByPackage(packageName)
-            val isGlobalStrict = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first().isStrictModeDefault
-            val isStrict = limit?.isStrictOverride == true || isGlobalStrict
 
             // Resetting restores the day's allowance (and the emergency passes), which is the
             // same bypass as unlocking under a different name — strict mode blocks it too.
-            if (isStrict) {
-                _strictLockMessage.value = "Strict Mode Active: You cannot reset ${limit?.appName ?: "this"} app's usage while Strict Mode is active."
+            if (limit?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: You cannot reset ${limit.appName} app's usage while Strict Mode is active."
                 return@launch
             }
             val dateStr = appLimitRepository.getTodayDateString()

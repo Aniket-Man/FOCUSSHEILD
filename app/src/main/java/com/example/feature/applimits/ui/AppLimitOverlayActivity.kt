@@ -74,6 +74,19 @@ class AppLimitOverlayActivity : ComponentActivity() {
          */
         fun isVisibleFor(packageName: String): Boolean =
             visibleInstance != null && visiblePackageName == packageName
+
+        /**
+         * Finishes the blocker if it belongs to [packageName]. Used when the limit is disabled or
+         * deleted while its blocker is on screen; otherwise the stale screen would keep blocking
+         * an app that is no longer limited until the user dismissed it manually.
+         */
+        fun dismissIfShowingFor(packageName: String) {
+            val instance = visibleInstance ?: return
+            if (visiblePackageName != packageName) return
+            instance.runOnUiThread {
+                if (visibleInstance === instance) instance.finish()
+            }
+        }
     }
 
     private val overlayParamsState = MutableStateFlow<AppLimitOverlayParams?>(null)
@@ -182,12 +195,36 @@ class AppLimitOverlayActivity : ComponentActivity() {
                         isStrict = data.isStrict,
                         streakDays = data.streakDays,
                         onSelectDuration = { durationMinutes ->
-                            AppLimitManager.instance.startTemporarySession(
-                                packageName = data.packageName,
-                                appName = data.appName,
-                                durationMinutes = durationMinutes
-                            )
-                            openLimitedAppAndFinish(data.packageName)
+                            lifecycleScope.launch {
+                                // Await the session before reopening the app. Hiding this blocker
+                                // first and starting the session in a detached coroutine left a
+                                // window in which the app was foreground with no session and no
+                                // blocker; it also reopened the app even when the limit had been
+                                // disabled or the allowance had changed underneath the prompt.
+                                val started = try {
+                                    AppLimitManager.instance.startTemporarySession(
+                                        packageName = data.packageName,
+                                        appName = data.appName,
+                                        durationMinutes = durationMinutes
+                                    )
+                                } catch (e: Exception) {
+                                    android.util.Log.e(
+                                        "AppLimitOverlay",
+                                        "Failed to start ${durationMinutes}m session for ${data.packageName}",
+                                        e
+                                    )
+                                    false
+                                }
+                                if (started) {
+                                    openLimitedAppAndFinish(data.packageName)
+                                } else {
+                                    Toast.makeText(
+                                        applicationContext,
+                                        "This limit changed. Close ${data.appName} or reopen it to try again.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
                         },
                         onUseEmergency = {
                             // Only step aside once the pass has actually been spent. An emergency
@@ -228,9 +265,31 @@ class AppLimitOverlayActivity : ComponentActivity() {
                             }
                         },
                         onTurnOffAndResetStreak = {
-                            AppLimitStrictModeEngine.instance.onUserQuitLimit(data.packageName)
-                            AppLimitManager.instance.leaveBlockForToday(data.packageName)
-                            openLimitedAppAndFinish(data.packageName)
+                            lifecycleScope.launch {
+                                // The bypass row must exist before the blocker steps aside and
+                                // the app is reopened. Firing this write into a detached scope
+                                // let the gate re-evaluate first and block the app again.
+                                val bypassed = try {
+                                    AppLimitManager.instance.leaveBlockForToday(data.packageName)
+                                } catch (e: Exception) {
+                                    android.util.Log.e(
+                                        "AppLimitOverlay",
+                                        "Failed to turn off limit for ${data.packageName}",
+                                        e
+                                    )
+                                    false
+                                }
+                                if (bypassed) {
+                                    AppLimitStrictModeEngine.instance.onUserQuitLimit(data.packageName)
+                                    openLimitedAppAndFinish(data.packageName)
+                                } else {
+                                    Toast.makeText(
+                                        applicationContext,
+                                        "Couldn't turn off ${data.appName}'s limit. Please try again.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
                         },
                         onGoToHome = { goHomeAndFinish(data.packageName) }
                     )
