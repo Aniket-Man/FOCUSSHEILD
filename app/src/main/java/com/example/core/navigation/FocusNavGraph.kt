@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,8 +83,67 @@ fun FocusNavGraph(
     updateViewModel: UpdateViewModel? = null
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val resolvedUpdateVm: UpdateViewModel = updateViewModel ?: hiltViewModel()
+    val updateState by resolvedUpdateVm.state.collectAsStateWithLifecycle()
+    val showUpdateDot by resolvedUpdateVm.showDot.collectAsStateWithLifecycle()
+    val completedUpdate by resolvedUpdateVm.completedUpdate.collectAsStateWithLifecycle()
 
-    // UpdateAvailableDialog popup disabled - no update pushing to user
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // App-wide installer launcher so "Install & Restart" works directly from the push modal or
+    // the Home banner as well as the dedicated UpdateScreen.
+    var pendingModalInstall by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<android.content.Intent?>(null)
+    }
+    val modalInstallLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        resolvedUpdateVm.cancelInstall()
+    }
+    val modalUnknownSourcesLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        val intent = pendingModalInstall
+        pendingModalInstall = null
+        if (intent != null && resolvedUpdateVm.canInstallPackages()) {
+            try {
+                modalInstallLauncher.launch(intent)
+            } catch (_: Exception) {
+                resolvedUpdateVm.cancelInstall()
+            }
+        } else {
+            resolvedUpdateVm.cancelInstall()
+        }
+    }
+
+    val triggerDirectInstall: () -> Unit = {
+        val intent = resolvedUpdateVm.createInstallIntent()
+        if (intent != null) {
+            resolvedUpdateVm.beginInstall()
+            if (resolvedUpdateVm.canInstallPackages()) {
+                try {
+                    modalInstallLauncher.launch(intent)
+                } catch (_: Exception) {
+                    resolvedUpdateVm.cancelInstall()
+                }
+            } else {
+                pendingModalInstall = intent
+                try {
+                    modalUnknownSourcesLauncher.launch(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:${context.packageName}")
+                        )
+                    )
+                } catch (_: Exception) {
+                    pendingModalInstall = null
+                    resolvedUpdateVm.cancelInstall()
+                }
+            }
+        } else {
+            navController.navigate(Screen.Update.route) { launchSingleTop = true }
+        }
+    }
 
     // Root-redirect gate (issue #18): every launch intent below must wait until the
     // splash→Home/Onboarding redirect has run. Two independent LaunchedEffects racing the
@@ -92,6 +152,32 @@ fun FocusNavGraph(
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val isSplashRoute = currentRoute == null || currentRoute == Screen.Splash.route
+
+    // Show the interactive Update Push Modal (Available → Inline Downloading → Ready to Install & Restart)
+    // whenever not on the Splash or Update screen.
+    if (!isSplashRoute && currentRoute != Screen.Update.route) {
+        com.example.feature.update.ui.UpdatePushModal(
+            state = updateState,
+            installedVersion = resolvedUpdateVm.installedVersionName,
+            onDownload = { resolvedUpdateVm.download() },
+            onLater = { resolvedUpdateVm.onLater() },
+            onHideModal = { resolvedUpdateVm.hideDownloadModal() },
+            onCancelDownload = { resolvedUpdateVm.cancelDownload() },
+            onInstallAndRestart = triggerDirectInstall,
+            onOpenDetails = {
+                navController.navigate(Screen.Update.route) { launchSingleTop = true }
+            }
+        )
+    }
+
+    // Post-restart "What's New" dialog once the newly installed update boots for the first time
+    val justUpdatedInfo = completedUpdate
+    if (!isSplashRoute && justUpdatedInfo != null) {
+        com.example.feature.update.ui.WhatsNewDialog(
+            info = justUpdatedInfo,
+            onDismiss = { resolvedUpdateVm.dismissCompletedUpdate() }
+        )
+    }
 
     // Automatically navigate to the session page when launched from a Study Plan notification.
     // Queued while Splash is visible; consumed on the first recomposition after the root
@@ -135,7 +221,6 @@ fun FocusNavGraph(
         onOpenUpdatesHandled()
     }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
     val permissionStatus = androidx.compose.runtime.remember { FocusPermissionManager.getPermissionStatus(context) }
     val corePermissionsGranted = permissionStatus.isAccessibilityEnabled &&
             permissionStatus.isUsageAccessGranted &&
@@ -191,7 +276,17 @@ fun FocusNavGraph(
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
-                showUpdateDot = false,
+                showUpdateDot = showUpdateDot,
+                updateState = updateState,
+                onUpdateBannerAction = {
+                    when (updateState) {
+                        is UpdateState.Downloaded -> triggerDirectInstall()
+                        is UpdateState.Downloading, is UpdateState.UpdateAvailable -> {
+                            resolvedUpdateVm.showModalPrompt()
+                        }
+                        else -> navController.navigate(Screen.Update.route)
+                    }
+                },
                 onStartPlanSession = { planItem ->
                     sessionViewModel.configureForStudyPlan(
                         subjectName = planItem.subject,

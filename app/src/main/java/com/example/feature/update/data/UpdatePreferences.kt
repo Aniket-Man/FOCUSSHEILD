@@ -53,8 +53,26 @@ data class UpdatePrefs(
      * The last offer, serialized, so the update screen can render the release notes and version
      * correctly after a process death instead of coming back empty (prompt.txt §13).
      */
-    val latestInfoJson: String? = null
-)
+    val latestInfoJson: String? = null,
+    /** HTTP ETag from the most recent release feed response for conditional 304 checks. */
+    val etag: String? = null,
+    /** Installed version string recorded on the previous launch to detect post-update restarts. */
+    val lastInstalledVersion: String? = null,
+    /** Serialized UpdateInfo of the release that was just installed, used for the post-restart What's New dialog. */
+    val pendingInstallInfoJson: String? = null,
+    /** User-pasted external Firebase connection config JSON (overrides or supplements .env). */
+    val externalFirebaseConfigJson: String? = null,
+    /** Cached JSON array of past releases from the external Firebase update server. */
+    val releaseHistoryJson: String? = null
+) {
+    /**
+     * Resolves the active external Firebase update configuration: prefers an in-app pasted token
+     * stored in preferences, then falls back to `BuildConfig` (`.env` / Secrets).
+     */
+    fun activeExternalFirebaseConfig(): ExternalFirebaseUpdateConfig? =
+        ExternalFirebaseUpdateConfig.fromStoredJson(externalFirebaseConfigJson)
+            ?: ExternalFirebaseUpdateConfig.fromBuildConfig()
+}
 
 class UpdatePreferences internal constructor(
     private val dataStore: DataStore<Preferences>,
@@ -73,6 +91,11 @@ class UpdatePreferences internal constructor(
         val LAST_CHECK_FAILED = booleanPreferencesKey("last_check_failed")
         val READ_VERSION = stringPreferencesKey("read_version")
         val LATEST_INFO_JSON = stringPreferencesKey("latest_info_json")
+        val ETAG = stringPreferencesKey("etag")
+        val LAST_INSTALLED_VERSION = stringPreferencesKey("last_installed_version")
+        val PENDING_INSTALL_INFO_JSON = stringPreferencesKey("pending_install_info_json")
+        val EXTERNAL_FIREBASE_CONFIG_JSON = stringPreferencesKey("external_firebase_config_json")
+        val RELEASE_HISTORY_JSON = stringPreferencesKey("release_history_json")
     }
 
     val flow: Flow<UpdatePrefs> = dataStore.data
@@ -87,7 +110,12 @@ class UpdatePreferences internal constructor(
                 downloadedPath = prefs[Keys.DOWNLOADED_PATH],
                 lastCheckFailed = prefs[Keys.LAST_CHECK_FAILED] ?: false,
                 readVersion = prefs[Keys.READ_VERSION],
-                latestInfoJson = prefs[Keys.LATEST_INFO_JSON]
+                latestInfoJson = prefs[Keys.LATEST_INFO_JSON],
+                etag = prefs[Keys.ETAG],
+                lastInstalledVersion = prefs[Keys.LAST_INSTALLED_VERSION],
+                pendingInstallInfoJson = prefs[Keys.PENDING_INSTALL_INFO_JSON],
+                externalFirebaseConfigJson = prefs[Keys.EXTERNAL_FIREBASE_CONFIG_JSON],
+                releaseHistoryJson = prefs[Keys.RELEASE_HISTORY_JSON]
             )
         }
 
@@ -107,6 +135,46 @@ class UpdatePreferences internal constructor(
             prefs[Keys.LAST_CHECK_TIME] = at
             prefs[Keys.LAST_CHECK_FAILED] = failed
             if (latestVersion != null) prefs[Keys.LATEST_KNOWN_VERSION] = latestVersion
+        }
+    }
+
+    suspend fun setEtag(etag: String?) {
+        dataStore.edit { prefs ->
+            if (etag.isNullOrBlank()) prefs.remove(Keys.ETAG) else prefs[Keys.ETAG] = etag
+        }
+    }
+
+    suspend fun setLastInstalledVersion(version: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LAST_INSTALLED_VERSION] = version
+        }
+    }
+
+    suspend fun setPendingInstallInfoJson(json: String?) {
+        dataStore.edit { prefs ->
+            if (json == null) prefs.remove(Keys.PENDING_INSTALL_INFO_JSON) else prefs[Keys.PENDING_INSTALL_INFO_JSON] = json
+        }
+    }
+
+    suspend fun setExternalFirebaseConfigJson(json: String?) {
+        dataStore.edit { prefs ->
+            if (json.isNullOrBlank()) {
+                prefs.remove(Keys.EXTERNAL_FIREBASE_CONFIG_JSON)
+            } else {
+                prefs[Keys.EXTERNAL_FIREBASE_CONFIG_JSON] = json
+            }
+            prefs.remove(Keys.ETAG)
+            prefs[Keys.LAST_CHECK_TIME] = 0L
+        }
+    }
+
+    suspend fun setReleaseHistoryJson(json: String?) {
+        dataStore.edit { prefs ->
+            if (json.isNullOrBlank()) {
+                prefs.remove(Keys.RELEASE_HISTORY_JSON)
+            } else {
+                prefs[Keys.RELEASE_HISTORY_JSON] = json
+            }
         }
     }
 
@@ -178,6 +246,7 @@ class UpdatePreferences internal constructor(
             prefs.remove(Keys.DOWNLOADED_VERSION)
             prefs.remove(Keys.DOWNLOADED_PATH)
             prefs.remove(Keys.LATEST_INFO_JSON)
+            prefs.remove(Keys.ETAG)
             prefs[Keys.LAST_CHECK_TIME] = 0L
         }
     }

@@ -61,6 +61,19 @@ object UpdateNotificationHelper {
             NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
 
+    private fun createOpenUpdatesPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_UPDATES, true)
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        return PendingIntent.getActivity(context, NOTIF_ID_UPDATE, intent, flags)
+    }
+
     /**
      * Posts the "update available" notification for [versionName].
      *
@@ -69,8 +82,58 @@ object UpdateNotificationHelper {
      * repeat would replace rather than stack anyway.
      */
     fun notifyUpdateAvailable(context: Context, versionName: String) {
-        // Disabled: GitHub update push notifications are removed.
-        clear(context)
+        initialize(context)
+        if (!hasNotificationPermission(context)) return
+
+        val pendingIntent = createOpenUpdatesPendingIntent(context)
+        val title = "FocusShield v$versionName Available"
+        val body = "A new update is ready to download from GitHub Releases. Tap to see what's new and update."
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_UPDATES)
+            .setSmallIcon(R.drawable.ic_focus_notification)
+            .setColor(0xFF6E18E6.toInt())
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_UPDATE, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /**
+     * Posts the "update downloaded — tap to install and restart" notification for [versionName].
+     */
+    fun notifyUpdateDownloaded(context: Context, versionName: String) {
+        initialize(context)
+        if (!hasNotificationPermission(context)) return
+
+        val pendingIntent = createOpenUpdatesPendingIntent(context)
+        val title = "Update Ready — Restart to Apply (v$versionName)"
+        val body = "FocusShield v$versionName finished downloading. Tap to install and restart the app."
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_UPDATES)
+            .setSmallIcon(R.drawable.ic_focus_notification)
+            .setColor(0xFF10B981.toInt())
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_UPDATE, notification)
+        } catch (_: SecurityException) {
+        }
     }
 
     /** Removes the announcement once the update has been installed or marked read (prompt.txt §7). */

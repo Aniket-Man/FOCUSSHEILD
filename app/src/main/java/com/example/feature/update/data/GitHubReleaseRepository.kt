@@ -46,27 +46,49 @@ class GitHubReleaseRepository(
     private val client: OkHttpClient = defaultClient()
 ) : UpdateRepository {
 
-    override suspend fun fetchLatestRelease(): UpdateInfo? = withContext(Dispatchers.IO) {
-        val url = buildUrl()
-        val request = Request.Builder()
-            .url(url)
-            .header("Accept", "application/json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            // GitHub rejects requests without a User-Agent.
-            .header("User-Agent", "FocusShield-Android")
-            .get()
-            .build()
+    override suspend fun fetchLatestRelease(): UpdateInfo? =
+        fetchLatestReleaseConditional(etag = null).info
 
-        val response = try {
-            client.newCall(request).execute()
-        } catch (e: IOException) {
-            throw UpdateSourceUnavailableException(
-                "Couldn't reach the update server. Check your connection and try again."
-            )
+    override suspend fun fetchLatestReleaseConditional(etag: String?): ReleaseFetchResponse =
+        withContext(Dispatchers.IO) {
+            val url = buildUrl()
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                // GitHub rejects requests without a User-Agent.
+                .header("User-Agent", "FocusShield-Android")
+                .get()
+
+            if (!etag.isNullOrBlank()) {
+                requestBuilder.header("If-None-Match", etag)
+            }
+
+            val response = try {
+                client.newCall(requestBuilder.build()).execute()
+            } catch (e: IOException) {
+                throw UpdateSourceUnavailableException(
+                    "Couldn't reach the update server. Check your connection and try again."
+                )
+            }
+
+            response.use { resp ->
+                val responseEtag = resp.header("ETag")?.takeIf { it.isNotBlank() } ?: etag
+                if (resp.code == 304) {
+                    ReleaseFetchResponse(
+                        info = null,
+                        etag = responseEtag,
+                        notModified = true
+                    )
+                } else {
+                    ReleaseFetchResponse(
+                        info = resp.toResult(),
+                        etag = responseEtag,
+                        notModified = false
+                    )
+                }
+            }
         }
-
-        response.use { it.toResult() }
-    }
 
     /** The URL actually requested: the configured feed, or the GitHub API for [repoSlug]. */
     internal fun buildUrl(): String {

@@ -44,10 +44,12 @@ class UpdateDownloadManager(
     private val context: Context,
     private val client: OkHttpClient = defaultClient(),
     /**
-     * Hosts beyond GitHub's own that may serve the APK for this build — the configured feed's host.
-     * See [com.example.feature.update.data.GitHubReleaseRepository.apkHostAllowList].
+     * Hosts beyond GitHub's own that may serve the APK for this build — the configured feed's host
+     * or external Firebase Storage hosts.
      */
-    private val allowedHosts: Set<String> = emptySet()
+    private val allowedHosts: Set<String> = emptySet(),
+    private val allowedHostsProvider: () -> Set<String> = { allowedHosts },
+    private val chunkedDownloader: (suspend (String, File, (DownloadProgress) -> Unit) -> Unit)? = null
 ) {
 
     /**
@@ -67,13 +69,14 @@ class UpdateDownloadManager(
             ?: throw UpdateDownloadException(
                 "Update is available, but the APK is not available for download yet."
             )
-        if (!url.endsWith(".apk", ignoreCase = true)) {
+        if (!UpdateUrlPolicy.isApkResource(url, info.apkAssetName)) {
             throw UpdateDownloadException("The update link does not point to an APK file.")
         }
+        val effectiveAllowedHosts = allowedHosts + allowedHostsProvider()
         // Second, independent URL check: https only, on a host this build trusts (see the class
         // doc). The parser filtered this URL when the offer was created; repeating the check here
         // means a tampered/persisted offer can never redirect the bytes.
-        if (!UpdateUrlPolicy.isAllowedApkUrl(url, allowedHosts)) {
+        if (!UpdateUrlPolicy.isAllowedApkUrl(url, effectiveAllowedHosts)) {
             throw UpdateDownloadException("The update link is not from a trusted update source.")
         }
 
@@ -83,6 +86,29 @@ class UpdateDownloadManager(
 
         val target = File(dir, safeFileName(info))
         val partial = File(dir, "${target.name}.part")
+
+        if (UpdateUrlPolicy.isFirebaseChunkedUri(url)) {
+            val downloader = chunkedDownloader
+                ?: throw UpdateDownloadException("Chunked Firebase APK downloader is not available.")
+            try {
+                onProgress(DownloadProgress(percent = 0))
+                downloader(url, partial, onProgress)
+                if (!partial.exists() || partial.length() == 0L) {
+                    throw UpdateDownloadException("Download failed: the file is empty.")
+                }
+                if (target.exists()) target.delete()
+                if (!partial.renameTo(target)) {
+                    throw UpdateDownloadException("Couldn't save the downloaded update.")
+                }
+            } catch (e: Throwable) {
+                partial.delete()
+                throw e
+            }
+            validateApk(target)
+            onProgress(DownloadProgress(percent = 100, bytesReceived = target.length(), totalBytes = target.length()))
+            cleanUpObsolete(dir, keepName = target.name)
+            return@withContext target
+        }
 
         val request = Request.Builder()
             .url(url)

@@ -107,17 +107,32 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val updateRepository by lazy {
         com.example.feature.update.data.GitHubReleaseRepository.fromConfig()
     }
+    val compositeUpdateRepository by lazy {
+        com.example.feature.update.data.CompositeUpdateRepository(
+            gitHubRepository = updateRepository,
+            runtimeConfigProvider = { updateManagerExternalConfigSnapshot }
+        )
+    }
+
+    @Volatile
+    private var updateManagerExternalConfigSnapshot: com.example.feature.update.data.ExternalFirebaseUpdateConfig? =
+        com.example.feature.update.data.ExternalFirebaseUpdateConfig.fromBuildConfig()
+
     val updateDownloadManager by lazy {
         com.example.feature.update.data.UpdateDownloadManager(
             this,
-            allowedHosts = updateRepository.apkHostAllowList()
+            allowedHosts = updateRepository.apkHostAllowList(),
+            allowedHostsProvider = { compositeUpdateRepository.apkHostAllowList() },
+            chunkedDownloader = { uri, partialFile, onProgress ->
+                compositeUpdateRepository.downloadChunkedApk(uri, partialFile, onProgress)
+            }
         )
     }
     val updateManager by lazy {
         com.example.feature.update.engine.UpdateManager(
             context = this,
             checker = com.example.feature.update.data.UpdateChecker(
-                repository = updateRepository,
+                repository = compositeUpdateRepository,
                 preferences = updatePreferences,
                 installedVersionName = BuildConfig.VERSION_NAME,
                 installedVersionCode = BuildConfig.VERSION_CODE,
@@ -127,7 +142,8 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             downloadManager = updateDownloadManager,
             scope = applicationScope,
             installedVersionName = BuildConfig.VERSION_NAME,
-            installedVersionCode = BuildConfig.VERSION_CODE
+            installedVersionCode = BuildConfig.VERSION_CODE,
+            compositeRepository = compositeUpdateRepository
         )
     }
 
@@ -307,16 +323,41 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Initialize Block Protection (always-on tamper guard during active sessions)
         com.example.feature.blocker.protection.BlockProtectionManager.initialize()
 
-        // Initialize session and protection notification channels
+        // Initialize session, protection, and update notification channels
         com.example.feature.session.notification.SessionNotificationHelper.initialize(this)
         com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this)
+        com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
 
-        // Update checker background tasks and push notifications are disabled
+        // Restore cached update state (including post-update What's New detection) and schedule
+        // continuous 15-minute background checks + immediate launch check.
+        applicationScope.launch {
+            updateManager.externalFirebaseConfig.collect { cfg ->
+                updateManagerExternalConfigSnapshot = cfg
+            }
+        }
+        applicationScope.launch {
+            try {
+                updateManagerExternalConfigSnapshot = updatePreferences.current().activeExternalFirebaseConfig()
+                updateManager.restore().join()
+                updateManagerExternalConfigSnapshot = updateManager.externalFirebaseConfig.value
+                updateManager.checkInBackground(forceForeground = true)
+            } catch (e: Exception) {
+                android.util.Log.w("FocusShieldApp", "Update check startup error: ${e.message}")
+            }
+        }
         try {
-            com.example.feature.update.work.UpdateCheckScheduler.cancel(this)
+            com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
         } catch (_: Throwable) {
         }
-        com.example.feature.update.notification.UpdateNotificationHelper.clear(this)
+
+        // Re-check automatically when connectivity returns
+        applicationScope.launch {
+            connectivityMonitor.isOnline.collect { online ->
+                if (online) {
+                    updateManager.checkInBackground(forceForeground = false)
+                }
+            }
+        }
 
         // Restore any active session from disk that was running prior to process restart
         try {

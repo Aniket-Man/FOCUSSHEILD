@@ -57,34 +57,50 @@ class UpdateCheckWorker(
  */
 object UpdateCheckScheduler {
 
-    private const val UNIQUE_WORK_NAME = "focusshield_update_check_v2"
+    private const val UNIQUE_WORK_NAME = "focusshield_update_check_v3"
+    private const val LEGACY_UNIQUE_WORK_NAME_V2 = "focusshield_update_check_v2"
+    private const val LEGACY_UNIQUE_WORK_NAME_V1 = "focusshield_update_check"
 
-    /**
-     * The original 6-hour request, cancelled on every schedule() so existing installs pick up the
-     * new cadence: [ExistingPeriodicWorkPolicy.KEEP] never rewrites an already-enqueued request's
-     * period, which would leave the old, too-short schedule in force forever after an app update.
-     */
-    private const val LEGACY_UNIQUE_WORK_NAME = "focusshield_update_check"
-
-    /**
-     * Deliberately *longer* than
-     * [com.example.feature.update.data.UpdateChecker.AUTO_CHECK_INTERVAL] (6h): the cooldown now
-     * starts when a check's request goes out, and WorkManager's timing is inexact — a period equal
-     * to the cooldown lets a run land just inside the still-open window and be skipped, repeating
-     * every other run and halving the real cadence (issue #26). At 7h every run is due.
-     */
-    private const val PERIOD_HOURS = 7L
+    /** Continuous 15-minute background cadence (WorkManager's minimum periodic interval). */
+    private const val PERIOD_MINUTES = 15L
 
     /** Idempotent, so it is safe to call on every process start. */
     fun schedule(context: Context) {
-        cancel(context)
+        try {
+            val workManager = WorkManager.getInstance(context)
+            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME_V1)
+            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME_V2)
+
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(
+                PERIOD_MINUTES,
+                TimeUnit.MINUTES
+            )
+                .setConstraints(constraints)
+                .build()
+
+            workManager.enqueueUniquePeriodicWork(
+                UNIQUE_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request
+            )
+        } catch (e: Throwable) {
+            android.util.Log.w(
+                "UpdateCheckScheduler",
+                "WorkManager unavailable or not initialized: ${e.message}"
+            )
+        }
     }
 
-    /** Cancels any background update check worker so updates are not checked or pushed periodically. */
+    /** Cancels any background update check worker. */
     fun cancel(context: Context) {
         try {
             val workManager = WorkManager.getInstance(context)
-            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME)
+            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME_V1)
+            workManager.cancelUniqueWork(LEGACY_UNIQUE_WORK_NAME_V2)
             workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
         } catch (e: Throwable) {
             android.util.Log.w("UpdateCheckScheduler", "WorkManager unavailable or not initialized: ${e.message}")

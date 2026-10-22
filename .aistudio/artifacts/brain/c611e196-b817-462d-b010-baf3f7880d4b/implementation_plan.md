@@ -1,54 +1,213 @@
-# Implementation Plan - Editable Session Tags & Removal of Preloaded Tags
+# External Firebase Release Push & Token Update System
 
-Remove hardcoded/preloaded session tags (`"Physics"`, `"Electrostatics"`, `"Solve 20 JEE Advanced problems"`), add custom Subject tag chips (with add, edit, and delete support) plus a Topic input in the Session Setup sheet, hide the tags section on the Active Session screen when none are selected, and save the chosen Subject and Topic to Session Summary and Session History.
+Replace the GitHub-only update feed with a **secondary external Firebase Update & Token System** inside the FocusShield Android app, paired with a complete, copy-pasteable **AI Studio Build Prompt** to create the companion **Firebase Release Management Website** in another chat.
 
-## User Requirements
-1. **Remove Preloaded Tags:**
-   - Remove the preloaded defaults (`"Physics"`, `"Electrostatics"`, `"Solve 20 JEE Advanced problems"`) so starting a session without selecting a tag does not display fake preloaded subjects/topics.
-   - Stop auto-seeding default subjects (`Physics`, `Chemistry`, `Mathematics`, `Biology`) and remove any untouched preloaded default subject rows so the user starts with a clean slate for their own tags.
-2. **Custom Editable Tags & Topic Input in Session Setup Sheet:**
-   - In `FocusSessionSetupSheet` (before starting a session), add a **Subject Tag & Topic** section:
-     - **Subject Tag Chips:** Display user-created tags as interactive chips, with a `+ Add Tag` chip to create a new tag, and an edit/delete option (via a long-press or edit icon / dialog) to rename or delete any tag. Tapping a selected tag chip deselects it.
-     - **Topic Input:** A clean text field allowing the user to type the specific topic for the session when a tag is selected or independently.
-3. **Active Session Screen Behavior:**
-   - If the user starts a session without selecting a Subject tag or entering a Topic, completely hide the Subject pill and Topic text on `ActiveSessionScreen`.
-   - Only render the Subject pill when `subject.isNotBlank()` and only render the Topic heading when `topic.isNotBlank()`.
-4. **Save with Session Summary & Session History:**
-   - Pass the user's selected Subject tag and Topic into the active session, display them on `FocusSessionSummaryScreen`, and save them into `SessionRecordEntity` so they appear in `SessionsHistoryScreen` (both in the history list cards and the session detail sheet).
+---
 
-## Proposed Changes
+## User Review & Critical Decisions
 
-### 1. Data & Repository Layer (`com.example.data`)
-- **`SubjectDao.kt` & `SubjectRepository.kt`**:
-  - Add `deleteSubject(id: String)` and `renameSubject(id: String, newName: String)` methods to `SubjectDao` and `SubjectRepository` (including Cloud Sync outbox updates).
-  - Remove preloaded subject/topic seeding in `initializeDefaultSubjectsIfEmpty()` and add a one-time cleanup helper to remove the legacy seeded IDs (`"physics"`, `"chemistry"`, `"mathematics"`, `"biology"`) if they were auto-seeded.
-- **`FocusPreferencesRepository.kt`**:
-  - Change `defaultSubject` and `defaultTopic` defaults from `"Physics"` and `"Electrostatics"` to `""` (empty string).
+> [!IMPORTANT]
+> Review the confirmed architecture below and the **Companion Website Prompt** in Section 5. Click **Proceed** when you are ready for us to implement the external Firebase update & token engine inside this Android app.
 
-### 2. ViewModel & Domain State (`com.example.feature.session`)
-- **`SessionViewModel.kt` & `FocusSession.kt`**:
-  - Change default `selectedSubject`, `selectedTopic`, and `sessionGoal` in `SessionSetupState` and `ActiveSessionUiState` from `"Physics"`, `"Electrostatics"`, and `"Solve 20 JEE Advanced problems"` to `""`.
-  - Expose `customSubjects: StateFlow<List<SubjectEntity>>` from `SubjectRepository` in `SessionViewModel`.
-  - Add ViewModel actions: `addCustomSubjectTag(name: String)`, `updateCustomSubjectTag(subject: SubjectEntity, newName: String)`, `deleteCustomSubjectTag(subject: SubjectEntity)`, `selectSubjectTag(name: String)` (toggles selection), and `setTopic(topic: String)`.
-- **`HomeViewModel.kt`**:
-  - Remove `"Physics"` / `"Electrostatics"` fallback strings when mapping active session state.
+- **Confirmed Decision 1 — Dual Credential & Token Provisioning**: The Android app will read external Firebase update credentials from both the AI Studio Secrets panel (`.env` / `BuildConfig`) **and** an in-app **Update Server Token / Config** dialog on the Updates screen, where you can paste a single Connection Token copied from your Release Website.
+- **Confirmed Decision 2 — Auto-Parsed APK + Structured Release Notes**: The companion Release Website will automatically parse uploaded `.apk` files in the browser to extract `versionName`, `versionCode`, `packageName`, and file size, while providing structured boxes for **What Changed**, **What Improved**, and **Fixes / Notes** that render cleanly in the Android app's update popup and post-restart **What's New** dialog.
+- **Confirmed Decision 3 — Hybrid Firebase Storage + Firestore Chunk Fallback**: The Release Website and Android app will support **Firebase Cloud Storage** as the primary APK host (with real-time bucket capacity and quota meters) plus **Firestore Chunked Binary Storage** as an automatic fallback, so APK uploads and downloads succeed even if Cloud Storage is not enabled on the external Firebase project.
 
-### 3. UI Layer (`com.example.feature.session` & `com.example.feature.history`)
-- **`FocusSessionSetupSheet.kt`**:
-  - Add a **Session Tag & Topic** card above the Core Session Settings card:
-    - Horizontal/flow row of user-created Subject tag chips + `+ Add Tag` chip.
-    - Edit/Delete dialog when the user taps the edit icon on a selected tag chip (or long-presses a chip) to rename or remove it.
-    - `OutlinedTextField` for entering the **Topic** (e.g., chapter, task, or focus topic).
-- **`ActiveSessionScreen.kt`**:
-  - Conditionally render the Subject pill only when `uiState.subject.isNotBlank()`.
-  - Conditionally render the Topic headline only when `uiState.topic.isNotBlank()`.
-  - If no Subject, Topic, or status pills are active, hide the empty header spacing cleanly.
-- **`FocusSessionSummaryScreen.kt` & `SessionsHistoryScreen.kt`**:
-  - Show the user's Subject tag and Topic in the Summary card and History cards; if a session was recorded without a Subject/Topic, hide the empty row or display a clean fallback label (`"General Focus"` only on the history card title when `subject.isBlank()`) so cards remain visually balanced.
+---
 
-## Verification Plan
-- **Compilation & Unit Tests:**
-  - Run `compile_applet` and unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.session.*"`).
-- **Functional Verification:**
-  - Open the Session Setup sheet, verify no preloaded `"Physics"` or `"Electrostatics"` tags are selected, add/edit/delete custom Subject tags, enter a Topic, start the session, and verify they appear on the Active Session screen and save to Session History.
-  - Start a session with no Subject or Topic selected and verify the tags area is completely hidden on the Active Session screen.
+## 1. Overview & Core Concept
+
+- **What It Does**:
+  1. Connects FocusShield's update engine to a **dedicated external Firebase project** (separate from the app's primary user database) using either `.env` secrets or a pasteable Connection Token generated by the Release Website.
+  2. Continuously monitors for new releases (on app launch, on resume, every 15 minutes via background work, and on manual check), triggers a system notification, displays the in-app **Update Available** modal with live byte progress and a persistent Home banner if skipped, and shows the **What's New** summary dialog after the new APK is installed and the app restarts.
+  3. Displays the full **Past Releases History** and connection status inside the Android app's Updates screen.
+  4. Provides a turnkey prompt you can paste into another AI Studio chat to build and provision the **FocusShield Firebase Release Admin Portal** (featuring past release management, 1-click release deletion, laptop storage gauge, Firebase Storage / Firestore quota gauge, APK auto-parser, and Android Connection Token generator).
+- **Target Audience / Persona**:
+  - **Admin (You)** publishing FocusShield APK builds from a laptop browser, inspecting laptop & Firebase storage health, managing release history, and copying the connection token into the app.
+  - **End Users** receiving seamless OTA update notifications, in-app update dialogs, verified APK downloads, and post-update release notes.
+- **Key Value**: Full control over APK distribution and release notes through your own external Firebase project without relying on public GitHub releases or writing SQL schemas.
+
+---
+
+## 2. User Experience & Visual Design
+
+### Key User Flows (Android App)
+1. **Connecting the External Firebase Update Server**:
+   - If `.env` secrets (`UPDATE_FIREBASE_PROJECT_ID`, `UPDATE_FIREBASE_API_KEY`, `UPDATE_FIREBASE_STORAGE_BUCKET`, `UPDATE_CHANNEL_TOKEN`) are set in AI Studio, the app connects automatically on startup.
+   - Alternatively, from **Profile → New Updates → Update Server Token**, you can paste the single **FocusShield Connection Token** (or JSON config) copied from the Admin Website. The app validates the token, saves it locally, and immediately checks the external Firebase project for updates.
+2. **Automatic & Background Update Discovery**:
+   - On launch, foreground resume, connectivity restore, and every 15 minutes in the background, FocusShield queries the external Firebase `releases` collection (falling back to GitHub/custom feed only if unconfigured).
+   - When a release has a higher `versionCode` or `versionName` than the installed build, a system notification fires and the **Update Available** modal opens with structured **What Changed / What Improved** notes.
+3. **Inline Download, Home Banner & Verified Install**:
+   - Tapping **Update Now** streams the APK (from Firebase Storage HTTPS or Firestore binary chunks) with real byte-by-byte progress, verifies the ZIP header and FocusShield package name (`com.aistudio.focusshield.krtjfp`), and launches the Android system package installer.
+   - Tapping **Later** hides the modal and pins the non-intrusive **Home Update Banner** and Profile notification dot.
+4. **Post-Update Restart & "What's New" Dialog + Release History**:
+   - On first launch after installing the new APK, FocusShield detects the version upgrade and presents the **What's New in vX.Y.Z** dialog showing the exact changes and improvements entered on the website.
+   - Inside **Profile → New Updates**, users can also browse the **Past Releases History** fetched from the external Firebase project.
+
+### Visual Identity & Theme
+- **Aesthetic Direction**: High-craft dark-first security & productivity UI matching FocusShield's existing Material 3 theme, using crisp status badges, tonal surface cards, and progress indicators.
+- **Color Palette & Mood**: Uses semantic `MaterialTheme.colorScheme` tokens (`primary` for active update actions and progress, `primaryContainer` for release notes badges and connection status pills, `surfaceContainerHigh` for modal cards and release history items, and `errorContainer` for actionable error states).
+- **Typography & Hierarchy**: Bold display headers for version titles (`v1.5.0`), structured bulleted sections for *What Changed*, *What Improved*, and *Fixes*, and monospace chips for version codes, SHA-256 hashes, and connection token fingerprints.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: REST-Based External Firebase Client + Token System (Zero Conflict with Primary Firebase)**
+  - *Chosen Approach*: Connect to the external Firebase project's Firestore (`releases` & `release_binaries` collections) and Firebase Cloud Storage via a dedicated, token-aware HTTP client (`FirebaseReleaseRepository`) rather than mutating the app's primary `google-services.json`.
+  - *Why*: FocusShield already uses its own default Firebase configuration for user data. Using a dedicated REST + Token client allows you to paste or update your external Firebase credentials at any time (via `.env` or in-app token paste) without breaking the app's primary Firebase build plugin.
+- **Decision 2: Dual APK Transport (Firebase Storage HTTPS + Firestore Chunk Reassembly)**
+  - *Chosen Approach*: Support standard Firebase Cloud Storage download URLs (`firebasestorage.googleapis.com` / `*.firebasestorage.app`) AND a chunked Firestore binary fallback (`firebase-chunked://...`).
+  - *Why*: If your external Firebase project has Cloud Storage enabled, large APKs stream directly over HTTPS with full `Content-Length` progress. If Cloud Storage is not enabled or hits quota limits, the website automatically splits the APK into ordered Firestore chunks and the Android app reassembles and validates the APK seamlessly with real progress reporting.
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+### Architecture & Component Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                EXTERNAL FIREBASE PROJECT (Release Backend)                 │
+│                                                                            │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │ Firestore: /releases/{releaseId} │  │ Firebase Storage: /releases/*  │  │
+│  │  - versionName, versionCode      │  │ (or Firestore /release_chunks  │  │
+│  │  - title, tagName, publishedAt   │  │  fallback if Storage disabled) │  │
+│  │  - whatChanged, whatImproved     │  └───────────────┬────────────────┘  │
+│  │  - releaseNotes, apkUrl, size    │                  │                   │
+│  └─────────────────┬────────────────┘                  │                   │
+└────────────────────┼───────────────────────────────────┼───────────────────┘
+                     │ ▲                                 │ ▲
+                     │ │ Publish / Delete /              │ │ Upload / Stream
+                     │ │ Quota Inspection                │ │ APK Bytes
+                     ▼ │                                 ▼ │
+┌────────────────────────┴───────────┐  ┌──────────────────┴─────────────────┐
+│   COMPANION ADMIN WEBSITE (Other   │  │   FOCUSSHIELD ANDROID APP (This    │
+│          AI Studio Chat)           │  │               Chat)                │
+│  - Auto APK Binary Parser          │  │  - ExternalFirebaseConfigStore     │
+│  - Structured Release Notes Form   │  │    (.env BuildConfig + In-App UI)  │
+│  - Laptop Storage & Firebase Quota │  │  - FirebaseReleaseRepository       │
+│  - Past Releases History & Delete  │  │    (Latest + Past Releases List)   │
+│  - 1-Click Android Token Generator ├──┼─►- UpdateDownloadManager           │
+└────────────────────────────────────┘  │    (Storage HTTPS + Chunk Stream)  │
+        Copy Connection Token           │  - UpdateManager & UI Dialogs      │
+                                        └────────────────────────────────────┘
+```
+
+### Data Model & State
+- **External Firebase Connection Config (`ExternalFirebaseUpdateConfig`)**:
+  - `projectId`: External Firebase Project ID
+  - `apiKey`: External Firebase Web API Key
+  - `storageBucket`: Optional Firebase Storage bucket (e.g., `my-project.firebasestorage.app`)
+  - `channelToken`: Optional release channel filter/token (defaults to `production`)
+  - `appId`: Optional Firebase App ID
+  - Can be loaded from `BuildConfig` (`.env`) or pasted as a single `fsupd_...` base64 token / JSON snippet in the app's **Update Server Connection** sheet.
+- **Firestore Release Document (`releases/{releaseId}`)**:
+  - `versionName` (String, e.g., `"1.5.0"`), `versionCode` (Number, e.g., `6`), `tagName` (String, e.g., `"v1.5.0"`), `title` (String)
+  - `whatChanged` (String), `whatImproved` (String), `bugFixes` (String), `releaseNotes` (combined Markdown for immediate display)
+  - `apkUrl` (HTTPS Firebase Storage download URL or `firebase-chunked://{projectId}/{releaseId}`), `apkAssetName` (String), `apkSizeBytes` (Number), `sha256` (String)
+  - `storageMode` (`"firebase_storage"` or `"firestore_chunks"`), `chunkCount` (Number), `channel` (String), `publishedAt` (ISO-8601 String), `createdAtEpochMs` (Number)
+
+### Interactive Component & State Mapping
+1. **Composite Update Repository (`CompositeUpdateRepository`)**:
+   - Checks `ExternalFirebaseUpdateConfig`: when configured via `.env` or pasted token, queries the external Firebase project's `releases` collection ordered by `versionCode` / `publishedAt`, and also exposes `fetchReleaseHistory(): List<UpdateInfo>` so the Android app can display all past releases.
+   - Falls back cleanly to `GitHubReleaseRepository` if no external Firebase config has been provided yet.
+2. **Trusted Host & Chunk Download Support (`UpdateUrlPolicy` & `UpdateDownloadManager`)**:
+   - Expands `UpdateUrlPolicy` to trust `firebasestorage.googleapis.com` and `*.firebasestorage.app` HTTPS URLs with download token query parameters (`?alt=media&token=...`).
+   - Adds transparent support for `firebase-chunked://` URLs so chunked APKs stored in Firestore are downloaded chunk-by-chunk into `.part`, verified with `validateApk()` (ZIP header + package name check), and handed to Android's package installer.
+3. **Update Screen Enhancements (`UpdateScreen` & `UpdateViewModel`)**:
+   - Adds an **Update Server Connection** card/dialog where you can view whether the external Firebase update server is connected, paste/clear a Connection Token from the website, and test the connection immediately.
+   - Adds a **Release History** section displaying all previous releases published from the admin website.
+
+---
+
+## 5. Prompt to Paste in Another AI Studio Chat (Admin Release Website)
+
+Copy the entire block below and paste it into a **new AI Studio chat** to create your Firebase Release Management Website and provision its Firebase project automatically:
+
+```markdown
+Build a complete, production-grade **FocusShield Firebase Release & OTA Update Management Portal** web application and set up Firebase (Firestore) for it.
+
+### 1. Purpose & How It Connects to the FocusShield Android App
+This website is the official Release Admin Portal for the **FocusShield Android app** (`applicationId = "com.aistudio.focusshield.krtjfp"`).
+- When I upload an `.apk` file and publish a release on this website, it stores the release metadata and APK binary in this project's Firebase backend.
+- The FocusShield Android app connects to this Firebase project using a **Connection Token / Firebase Config** that I copy from this website and paste into the Android app (or `.env`).
+- Because the Android app reads this Firebase project directly via Firestore REST API and Firebase Storage HTTPS URLs, configure `firestore.rules` so that:
+  - `releases/{releaseId}` and `release_binaries/{releaseId}/chunks/{chunkId}` allow public `get, list` (`allow read: if true;`) so the Android app can check for updates, view past release history, and download APK chunks without requiring Google Sign-In on the secondary Firebase instance.
+  - `write` (`create, update, delete`) on `releases/{releaseId}`, `release_binaries/{releaseId}/chunks/{chunkId}`, and `storage_stats/{docId}` requires an authenticated admin user (`request.auth != null`).
+
+### 2. Required Core Features on the Website
+
+#### A. Storage Health & Capacity Dashboard (Top Telemetry Bar)
+1. **Laptop / Local Browser Storage Meter**:
+   - Use the browser's `navigator.storage.estimate()` API (plus File API staging metrics) to display:
+     - Available & used browser/laptop storage quota (in GB / MB)
+     - A visual progress bar showing local disk/browser storage health and whether sufficient local buffer space exists for APK parsing and chunking.
+2. **Firebase Storage & Firestore Capacity Meter**:
+   - Calculate and display real-time Firebase storage usage across all uploaded releases (`totalBytesUsed` summed across `releases`):
+     - Show **Firebase Cloud Storage Quota** (out of 5 GB default free tier, configurable quota limit) AND **Firestore Binary Storage Quota** (out of 1 GB free tier) with color-coded status badges: `Healthy (<70%)`, `Warning (70–90%)`, or `Storage Full / Critical (>90%)`.
+     - Show average APK size, total active releases count, and how many more APK releases of average size can fit before Firebase storage is full.
+
+#### B. Publish New Release Form (with Automatic APK Binary Inspector)
+1. **Drag-and-Drop `.apk` File Uploader & Auto-Inspector**:
+   - When I select or drop an `.apk` file from my laptop:
+     - Compute its exact file size in bytes and **SHA-256 checksum** using Web Crypto API (`crypto.subtle.digest('SHA-256', buffer)`).
+     - Automatically inspect the APK ZIP archive in the browser (using JSZip / binary `AndroidManifest.xml` AXML parser or filename + manifest heuristics) to auto-fill:
+       - `versionName` (e.g., `1.5.0`)
+       - `versionCode` (integer, e.g., `6` — also auto-suggest `highestPreviousVersionCode + 1` if binary parsing is overridden)
+       - `tagName` (auto-formatted as `v{versionName}`)
+       - `apkAssetName` (e.g., `FocusShield-v1.5.0.apk`)
+     - Allow me to edit or override any auto-detected field before publishing.
+2. **Structured Release Notes Builder (Matched to Android App)**:
+   - **Release Title** (e.g., `"FocusShield v1.5.0 — Smarter App Blocking & Faster Sync"`)
+   - **Release Channel** (`production` by default)
+   - **What Changed (New Features)** — structured multi-line input
+   - **What Improved (Performance & Polish)** — structured multi-line input
+   - **Bug Fixes & Important Update Notes** — structured multi-line input
+   - **Live Android Popup Preview**: Show a live preview of how the "Update Available" popup and post-restart "What's New" dialog will look inside the FocusShield Android app, automatically combining the sections into clean Markdown stored in `releaseNotes`.
+3. **Dual-Mode Firebase APK Upload Engine (Storage + Automatic Firestore Chunk Fallback)**:
+   - Support two storage modes selectable or auto-fallback:
+     - **Mode 1: Firebase Cloud Storage** (uploads APK to `releases/{versionName}/{apkAssetName}` and stores the public HTTPS download URL `https://firebasestorage.googleapis.com/...` in `apkUrl`).
+     - **Mode 2: Firestore Chunked Binary Storage (Zero-Config Fallback)** — if Firebase Cloud Storage bucket is not provisioned or fails, automatically split the APK file into 650 KB base64 chunks saved under `release_binaries/{releaseId}/chunks/{chunkIndex}` with a real-time chunk upload progress bar, and set `apkUrl` to `firebase-chunked://{projectId}/{releaseId}`.
+
+#### C. Exact Firestore Document Schema (`releases/{releaseId}`)
+Every published release document in the `releases` collection MUST store these exact fields so the FocusShield Android app can parse it immediately:
+- `versionName`: string (e.g. `"1.5.0"`)
+- `versionCode`: number (e.g. `6`)
+- `tagName`: string (e.g. `"v1.5.0"`)
+- `title`: string
+- `whatChanged`: string
+- `whatImproved`: string
+- `bugFixes`: string
+- `releaseNotes`: string (formatted Markdown combining What Changed, What Improved, and Bug Fixes)
+- `apkUrl`: string (HTTPS Firebase Storage download URL or `firebase-chunked://{projectId}/{releaseId}`)
+- `apkAssetName`: string (e.g. `"FocusShield-v1.5.0.apk"`)
+- `apkSizeBytes`: number
+- `sha256`: string
+- `storageMode`: `"firebase_storage"` | `"firestore_chunks"`
+- `chunkCount`: number
+- `channel`: string (default `"production"`)
+- `publishedAt`: string (ISO-8601 timestamp, e.g. `new Date().toISOString()`)
+- `createdAtEpochMs`: number (`Date.now()`)
+
+#### D. Past Releases History & Full Cleanup Deletion
+- List all past releases sorted newest-first (`versionCode` descending), showing:
+  - Version badge (`v1.5.0`, `versionCode: 6`), Latest/Active badge, publish date, APK file size, SHA-256 snippet, storage mode badge, and expandable What Changed / What Improved notes.
+  - **Direct Download APK button** (streams from Storage or reassembles chunks in browser).
+  - **Delete Release button** with confirmation: deleting a past release MUST delete the `releases/{releaseId}` document AND delete the associated APK file from Firebase Storage (or all chunk documents in `release_binaries/{releaseId}/chunks/*`), immediately freeing up Firebase storage quota on the dashboard.
+
+#### E. "Connect FocusShield Android App" Token & Credentials Drawer
+- Include a prominent **"Android App Connection Token & Credentials"** panel that reads the active Firebase configuration (`firebase-applet-config.json`) and generates:
+  1. **One-Click Copyable Connection Token (`fsupd_...`)**: Base64URL-encoded JSON containing `{ "projectId", "apiKey", "storageBucket", "appId", "databaseId", "channel": "production" }` that I can paste directly into the FocusShield Android app's Update screen.
+  2. **One-Click Copyable `.env` Secrets Block** for AI Studio Secrets:
+     ```
+     UPDATE_FIREBASE_PROJECT_ID=...
+     UPDATE_FIREBASE_API_KEY=...
+     UPDATE_FIREBASE_STORAGE_BUCKET=...
+     UPDATE_FIREBASE_APP_ID=...
+     UPDATE_FIREBASE_DATABASE_ID=...
+     UPDATE_CHANNEL_TOKEN=production
+     ```
+```

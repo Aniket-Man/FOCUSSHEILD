@@ -86,6 +86,8 @@ fun UpdateScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val externalFirebaseConfig by viewModel.externalFirebaseConfig.collectAsStateWithLifecycle()
+    val releaseHistory by viewModel.releaseHistory.collectAsStateWithLifecycle()
 
     // Android only shows the installer UI for an app the user has allowed to install unknown apps.
     // We never bypass it — we explain it and deep-link into the setting (prompt.txt §10).
@@ -268,6 +270,22 @@ fun UpdateScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(FocusSpacing.lg))
+
+            FirebaseUpdateServerCard(
+                config = externalFirebaseConfig,
+                onApplyTokenOrConfig = { raw, cb -> viewModel.applyExternalFirebaseToken(raw, cb) },
+                onDisconnectToken = { viewModel.clearExternalFirebaseToken() }
+            )
+
+            if (releaseHistory.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(FocusSpacing.lg))
+                ReleaseHistorySection(
+                    releases = releaseHistory,
+                    installedVersionName = viewModel.installedVersionName
+                )
+            }
+
             Spacer(modifier = Modifier.height(FocusSpacing.xxl))
         }
     }
@@ -427,8 +445,8 @@ private fun DownloadedContent(
     onCheckAgain: () -> Unit
 ) {
     HeaderCard(
-        title = "Download complete",
-        subtitle = "Tap install, then confirm in the Android installer.",
+        title = "Update complete — restart to apply",
+        subtitle = "FocusShield v${info.versionName} is ready. Install and restart the app to finish updating.",
         accent = FocusColors.EmeraldSuccess,
         icon = Icons.Rounded.CheckCircle
     )
@@ -452,8 +470,7 @@ private fun DownloadedContent(
             )
             Spacer(modifier = Modifier.width(FocusSpacing.sm))
             Text(
-                text = "Android will ask you to confirm the installation. FocusShield never installs " +
-                    "anything on its own.",
+                text = "Android will ask you to confirm the installation and restart FocusShield on the new version.",
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = FocusColors.TextSecondary,
                     fontSize = 12.sp
@@ -465,7 +482,7 @@ private fun DownloadedContent(
     Spacer(modifier = Modifier.height(FocusSpacing.base))
 
     PrimaryAction(
-        label = "Install Update",
+        label = "Install & Restart App",
         icon = Icons.Rounded.SystemUpdate,
         testTag = "update_install_button",
         onClick = onInstall

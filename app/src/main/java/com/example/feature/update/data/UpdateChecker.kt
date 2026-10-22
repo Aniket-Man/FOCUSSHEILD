@@ -20,6 +20,11 @@ sealed interface UpdateCheckResult {
      * check. Not an error, and never surfaced (prompt.txt §4/§16).
      */
     data object Skipped : UpdateCheckResult
+
+    /**
+     * The remote server returned HTTP 304 Not Modified for our cached ETag.
+     */
+    data object NotModified : UpdateCheckResult
 }
 
 /**
@@ -52,12 +57,17 @@ class UpdateChecker(
      *
      * @param manual true when the user asked for it (Profile → New Updates). Manual checks ignore the
      *   cooldown and report failures; automatic ones are skipped while offline and stay silent.
+     * @param forceForeground true when triggered by app launch or foreground resume (uses a short
+     *   2-minute debounce combined with ETag conditional requests so newly published releases are
+     *   detected right away when opening the app without exhausting GitHub rate limits).
      */
-    suspend fun check(manual: Boolean): UpdateCheckResult {
+    suspend fun check(manual: Boolean, forceForeground: Boolean = false): UpdateCheckResult {
         if (!manual && !isOnline()) return UpdateCheckResult.Skipped
 
         val prefs = preferences.current()
-        if (!manual && !isDueForCheck(prefs)) return UpdateCheckResult.Skipped
+        if (!manual && !isDueForCheck(prefs, forceForeground = forceForeground)) {
+            return UpdateCheckResult.Skipped
+        }
 
         // The cooldown is stamped from the moment the request starts, never from its completion:
         // a stamp written after a slow response landed later and later, and the periodic worker
@@ -65,8 +75,9 @@ class UpdateChecker(
         // run, skipping every other run and halving the real background cadence.
         val startedAt = now()
 
-        val info = try {
-            repository.fetchLatestRelease()
+        val fetchResponse = try {
+            val etagToUse = if (manual) null else prefs.etag
+            repository.fetchLatestReleaseConditional(etag = etagToUse)
         } catch (e: UpdateSourceUnavailableException) {
             preferences.recordCheck(latestVersion = null, failed = true, at = startedAt)
             return UpdateCheckResult.Failed(e.reason)
@@ -74,6 +85,22 @@ class UpdateChecker(
             preferences.recordCheck(latestVersion = null, failed = true, at = startedAt)
             return UpdateCheckResult.Failed("Couldn't check for updates.")
         }
+
+        if (fetchResponse.etag != null) {
+            preferences.setEtag(fetchResponse.etag)
+        }
+
+        // HTTP 304 Not Modified: nothing changed on the remote feed since our last ETag.
+        if (fetchResponse.notModified) {
+            preferences.recordCheck(
+                latestVersion = prefs.latestKnownVersion,
+                failed = false,
+                at = startedAt
+            )
+            return UpdateCheckResult.NotModified
+        }
+
+        val info = fetchResponse.info
 
         // A release feed with nothing published is not an error — there is simply nothing newer.
         // GitHub's 404 for an empty release list (and for a private repo) lands here too.
@@ -104,13 +131,18 @@ class UpdateChecker(
     }
 
     /**
-     * True when an automatic check is allowed to go out. A previous failure shortens the wait so a
-     * transient outage does not cost the user six hours of staleness (prompt.txt §4).
+     * True when an automatic check is allowed to go out.
+     * Periodic background checks run on a 15-minute cadence, while foreground launch/resume checks
+     * use a 30-second debounce with ETag conditional requests so opening the app always checks fresh.
      */
-    private fun isDueForCheck(prefs: UpdatePrefs): Boolean {
+    private fun isDueForCheck(prefs: UpdatePrefs, forceForeground: Boolean): Boolean {
         val last = prefs.lastCheckTime
         if (last == 0L) return true
-        val interval = if (prefs.lastCheckFailed) AUTO_RETRY_INTERVAL else AUTO_CHECK_INTERVAL
+        val interval = when {
+            forceForeground -> FOREGROUND_CHECK_DEBOUNCE
+            prefs.lastCheckFailed -> AUTO_RETRY_INTERVAL
+            else -> AUTO_CHECK_INTERVAL
+        }
         return now() - last >= interval
     }
 
@@ -129,10 +161,13 @@ class UpdateChecker(
         prefs.notifiedVersion != info.versionName
 
     companion object {
-        /** How long an automatic check stays quiet after a successful one (prompt.txt §4). */
-        const val AUTO_CHECK_INTERVAL = 6 * 60 * 60 * 1000L
+        /** Continuous 15-minute background cadence for periodic checks. */
+        const val AUTO_CHECK_INTERVAL = 15 * 60 * 1000L
 
         /** Shorter backoff after a failed check, so recovery does not wait a full interval. */
-        const val AUTO_RETRY_INTERVAL = 15 * 60 * 1000L
+        const val AUTO_RETRY_INTERVAL = 5 * 60 * 1000L
+
+        /** Minimum debounce between foreground launch/resume checks (paired with ETag 304). */
+        const val FOREGROUND_CHECK_DEBOUNCE = 30 * 1000L
     }
 }

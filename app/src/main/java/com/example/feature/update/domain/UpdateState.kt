@@ -32,9 +32,17 @@ sealed interface UpdateState {
         val showPrompt: Boolean = true
     ) : UpdateState
 
-    data class Downloading(val progress: DownloadProgress) : UpdateState
+    data class Downloading(
+        val progress: DownloadProgress,
+        val info: UpdateInfo? = null,
+        val showInModal: Boolean = true
+    ) : UpdateState
 
-    data class Downloaded(val info: UpdateInfo, val file: File) : UpdateState
+    data class Downloaded(
+        val info: UpdateInfo,
+        val file: File,
+        val showInModal: Boolean = true
+    ) : UpdateState
 
     /** The validated APK has been handed to Android's permission/installer flow. */
     data object Installing : UpdateState

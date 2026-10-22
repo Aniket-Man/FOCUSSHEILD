@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
         com.example.core.accessibility.AccessibilityHelper.updateState(this)
         com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
         com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance?.syncWithPreferences()
+        (application as? FocusShieldApp)?.updateManager?.checkInBackground(forceForeground = true)
     }
 
     override fun onNewIntent(intent: Intent) {

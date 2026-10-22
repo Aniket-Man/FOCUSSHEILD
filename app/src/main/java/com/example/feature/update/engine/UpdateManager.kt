@@ -1,11 +1,14 @@
 package com.example.feature.update.engine
 
 import android.content.Context
+import com.example.feature.update.data.CompositeUpdateRepository
+import com.example.feature.update.data.ExternalFirebaseUpdateConfig
 import com.example.feature.update.data.UpdateChecker
 import com.example.feature.update.data.UpdateCheckResult
 import com.example.feature.update.data.UpdateDownloadException
 import com.example.feature.update.data.UpdateDownloadManager
 import com.example.feature.update.data.UpdatePreferences
+import com.example.feature.update.data.UpdateRepository
 import com.example.feature.update.domain.DownloadProgress
 import com.example.feature.update.domain.SemanticVersion
 import com.example.feature.update.domain.UpdateInfo
@@ -21,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -48,15 +52,34 @@ class UpdateManager(
     private val scope: CoroutineScope,
     private val installedVersionName: String,
     /** The running build's `versionCode`; must agree with what the checker compares. */
-    private val installedVersionCode: Int? = null
+    private val installedVersionCode: Int? = null,
+    private val compositeRepository: CompositeUpdateRepository? = null
 ) {
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
-    /** Whether the small red dot should be showing on Profile → New Updates. */
+    /** Whether the small red dot should be showing on Profile → New Updates and Home header. */
     private val _showDot = MutableStateFlow(false)
     val showDot: StateFlow<Boolean> = _showDot.asStateFlow()
+
+    /**
+     * Non-null after the app restarts onto a newly installed update, carrying the release info for
+     * the post-update "What's New" confirmation dialog until the user dismisses it.
+     */
+    private val _completedUpdate = MutableStateFlow<UpdateInfo?>(null)
+    val completedUpdate: StateFlow<UpdateInfo?> = _completedUpdate.asStateFlow()
+
+    /** Active external Firebase update project configuration (from in-app token or .env Secrets). */
+    private val _externalFirebaseConfig = MutableStateFlow<ExternalFirebaseUpdateConfig?>(
+        ExternalFirebaseUpdateConfig.fromBuildConfig()
+    )
+    val externalFirebaseConfig: StateFlow<ExternalFirebaseUpdateConfig?> =
+        _externalFirebaseConfig.asStateFlow()
+
+    /** All past releases fetched from the external Firebase release portal (newest first). */
+    private val _releaseHistory = MutableStateFlow<List<UpdateInfo>>(emptyList())
+    val releaseHistory: StateFlow<List<UpdateInfo>> = _releaseHistory.asStateFlow()
 
     /** Serialises checks so a resume-triggered check cannot race a manual one. */
     private val checkMutex = Mutex()
@@ -69,89 +92,128 @@ class UpdateManager(
 
     private var downloadJob: Job? = null
 
+    @Volatile
+    private var showDownloadInModal: Boolean = true
+
     /** Downloaded state retained while Android's installer (or its permission screen) is in front. */
     private var installCandidate: UpdateState.Downloaded? = null
 
     /** Restores any persisted update state. Safe to call once, from `Application.onCreate`. */
     fun restore(): Job = scope.launch {
         val needsFreshCheck = stateMutex.withLock {
-                val prefs = preferences.current()
-                val rawInfo = prefs.latestInfoJson
-                val restored = rawInfo?.let(::decodeInfo)
+            val prefs = preferences.current()
+            _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
+            prefs.releaseHistoryJson?.let(::decodeHistory)?.takeIf { it.isNotEmpty() }?.let {
+                _releaseHistory.value = it
+            }
+            val rawInfo = prefs.latestInfoJson
+            val restored = rawInfo?.let(::decodeInfo)
+            val pendingCompleted = prefs.pendingInstallInfoJson?.let(::decodeInfo)
 
-                if (restored == null) {
-                    current = null
-                    _showDot.value = false
-                    // Invalid JSON cannot be safely offered. Discard it atomically and bypass the
-                    // cooldown so the full release metadata is fetched again.
-                    if (rawInfo != null) {
-                        discardStaleOffer()
-                        true
-                    } else {
-                        false
-                    }
-                } else if (!isNewerThanInstalled(restored)) {
-                    // The app may have been updated through our installer, a file manager, or ADB.
-                    // Detect that before restoring any UI so neither the old offer nor its
-                    // notification can survive the new process.
-                    clearInstalledOffer()
-                    false
-                } else if (prefs.latestKnownVersion?.let {
-                        SemanticVersion.isNewer(it, restored.versionName)
-                    } == true
-                ) {
-                    // recordCheck() is written before the complete UpdateInfo. If the process dies
-                    // between those writes, latestKnownVersion is the only evidence that this APK is
-                    // obsolete. Remove it and force a complete check instead of offering a downgrade.
+            if (pendingCompleted != null && pendingCompleted.versionName == installedVersionName) {
+                _completedUpdate.value = pendingCompleted
+            }
+
+            val resultNeedsCheck = if (restored == null) {
+                current = null
+                _showDot.value = false
+                // Invalid JSON cannot be safely offered. Discard it atomically and bypass the
+                // cooldown so the full release metadata is fetched again.
+                if (rawInfo != null) {
                     discardStaleOffer()
                     true
                 } else {
-                    current = restored
-
-                    // A downloaded APK that is still on disk means the user was one tap from
-                    // installing. It is restored only when it belongs to the current cached offer.
-                    val path = prefs.downloadedPath
-                    if (prefs.downloadedVersion == restored.versionName && path != null) {
-                        val file = File(path)
-                        if (file.exists() && file.length() > 0) {
-                            _state.value = UpdateState.Downloaded(restored, file)
-                        } else {
-                            preferences.clearDownload()
-                            _state.value = UpdateState.UpdateAvailable(restored, showPrompt = false)
-                        }
-                    } else {
-                        if (prefs.downloadedVersion != null || path != null) {
-                            preferences.clearDownload()
-                            downloadManager.cleanUpObsolete(keepName = null)
-                        }
-                        _state.value = UpdateState.UpdateAvailable(restored, showPrompt = false)
-                    }
-                    refreshDot()
                     false
                 }
+            } else if (!isNewerThanInstalled(restored)) {
+                // The app was just updated! If the newly running build matches the cached offer (or
+                // upgraded past the previously recorded installed version), surface the post-restart
+                // "What's New" dialog with its release notes before clearing the old offer.
+                if (restored.versionName == installedVersionName ||
+                    (prefs.lastInstalledVersion != null &&
+                        SemanticVersion.isNewer(installedVersionName, prefs.lastInstalledVersion))
+                ) {
+                    val completed = restored.copy(versionName = installedVersionName)
+                    _completedUpdate.value = completed
+                    preferences.setPendingInstallInfoJson(encodeInfo(completed))
+                }
+                clearInstalledOffer()
+                false
+            } else if (prefs.latestKnownVersion?.let {
+                    SemanticVersion.isNewer(it, restored.versionName)
+                } == true
+            ) {
+                // recordCheck() is written before the complete UpdateInfo. If the process dies
+                // between those writes, latestKnownVersion is the only evidence that this APK is
+                // obsolete. Remove it and force a complete check instead of offering a downgrade.
+                discardStaleOffer()
+                true
+            } else {
+                current = restored
+                val promptAllowed = checker.shouldPrompt(prefs, restored)
+
+                // A downloaded APK that is still on disk means the user was one tap from
+                // installing. It is restored only when it belongs to the current cached offer.
+                val path = prefs.downloadedPath
+                if (prefs.downloadedVersion == restored.versionName && path != null) {
+                    val file = File(path)
+                    if (file.exists() && file.length() > 0) {
+                        _state.value = UpdateState.Downloaded(
+                            info = restored,
+                            file = file,
+                            showInModal = promptAllowed
+                        )
+                    } else {
+                        preferences.clearDownload()
+                        _state.value = UpdateState.UpdateAvailable(restored, showPrompt = promptAllowed)
+                    }
+                } else {
+                    if (prefs.downloadedVersion != null || path != null) {
+                        preferences.clearDownload()
+                        downloadManager.cleanUpObsolete(keepName = null)
+                    }
+                    _state.value = UpdateState.UpdateAvailable(restored, showPrompt = promptAllowed)
+                }
+                refreshDot()
+                false
             }
 
-            // Usually Application.onCreate also requests a background check. Calling it here for an
-            // inconsistent cache makes restore correct on its own; checkMutex and the cooldown make
-            // the duplicate launch harmless.
-            if (needsFreshCheck) runBackgroundCheck()
+            preferences.setLastInstalledVersion(installedVersionName)
+            resultNeedsCheck
         }
+
+        // Usually Application.onCreate also requests a background check. Calling it here for an
+        // inconsistent cache makes restore correct on its own; checkMutex and the cooldown make
+        // the duplicate launch harmless.
+        if (needsFreshCheck) runBackgroundCheck()
+    }
+
+    /** Dismisses the post-restart "What's New" confirmation dialog. */
+    fun dismissCompletedUpdate() {
+        scope.launch {
+            stateMutex.withLock {
+                _completedUpdate.value = null
+                preferences.setPendingInstallInfoJson(null)
+            }
+        }
+    }
 
     /**
      * Automatic check — app launch, return to foreground, or connectivity regained.
      */
-    fun checkInBackground() {
-        scope.launch { runBackgroundCheck() }
+    fun checkInBackground(forceForeground: Boolean = false) {
+        scope.launch { runBackgroundCheck(forceForeground = forceForeground) }
     }
 
     /**
      * The background check implementation.
      */
-    suspend fun runBackgroundCheck() {
+    suspend fun runBackgroundCheck(forceForeground: Boolean = false) {
         checkMutex.withLock {
             if (isUpdateFlowBusy()) return@withLock
-            val result = checker.check(manual = false)
+            val result = checker.check(manual = false, forceForeground = forceForeground)
             stateMutex.withLock { applyResult(result, manual = false) }
+            refreshReleaseHistoryQuietly()
         }
     }
 
@@ -172,6 +234,64 @@ class UpdateManager(
             stateMutex.withLock { _state.value = UpdateState.Checking }
             val result = checker.check(manual = true)
             stateMutex.withLock { applyResult(result, manual = true) }
+            refreshReleaseHistoryQuietly()
+        }
+    }
+
+    /**
+     * Parses and saves an external Firebase Connection Token (`fsupd_...`), JSON config, or `.env`
+     * snippet pasted by the user inside the app, and immediately triggers an update check.
+     */
+    fun applyExternalFirebaseToken(
+        rawInput: String,
+        onResult: (Result<ExternalFirebaseUpdateConfig>) -> Unit = {}
+    ) {
+        val parsed = ExternalFirebaseUpdateConfig.parseFlexibleInput(
+            rawInput = rawInput,
+            sourceLabel = "In-App Token"
+        )
+        if (parsed == null || !parsed.isValid) {
+            onResult(
+                Result.failure(
+                    IllegalArgumentException(
+                        "Invalid Firebase token or config. Paste the Connection Token (fsupd_...) or Firebase JSON from your release website."
+                    )
+                )
+            )
+            return
+        }
+        scope.launch {
+            stateMutex.withLock {
+                preferences.setExternalFirebaseConfigJson(parsed.toJsonString())
+                _externalFirebaseConfig.value = parsed
+            }
+            onResult(Result.success(parsed))
+            checkManually()
+        }
+    }
+
+    /** Removes the in-app pasted Firebase token, reverting to `.env` Secrets (if set) or fallback. */
+    fun clearExternalFirebaseToken() {
+        scope.launch {
+            stateMutex.withLock {
+                preferences.setExternalFirebaseConfigJson(null)
+                preferences.setReleaseHistoryJson(null)
+                _externalFirebaseConfig.value = ExternalFirebaseUpdateConfig.fromBuildConfig()
+                _releaseHistory.value = emptyList()
+            }
+            checkManually()
+        }
+    }
+
+    private suspend fun refreshReleaseHistoryQuietly() {
+        val repo = compositeRepository ?: return
+        try {
+            val list = repo.fetchReleaseHistory()
+            stateMutex.withLock {
+                _releaseHistory.value = list
+                preferences.setReleaseHistoryJson(encodeHistory(list))
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -220,6 +340,24 @@ class UpdateManager(
 
             UpdateCheckResult.UpToDate -> clearInstalledOffer()
 
+            UpdateCheckResult.NotModified -> {
+                // 304 Not Modified: keep our current offer if still newer than installed, or UpToDate.
+                val info = current ?: preferences.current().latestInfoJson?.let(::decodeInfo)
+                if (info != null && isNewerThanInstalled(info)) {
+                    current = info
+                    val prefs = preferences.current()
+                    if (_state.value !is UpdateState.Downloaded && _state.value !is UpdateState.Downloading) {
+                        _state.value = UpdateState.UpdateAvailable(
+                            info = info,
+                            showPrompt = checker.shouldPrompt(prefs, info)
+                        )
+                    }
+                } else {
+                    clearInstalledOffer()
+                }
+                refreshDot()
+            }
+
             is UpdateCheckResult.Failed -> {
                 // An automatic failure leaves whatever we already knew on screen, and says nothing.
                 _state.value = if (manual) {
@@ -243,11 +381,50 @@ class UpdateManager(
     fun dismissPrompt() {
         scope.launch {
             stateMutex.withLock {
-                val info = current ?: return@withLock
-                preferences.markDismissed(info.versionName)
-                _state.value = UpdateState.UpdateAvailable(info = info, showPrompt = false)
+                val info = current
+                if (info != null) {
+                    preferences.markDismissed(info.versionName)
+                }
+                when (val s = _state.value) {
+                    is UpdateState.UpdateAvailable -> {
+                        _state.value = s.copy(showPrompt = false)
+                    }
+                    is UpdateState.Downloading -> {
+                        showDownloadInModal = false
+                        _state.value = s.copy(showInModal = false)
+                    }
+                    is UpdateState.Downloaded -> {
+                        _state.value = s.copy(showInModal = false)
+                    }
+                    else -> {
+                        if (info != null) {
+                            _state.value = UpdateState.UpdateAvailable(info = info, showPrompt = false)
+                        }
+                    }
+                }
                 refreshDot()
             }
+        }
+    }
+
+    /** Hides the modal during an active download or post-download prompt while keeping the Home banner active. */
+    fun hideDownloadModal() {
+        showDownloadInModal = false
+        when (val s = _state.value) {
+            is UpdateState.Downloading -> _state.value = s.copy(showInModal = false)
+            is UpdateState.Downloaded -> _state.value = s.copy(showInModal = false)
+            else -> dismissPrompt()
+        }
+    }
+
+    /** Re-opens the modal dialog from the Home banner if an update or download is in progress. */
+    fun showModalPrompt() {
+        showDownloadInModal = true
+        when (val s = _state.value) {
+            is UpdateState.UpdateAvailable -> _state.value = s.copy(showPrompt = true)
+            is UpdateState.Downloading -> _state.value = s.copy(showInModal = true)
+            is UpdateState.Downloaded -> _state.value = s.copy(showInModal = true)
+            else -> {}
         }
     }
 
@@ -268,14 +445,28 @@ class UpdateManager(
         val info = current ?: return
         if (downloadJob?.isActive == true) return
 
+        showDownloadInModal = true
         downloadJob = scope.launch {
-            _state.value = UpdateState.Downloading(DownloadProgress(percent = 0))
+            _state.value = UpdateState.Downloading(
+                progress = DownloadProgress(percent = 0),
+                info = info,
+                showInModal = showDownloadInModal
+            )
             try {
                 val file = downloadManager.download(info) { progress ->
-                    _state.value = UpdateState.Downloading(progress)
+                    _state.value = UpdateState.Downloading(
+                        progress = progress,
+                        info = info,
+                        showInModal = showDownloadInModal
+                    )
                 }
                 preferences.recordDownload(info.versionName, file.absolutePath)
-                _state.value = UpdateState.Downloaded(info, file)
+                _state.value = UpdateState.Downloaded(
+                    info = info,
+                    file = file,
+                    showInModal = true
+                )
+                UpdateNotificationHelper.notifyUpdateDownloaded(context, info.versionName)
             } catch (e: CancellationException) {
                 // cancelDownload() already moved the state back to the offer — surface it unchanged.
                 throw e
@@ -364,6 +555,7 @@ class UpdateManager(
                 }
 
                 val prefs = preferences.current()
+                _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
                 val rawInfo = prefs.latestInfoJson
                 val info = current ?: rawInfo?.let(::decodeInfo)
 
@@ -483,5 +675,25 @@ class UpdateManager(
         }
     } catch (_: Exception) {
         null
+    }
+
+    private fun encodeHistory(list: List<UpdateInfo>): String {
+        val arr = JSONArray()
+        list.forEach { info ->
+            arr.put(JSONObject(encodeInfo(info)))
+        }
+        return arr.toString()
+    }
+
+    private fun decodeHistory(raw: String): List<UpdateInfo> = try {
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                decodeInfo(obj.toString())?.let(::add)
+            }
+        }
+    } catch (_: Exception) {
+        emptyList()
     }
 }

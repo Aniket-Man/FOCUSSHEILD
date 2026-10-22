@@ -604,10 +604,23 @@ fun ProfileScreen(
 
                 // About FocusShield
                 item {
+                    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+                    val updateSubtitle = when (val s = updateState) {
+                        is com.example.feature.update.domain.UpdateState.Downloaded ->
+                            "Update v${s.info.versionName} downloaded — Tap to install & restart"
+                        is com.example.feature.update.domain.UpdateState.Downloading ->
+                            "Downloading update…"
+                        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
+                            "New release v${s.info.versionName} available on GitHub"
+                        else ->
+                            "Check GitHub Releases for new FocusShield versions"
+                    }
+
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
+                            .padding(horizontal = FocusSpacing.screenHorizontal),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
                             text = "ABOUT FOCUSSHIELD",
@@ -618,7 +631,15 @@ fun ProfileScreen(
                                 letterSpacing = 0.5.sp
                             )
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        ProfileNavigationRow(
+                            title = "New Updates",
+                            subtitle = updateSubtitle,
+                            icon = Icons.Rounded.SystemUpdate,
+                            iconTint = if (showUpdateDot) FocusColors.EmeraldSuccess else FocusColors.Primary,
+                            onClick = onNavigateToUpdates,
+                            testTag = "profile_updates_row",
+                            showBadge = showUpdateDot
+                        )
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
