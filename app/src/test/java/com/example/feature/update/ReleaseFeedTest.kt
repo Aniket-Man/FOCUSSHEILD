@@ -327,4 +327,92 @@ class ReleaseFeedTest {
         assertTrue(SemanticVersion.isNewerRelease("1.0.1", 9, "1.0.0", null))
         assertFalse(SemanticVersion.isNewerRelease("1.0.0", null, "1.0.1", null))
     }
+
+    @Test
+    fun `release server filters strictly by the user's selected UpdateChannel`() {
+        val firestorePayload = """
+            {
+              "documents": [
+                {
+                  "name": "projects/eminent-physics-z8p5g/databases/default/documents/releases/prod-150",
+                  "fields": {
+                    "versionName": { "stringValue": "1.5.0" },
+                    "versionCode": { "integerValue": "6" },
+                    "channel": { "stringValue": "production" },
+                    "title": { "stringValue": "FocusShield 1.5.0 Stable" }
+                  }
+                },
+                {
+                  "name": "projects/eminent-physics-z8p5g/databases/default/documents/releases/beta-160",
+                  "fields": {
+                    "versionName": { "stringValue": "1.6.0-beta.1" },
+                    "versionCode": { "integerValue": "7" },
+                    "channel": { "stringValue": "beta" },
+                    "title": { "stringValue": "FocusShield 1.6.0 Beta 1" }
+                  }
+                },
+                {
+                  "name": "projects/eminent-physics-z8p5g/databases/default/documents/releases/pre-160",
+                  "fields": {
+                    "versionName": { "stringValue": "1.6.0-rc.1" },
+                    "versionCode": { "integerValue": "8" },
+                    "channel": { "stringValue": "pre-release" },
+                    "title": { "stringValue": "FocusShield 1.6.0 Pre-Release" }
+                  }
+                },
+                {
+                  "name": "projects/eminent-physics-z8p5g/databases/default/documents/releases/alpha-170",
+                  "fields": {
+                    "versionName": { "stringValue": "1.7.0-alpha.1" },
+                    "versionCode": { "integerValue": "9" },
+                    "channel": { "stringValue": "alpha" },
+                    "title": { "stringValue": "FocusShield 1.7.0 Alpha" }
+                  }
+                },
+                {
+                  "name": "projects/eminent-physics-z8p5g/databases/default/documents/releases/internal-180",
+                  "fields": {
+                    "versionName": { "stringValue": "1.8.0-internal.1" },
+                    "versionCode": { "integerValue": "10" },
+                    "channel": { "stringValue": "internal" },
+                    "title": { "stringValue": "FocusShield 1.8.0 Internal" }
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val baseConfig = com.example.feature.update.data.ExternalFirebaseUpdateConfig.fromBuildConfig()
+        val repo = com.example.feature.update.data.FirebaseReleaseRepository(configProvider = { baseConfig })
+
+        val prodReleases = repo.parseFirestoreReleasesList(
+            firestorePayload,
+            baseConfig.withChannel(com.example.feature.update.domain.UpdateChannel.PRODUCTION)
+        )
+        assertEquals(listOf("1.5.0"), prodReleases.map { it.versionName })
+
+        val betaReleases = repo.parseFirestoreReleasesList(
+            firestorePayload,
+            baseConfig.withChannel(com.example.feature.update.domain.UpdateChannel.BETA)
+        )
+        assertEquals(listOf("1.6.0-beta.1"), betaReleases.map { it.versionName })
+
+        val preReleases = repo.parseFirestoreReleasesList(
+            firestorePayload,
+            baseConfig.withChannel(com.example.feature.update.domain.UpdateChannel.PRE_RELEASE)
+        )
+        assertEquals(listOf("1.6.0-rc.1"), preReleases.map { it.versionName })
+
+        val alphaReleases = repo.parseFirestoreReleasesList(
+            firestorePayload,
+            baseConfig.withChannel(com.example.feature.update.domain.UpdateChannel.ALPHA)
+        )
+        assertEquals(listOf("1.7.0-alpha.1"), alphaReleases.map { it.versionName })
+
+        val internalReleases = repo.parseFirestoreReleasesList(
+            firestorePayload,
+            baseConfig.withChannel(com.example.feature.update.domain.UpdateChannel.INTERNAL)
+        )
+        assertEquals(listOf("1.8.0-internal.1"), internalReleases.map { it.versionName })
+    }
 }

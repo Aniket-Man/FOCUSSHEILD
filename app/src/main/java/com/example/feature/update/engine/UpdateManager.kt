@@ -70,14 +70,21 @@ class UpdateManager(
     private val _completedUpdate = MutableStateFlow<UpdateInfo?>(null)
     val completedUpdate: StateFlow<UpdateInfo?> = _completedUpdate.asStateFlow()
 
-    /** Active external Firebase update project configuration (from in-app token or .env Secrets). */
+    /** Active update server configuration. */
     private val _externalFirebaseConfig = MutableStateFlow<ExternalFirebaseUpdateConfig?>(
         ExternalFirebaseUpdateConfig.fromBuildConfig()
     )
     val externalFirebaseConfig: StateFlow<ExternalFirebaseUpdateConfig?> =
         _externalFirebaseConfig.asStateFlow()
 
-    /** All past releases fetched from the external Firebase release portal (newest first). */
+    /** Currently selected update server track (Production, Beta, Pre-Release, Alpha, Internal). */
+    private val _selectedChannel = MutableStateFlow(
+        ExternalFirebaseUpdateConfig.fromBuildConfig().selectedUpdateChannel
+    )
+    val selectedChannel: StateFlow<com.example.feature.update.domain.UpdateChannel> =
+        _selectedChannel.asStateFlow()
+
+    /** All past releases fetched from the release server for the selected channel (newest first). */
     private val _releaseHistory = MutableStateFlow<List<UpdateInfo>>(emptyList())
     val releaseHistory: StateFlow<List<UpdateInfo>> = _releaseHistory.asStateFlow()
 
@@ -102,6 +109,7 @@ class UpdateManager(
     fun restore(): Job = scope.launch {
         val needsFreshCheck = stateMutex.withLock {
             val prefs = preferences.current()
+            _selectedChannel.value = prefs.selectedChannel
             _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
             prefs.releaseHistoryJson?.let(::decodeHistory)?.takeIf { it.isNotEmpty() }?.let {
                 _releaseHistory.value = it
@@ -239,8 +247,38 @@ class UpdateManager(
     }
 
     /**
-     * Parses and saves an external Firebase Connection Token (`fsupd_...`), JSON config, or `.env`
-     * snippet pasted by the user inside the app, and immediately triggers an update check.
+     * Switches the active update channel (`production`, `beta`, `prerelease`, `alpha`, `internal`),
+     * clears any cached offer or release history from the previous channel, and immediately checks
+     * the release server for updates on the selected track.
+     */
+    fun selectUpdateChannel(channel: com.example.feature.update.domain.UpdateChannel): Job {
+        downloadJob?.cancel()
+        downloadJob = null
+        return scope.launch {
+            checkMutex.withLock {
+                stateMutex.withLock {
+                    preferences.setSelectedUpdateChannel(channel)
+                    current = null
+                    installCandidate = null
+                    downloadManager.cleanUpObsolete(keepName = null)
+                    UpdateNotificationHelper.clear(context)
+                    _selectedChannel.value = channel
+                    val updatedConfig = (_externalFirebaseConfig.value
+                        ?: ExternalFirebaseUpdateConfig.fromBuildConfig()).withChannel(channel)
+                    _externalFirebaseConfig.value = updatedConfig
+                    _releaseHistory.value = emptyList()
+                    _showDot.value = false
+                    _state.value = UpdateState.Checking
+                }
+                val result = checker.check(manual = true)
+                stateMutex.withLock { applyResult(result, manual = true) }
+                refreshReleaseHistoryQuietly()
+            }
+        }
+    }
+
+    /**
+     * Parses and saves an external update configuration and immediately triggers an update check.
      */
     fun applyExternalFirebaseToken(
         rawInput: String,
@@ -248,13 +286,13 @@ class UpdateManager(
     ) {
         val parsed = ExternalFirebaseUpdateConfig.parseFlexibleInput(
             rawInput = rawInput,
-            sourceLabel = "In-App Token"
+            sourceLabel = "Release Server"
         )
         if (parsed == null || !parsed.isValid) {
             onResult(
                 Result.failure(
                     IllegalArgumentException(
-                        "Invalid Firebase token or config. Paste the Connection Token (fsupd_...) or Firebase JSON from your release website."
+                        "Invalid update server configuration."
                     )
                 )
             )
@@ -262,23 +300,13 @@ class UpdateManager(
         }
         scope.launch {
             stateMutex.withLock {
+                val activeChannel = parsed.selectedUpdateChannel
+                preferences.setSelectedUpdateChannel(activeChannel)
                 preferences.setExternalFirebaseConfigJson(parsed.toJsonString())
-                _externalFirebaseConfig.value = parsed
+                _selectedChannel.value = activeChannel
+                _externalFirebaseConfig.value = parsed.withChannel(activeChannel)
             }
             onResult(Result.success(parsed))
-            checkManually()
-        }
-    }
-
-    /** Removes the in-app pasted Firebase token, reverting to `.env` Secrets (if set) or fallback. */
-    fun clearExternalFirebaseToken() {
-        scope.launch {
-            stateMutex.withLock {
-                preferences.setExternalFirebaseConfigJson(null)
-                preferences.setReleaseHistoryJson(null)
-                _externalFirebaseConfig.value = ExternalFirebaseUpdateConfig.fromBuildConfig()
-                _releaseHistory.value = emptyList()
-            }
             checkManually()
         }
     }
@@ -555,6 +583,7 @@ class UpdateManager(
                 }
 
                 val prefs = preferences.current()
+                _selectedChannel.value = prefs.selectedChannel
                 _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
                 val rawInfo = prefs.latestInfoJson
                 val info = current ?: rawInfo?.let(::decodeInfo)

@@ -3,6 +3,7 @@ package com.example.feature.update.data
 import android.util.Base64
 import com.example.feature.update.domain.DownloadProgress
 import com.example.feature.update.domain.SemanticVersion
+import com.example.feature.update.domain.UpdateChannel
 import com.example.feature.update.domain.UpdateInfo
 import java.io.BufferedOutputStream
 import java.io.File
@@ -19,9 +20,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Fetches FocusShield releases and past release history from an external/secondary Firebase
- * project's Firestore database (`releases` collection) and supports both Firebase Cloud Storage
- * HTTPS APK links and Firestore Chunked Binary fallback (`release_binaries/{releaseId}/chunks`).
+ * Fetches FocusShield releases and past release history from the dedicated release server
+ * (`releases` collection) and supports both HTTPS APK links and chunked binary packages
+ * (`release_binaries/{releaseId}/chunks`).
  */
 class FirebaseReleaseRepository(
     private val configProvider: () -> ExternalFirebaseUpdateConfig?,
@@ -32,8 +33,11 @@ class FirebaseReleaseRepository(
         fetchReleaseHistory().firstOrNull()
 
     override suspend fun fetchLatestReleaseConditional(etag: String?): ReleaseFetchResponse {
+        val activeChannel = UpdateChannel.normalizeKey(configProvider()?.normalizedChannel)
         val latest = fetchLatestRelease()
-        val syntheticEtag = latest?.let { "${it.versionName}-${it.versionCode ?: 0}-${it.publishedAt.orEmpty()}" }
+        val syntheticEtag = latest?.let {
+            "$activeChannel:${it.versionName}-${it.versionCode ?: 0}-${it.publishedAt.orEmpty()}"
+        }
         return if (etag != null && syntheticEtag != null && etag == syntheticEtag) {
             ReleaseFetchResponse(info = latest, etag = syntheticEtag, notModified = true)
         } else {
@@ -42,17 +46,18 @@ class FirebaseReleaseRepository(
     }
 
     /**
-     * Fetches all published releases from the external Firebase project's `releases` collection,
-     * sorted newest-first (`versionCode` and semantic `versionName` descending).
+     * Fetches all published releases for the currently selected update channel (`production`,
+     * `beta`, `prerelease`, `alpha`, or `internal`), sorted newest-first (`versionCode` and
+     * semantic `versionName` descending).
      */
     override suspend fun fetchReleaseHistory(): List<UpdateInfo> = withContext(Dispatchers.IO) {
         val config = configProvider()
             ?: throw UpdateSourceUnavailableException(
-                "External Firebase update server is not configured yet."
+                "Update server is not configured yet."
             )
         if (!config.isValid) {
             throw UpdateSourceUnavailableException(
-                "External Firebase Project ID is invalid."
+                "Update server configuration is invalid."
             )
         }
 
@@ -68,7 +73,7 @@ class FirebaseReleaseRepository(
             client.newCall(request).execute()
         } catch (e: IOException) {
             throw UpdateSourceUnavailableException(
-                "Couldn't reach the Firebase update server. Check your internet connection."
+                "Couldn't reach the update server. Check your internet connection."
             )
         }
 
@@ -79,12 +84,12 @@ class FirebaseReleaseRepository(
             }
             if (resp.code == 403 || resp.code == 401) {
                 throw UpdateSourceUnavailableException(
-                    "Firebase update server denied read access (HTTP ${resp.code}). Ensure firestore.rules allows read on /releases."
+                    "Update server denied read access (HTTP ${resp.code})."
                 )
             }
             if (!resp.isSuccessful) {
                 throw UpdateSourceUnavailableException(
-                    "Firebase update server returned HTTP ${resp.code}."
+                    "Update server returned HTTP ${resp.code}."
                 )
             }
 
@@ -93,8 +98,8 @@ class FirebaseReleaseRepository(
     }
 
     /**
-     * Reassembles a chunked APK stored in Firestore under `release_binaries/{releaseId}/chunks`
-     * when the companion Release Website uses Firestore Chunk Fallback mode.
+     * Reassembles a chunked APK stored on the release server under
+     * `release_binaries/{releaseId}/chunks`.
      */
     suspend fun downloadChunkedApk(
         chunkedUri: String,
@@ -102,11 +107,11 @@ class FirebaseReleaseRepository(
         onProgress: (DownloadProgress) -> Unit
     ) = withContext(Dispatchers.IO) {
         val config = configProvider()
-            ?: throw UpdateDownloadException("External Firebase update server is not configured.")
+            ?: throw UpdateDownloadException("Update server is not configured.")
         val stripped = chunkedUri.removePrefix(UpdateUrlPolicy.FIREBASE_CHUNKED_SCHEME).trim('/')
         val parts = stripped.split('/')
         if (parts.size < 2) {
-            throw UpdateDownloadException("Malformed chunked APK descriptor.")
+            throw UpdateDownloadException("Malformed update package descriptor.")
         }
         val releaseId = parts.drop(1).joinToString("/")
 
@@ -133,17 +138,17 @@ class FirebaseReleaseRepository(
             val resp = try {
                 client.newCall(req).execute()
             } catch (e: IOException) {
-                throw UpdateDownloadException("Failed while downloading APK chunks from Firebase.")
+                throw UpdateDownloadException("Failed while downloading update package from server.")
             }
 
             resp.use { r ->
                 if (!r.isSuccessful) {
-                    throw UpdateDownloadException("Firebase chunk download failed (HTTP ${r.code}).")
+                    throw UpdateDownloadException("Update package download failed (HTTP ${r.code}).")
                 }
                 val json = try {
                     JSONObject(r.body?.string().orEmpty())
                 } catch (_: Exception) {
-                    throw UpdateDownloadException("Unreadable chunk payload from Firebase.")
+                    throw UpdateDownloadException("Unreadable update package payload from server.")
                 }
                 val docs = json.optJSONArray("documents") ?: JSONArray()
                 for (i in 0 until docs.length()) {
@@ -169,7 +174,7 @@ class FirebaseReleaseRepository(
         } while (!pageToken.isNullOrBlank())
 
         if (chunks.isEmpty()) {
-            throw UpdateDownloadException("No APK binary chunks were found in Firebase for this release.")
+            throw UpdateDownloadException("No APK binary chunks were found on the update server for this release.")
         }
 
         val ordered = chunks.sortedBy { it.index }
@@ -180,7 +185,7 @@ class FirebaseReleaseRepository(
             ordered.forEachIndexed { idx, chunk ->
                 currentCoroutineContext().ensureActive()
                 val decoded = decodeBase64Chunk(chunk.base64Data)
-                    ?: throw UpdateDownloadException("Corrupted APK chunk #${chunk.index} in Firebase.")
+                    ?: throw UpdateDownloadException("Corrupted APK chunk #${chunk.index} from update server.")
                 output.write(decoded)
                 writtenBytes += decoded.size
                 val percent = if (declaredTotalBytes > 0) {
@@ -207,11 +212,11 @@ class FirebaseReleaseRepository(
         val root = try {
             JSONObject(rawBody)
         } catch (_: Exception) {
-            throw UpdateSourceUnavailableException("Firebase update server returned invalid JSON.")
+            throw UpdateSourceUnavailableException("Update server returned invalid JSON.")
         }
 
         val docs = root.optJSONArray("documents") ?: return emptyList()
-        val targetChannel = config.normalizedChannel.lowercase()
+        val targetChannel = UpdateChannel.normalizeKey(config.normalizedChannel)
         val parsed = mutableListOf<UpdateInfo>()
 
         for (i in 0 until docs.length()) {
@@ -244,12 +249,12 @@ class FirebaseReleaseRepository(
         val docPath = doc.optString("name")
         val releaseId = docPath.substringAfterLast('/').ifBlank { "latest" }
 
-        val docChannel = readStringField(fields, "channel").trim().lowercase()
-        if (docChannel.isNotEmpty() &&
-            targetChannel.isNotEmpty() &&
-            targetChannel != "all" &&
-            docChannel != targetChannel
-        ) {
+        val rawDocChannel = readStringField(fields, "channel")
+            .ifBlank { readStringField(fields, "track") }
+            .ifBlank { readStringField(fields, "releaseChannel") }
+        val normalizedDocChannel = UpdateChannel.normalizeKey(rawDocChannel)
+        val normalizedTargetChannel = UpdateChannel.normalizeKey(targetChannel)
+        if (normalizedTargetChannel != "all" && normalizedDocChannel != normalizedTargetChannel) {
             return null
         }
 

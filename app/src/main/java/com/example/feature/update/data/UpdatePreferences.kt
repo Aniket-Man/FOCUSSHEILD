@@ -63,15 +63,22 @@ data class UpdatePrefs(
     /** User-pasted external Firebase connection config JSON (overrides or supplements .env). */
     val externalFirebaseConfigJson: String? = null,
     /** Cached JSON array of past releases from the external Firebase update server. */
-    val releaseHistoryJson: String? = null
+    val releaseHistoryJson: String? = null,
+    /** Selected update server track (`production`, `beta`, `prerelease`, `alpha`, `internal`). */
+    val selectedChannelKey: String = com.example.feature.update.domain.UpdateChannel.PRODUCTION.key
 ) {
+    val selectedChannel: com.example.feature.update.domain.UpdateChannel
+        get() = com.example.feature.update.domain.UpdateChannel.fromKey(selectedChannelKey)
+
     /**
-     * Resolves the active external Firebase update configuration: prefers an in-app pasted token
-     * stored in preferences, then falls back to `BuildConfig` (`.env` / Secrets).
+     * Resolves the active update server configuration and applies the user's selected
+     * [selectedChannel] so update checks only fetch releases from that track.
      */
-    fun activeExternalFirebaseConfig(): ExternalFirebaseUpdateConfig? =
-        ExternalFirebaseUpdateConfig.fromStoredJson(externalFirebaseConfigJson)
+    fun activeExternalFirebaseConfig(): ExternalFirebaseUpdateConfig {
+        val base = ExternalFirebaseUpdateConfig.fromStoredJson(externalFirebaseConfigJson)
             ?: ExternalFirebaseUpdateConfig.fromBuildConfig()
+        return base.withChannel(selectedChannel)
+    }
 }
 
 class UpdatePreferences internal constructor(
@@ -96,6 +103,7 @@ class UpdatePreferences internal constructor(
         val PENDING_INSTALL_INFO_JSON = stringPreferencesKey("pending_install_info_json")
         val EXTERNAL_FIREBASE_CONFIG_JSON = stringPreferencesKey("external_firebase_config_json")
         val RELEASE_HISTORY_JSON = stringPreferencesKey("release_history_json")
+        val SELECTED_UPDATE_CHANNEL = stringPreferencesKey("selected_update_channel")
     }
 
     val flow: Flow<UpdatePrefs> = dataStore.data
@@ -115,7 +123,9 @@ class UpdatePreferences internal constructor(
                 lastInstalledVersion = prefs[Keys.LAST_INSTALLED_VERSION],
                 pendingInstallInfoJson = prefs[Keys.PENDING_INSTALL_INFO_JSON],
                 externalFirebaseConfigJson = prefs[Keys.EXTERNAL_FIREBASE_CONFIG_JSON],
-                releaseHistoryJson = prefs[Keys.RELEASE_HISTORY_JSON]
+                releaseHistoryJson = prefs[Keys.RELEASE_HISTORY_JSON],
+                selectedChannelKey = prefs[Keys.SELECTED_UPDATE_CHANNEL]
+                    ?: ExternalFirebaseUpdateConfig.fromBuildConfig().normalizedChannel
             )
         }
 
@@ -153,6 +163,23 @@ class UpdatePreferences internal constructor(
     suspend fun setPendingInstallInfoJson(json: String?) {
         dataStore.edit { prefs ->
             if (json == null) prefs.remove(Keys.PENDING_INSTALL_INFO_JSON) else prefs[Keys.PENDING_INSTALL_INFO_JSON] = json
+        }
+    }
+
+    /**
+     * Persists the user's selected [com.example.feature.update.domain.UpdateChannel] and clears
+     * any cached offer/history from the previous channel so the next check fetches strictly from
+     * the newly selected track.
+     */
+    suspend fun setSelectedUpdateChannel(channel: com.example.feature.update.domain.UpdateChannel) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SELECTED_UPDATE_CHANNEL] = channel.key
+            prefs.remove(Keys.DOWNLOADED_VERSION)
+            prefs.remove(Keys.DOWNLOADED_PATH)
+            prefs.remove(Keys.LATEST_INFO_JSON)
+            prefs.remove(Keys.RELEASE_HISTORY_JSON)
+            prefs.remove(Keys.ETAG)
+            prefs[Keys.LAST_CHECK_TIME] = 0L
         }
     }
 

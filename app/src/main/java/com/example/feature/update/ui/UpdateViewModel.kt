@@ -2,7 +2,7 @@ package com.example.feature.update.ui
 
 import android.content.Intent
 import androidx.lifecycle.ViewModel
-import com.example.feature.update.data.ExternalFirebaseUpdateConfig
+import com.example.feature.update.domain.UpdateChannel
 import com.example.feature.update.domain.UpdateInfo
 import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.engine.UpdateManager
@@ -31,11 +31,10 @@ class UpdateViewModel @Inject constructor(
     /** Non-null after the app restarts onto a newly installed update until dismissed. */
     val completedUpdate: StateFlow<UpdateInfo?> = manager.completedUpdate
 
-    /** Active external Firebase update server configuration (from in-app token or .env Secrets). */
-    val externalFirebaseConfig: StateFlow<ExternalFirebaseUpdateConfig?> =
-        manager.externalFirebaseConfig
+    /** Currently selected update server track (Production, Beta, Pre-Release, Alpha, Internal). */
+    val selectedChannel: StateFlow<UpdateChannel> = manager.selectedChannel
 
-    /** All published releases fetched from the external Firebase project (newest first). */
+    /** All published releases fetched for the active update channel (newest first). */
     val releaseHistory: StateFlow<List<UpdateInfo>> = manager.releaseHistory
 
     init {
@@ -46,14 +45,8 @@ class UpdateViewModel @Inject constructor(
     /** Manual "Check for updates" — ignores the cooldown and may report a failure. */
     fun checkForUpdates() = manager.checkManually()
 
-    /** Saves a pasted external Firebase connection token (`fsupd_...`) or JSON config and checks immediately. */
-    fun applyExternalFirebaseToken(
-        rawInput: String,
-        onResult: (Result<ExternalFirebaseUpdateConfig>) -> Unit = {}
-    ) = manager.applyExternalFirebaseToken(rawInput, onResult)
-
-    /** Clears an in-app pasted Firebase connection token. */
-    fun clearExternalFirebaseToken() = manager.clearExternalFirebaseToken()
+    /** Switches the active update channel track and immediately checks for updates on that track. */
+    fun selectUpdateChannel(channel: UpdateChannel) = manager.selectUpdateChannel(channel)
 
     /** "Later" on the popup. The update stays available and the red dot stays lit. */
     fun onLater() = manager.dismissPrompt()

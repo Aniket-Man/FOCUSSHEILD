@@ -2,26 +2,20 @@ package com.example.feature.update.data
 
 import android.util.Base64
 import com.example.BuildConfig
+import com.example.feature.update.domain.UpdateChannel
 import org.json.JSONObject
 
 /**
- * Configuration and connection token model for connecting FocusShield's update system to an
- * external/secondary Firebase project (separate from the primary user-sync Firebase instance).
- *
- * Supports dual provisioning:
- *  1. Build-time `.env` / AI Studio Secrets (`UPDATE_FIREBASE_PROJECT_ID`, `UPDATE_FIREBASE_API_KEY`,
- *     `UPDATE_FIREBASE_STORAGE_BUCKET`, `UPDATE_CONNECTION_TOKEN`, etc.).
- *  2. Runtime pasteable Connection Token (`fsupd_<base64>`), raw JSON (`firebase-applet-config.json`),
- *     or `.env` key-value block copied from the companion Firebase Release Admin Website.
+ * Configuration model for connecting FocusShield's update system to the release server.
  */
 data class ExternalFirebaseUpdateConfig(
-    val projectId: String,
+    val projectId: String = DEFAULT_PROJECT_ID,
     val apiKey: String = "",
-    val storageBucket: String = "",
-    val appId: String = "",
+    val storageBucket: String = DEFAULT_STORAGE_BUCKET,
+    val appId: String = DEFAULT_APP_ID,
     val databaseId: String = DEFAULT_DATABASE_ID,
     val channelToken: String = DEFAULT_CHANNEL,
-    val sourceLabel: String = "In-App Token"
+    val sourceLabel: String = "Release Server"
 ) {
     val isValid: Boolean
         get() = projectId.isNotBlank() && projectId != "remixed-project-id"
@@ -36,9 +30,18 @@ data class ExternalFirebaseUpdateConfig(
             .ifBlank { "$projectId.firebasestorage.app" }
 
     val normalizedChannel: String
-        get() = channelToken.trim().ifBlank { DEFAULT_CHANNEL }
+        get() = UpdateChannel.normalizeKey(channelToken)
 
-    /** Short fingerprint of the connection token for UI verification. */
+    val selectedUpdateChannel: UpdateChannel
+        get() = UpdateChannel.fromKey(channelToken)
+
+    fun withChannel(channel: UpdateChannel): ExternalFirebaseUpdateConfig =
+        copy(channelToken = channel.key)
+
+    fun withChannelKey(channelKey: String): ExternalFirebaseUpdateConfig =
+        copy(channelToken = UpdateChannel.normalizeKey(channelKey))
+
+    /** Short fingerprint of the connection token for internal diagnostics. */
     val tokenPreview: String
         get() {
             val token = toConnectionToken()
@@ -81,7 +84,7 @@ data class ExternalFirebaseUpdateConfig(
         return "$TOKEN_PREFIX$encoded"
     }
 
-    /** Additional HTTPS hosts allowed to serve APK binaries for this external Firebase project. */
+    /** Additional HTTPS hosts allowed to serve APK binaries for this release server. */
     fun apkHostAllowList(): Set<String> = buildSet {
         add("firebasestorage.googleapis.com")
         add("storage.googleapis.com")
@@ -99,33 +102,44 @@ data class ExternalFirebaseUpdateConfig(
 
     companion object {
         const val TOKEN_PREFIX = "fsupd_"
-        const val DEFAULT_DATABASE_ID = "(default)"
+        const val DEFAULT_PROJECT_ID = "eminent-physics-z8p5g"
+        const val DEFAULT_STORAGE_BUCKET = "eminent-physics-z8p5g.firebasestorage.app"
+        const val DEFAULT_APP_ID = "1:676324793849:web:a1523e5318fd333719b128"
+        const val DEFAULT_DATABASE_ID = "ai-studio-focusshieldrelea-3363add2-5434-4c84-81c2-0bc738e40dc8"
         const val DEFAULT_CHANNEL = "production"
 
         /**
-         * Reads the compile-time configuration from `BuildConfig` (populated from `.env` / AI Studio Secrets).
-         * Returns null when neither `UPDATE_CONNECTION_TOKEN` nor `UPDATE_FIREBASE_PROJECT_ID` is set.
+         * Reads the compile-time configuration from `BuildConfig` (populated from `.env` / Secrets)
+         * and falls back to the built-in release server defaults so the update server remains
+         * permanently connected.
          */
-        fun fromBuildConfig(): ExternalFirebaseUpdateConfig? {
+        fun fromBuildConfig(channelOverride: String? = null): ExternalFirebaseUpdateConfig {
+            val resolvedChannel = channelOverride?.takeIf { it.isNotBlank() }?.let(UpdateChannel::normalizeKey)
+
             val connectionToken = BuildConfig.UPDATE_CONNECTION_TOKEN.trim()
             if (connectionToken.isNotEmpty()) {
-                parseFlexibleInput(connectionToken, sourceLabel = "Secrets (.env Token)")?.let {
-                    if (it.isValid) return it
+                parseFlexibleInput(connectionToken, sourceLabel = "Release Server")?.let { parsed ->
+                    if (parsed.isValid) {
+                        return if (resolvedChannel != null) parsed.withChannelKey(resolvedChannel) else parsed
+                    }
                 }
             }
 
-            val projectId = BuildConfig.UPDATE_FIREBASE_PROJECT_ID.trim()
-            if (projectId.isEmpty()) return null
+            val projectId = BuildConfig.UPDATE_FIREBASE_PROJECT_ID.trim().ifBlank { DEFAULT_PROJECT_ID }
+            val storageBucket = BuildConfig.UPDATE_FIREBASE_STORAGE_BUCKET.trim().ifBlank { DEFAULT_STORAGE_BUCKET }
+            val appId = BuildConfig.UPDATE_FIREBASE_APP_ID.trim().ifBlank { DEFAULT_APP_ID }
+            val databaseId = BuildConfig.UPDATE_FIREBASE_DATABASE_ID.trim().ifBlank { DEFAULT_DATABASE_ID }
+            val defaultChannel = BuildConfig.UPDATE_CHANNEL_TOKEN.trim().ifBlank { DEFAULT_CHANNEL }
 
             return ExternalFirebaseUpdateConfig(
                 projectId = projectId,
                 apiKey = BuildConfig.UPDATE_FIREBASE_API_KEY.trim(),
-                storageBucket = BuildConfig.UPDATE_FIREBASE_STORAGE_BUCKET.trim(),
-                appId = BuildConfig.UPDATE_FIREBASE_APP_ID.trim(),
-                databaseId = BuildConfig.UPDATE_FIREBASE_DATABASE_ID.trim().ifBlank { DEFAULT_DATABASE_ID },
-                channelToken = BuildConfig.UPDATE_CHANNEL_TOKEN.trim().ifBlank { DEFAULT_CHANNEL },
-                sourceLabel = "Secrets (.env)"
-            ).takeIf { it.isValid }
+                storageBucket = storageBucket,
+                appId = appId,
+                databaseId = databaseId,
+                channelToken = resolvedChannel ?: UpdateChannel.normalizeKey(defaultChannel),
+                sourceLabel = "Release Server"
+            )
         }
 
         /**

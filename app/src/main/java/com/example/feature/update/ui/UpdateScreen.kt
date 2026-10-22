@@ -86,7 +86,6 @@ fun UpdateScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val externalFirebaseConfig by viewModel.externalFirebaseConfig.collectAsStateWithLifecycle()
     val releaseHistory by viewModel.releaseHistory.collectAsStateWithLifecycle()
 
     // Android only shows the installer UI for an app the user has allowed to install unknown apps.
@@ -269,14 +268,6 @@ fun UpdateScreen(
                     onCheck = { viewModel.checkForUpdates() }
                 )
             }
-
-            Spacer(modifier = Modifier.height(FocusSpacing.lg))
-
-            FirebaseUpdateServerCard(
-                config = externalFirebaseConfig,
-                onApplyTokenOrConfig = { raw, cb -> viewModel.applyExternalFirebaseToken(raw, cb) },
-                onDisconnectToken = { viewModel.clearExternalFirebaseToken() }
-            )
 
             if (releaseHistory.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(FocusSpacing.lg))
