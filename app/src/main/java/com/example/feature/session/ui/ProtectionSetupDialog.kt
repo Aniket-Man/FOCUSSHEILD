@@ -66,6 +66,7 @@ import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
+import com.example.core.permission.rememberVpnConsentRequester
 
 /**
  * Educational setup & permission verification dialog shown before starting a protected session.
@@ -86,6 +87,9 @@ fun ProtectionSetupDialog(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isAccessibilityActive by com.example.core.accessibility.AccessibilityHelper.isServiceEnabledFlow.collectAsState()
+    val requestVpnConsent = rememberVpnConsentRequester {
+        onRefreshPermissions()
+    }
 
     // 1. Immediately refresh whenever service connects or flow emits
     LaunchedEffect(isAccessibilityActive) {
@@ -246,8 +250,7 @@ fun ProtectionSetupDialog(
                     isGranted = permissionStatus.isVpnGranted,
                     isRequired = false,
                     onClick = {
-                        FocusPermissionManager.requestVpnPermission(context)
-                        onRefreshPermissions()
+                        requestVpnConsent()
                     },
                     testTag = "vpn_permission_item"
                 )

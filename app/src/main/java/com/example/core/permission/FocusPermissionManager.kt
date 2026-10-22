@@ -1,6 +1,7 @@
 package com.example.core.permission
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -48,6 +49,9 @@ data class ProtectionPermissionStatus(
  * 4. "Battery Optimization Exemption" (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) to run in background without being killed when swiped from recents
  */
 object FocusPermissionManager {
+
+    /** Arbitrary request code for the legacy Activity.startActivityForResult VPN path. */
+    private const val VPN_PERMISSION_REQUEST_CODE = 0x5650
 
     private val _permissionStatusFlow = MutableStateFlow(ProtectionPermissionStatus())
     val permissionStatusFlow: StateFlow<ProtectionPermissionStatus> = _permissionStatusFlow.asStateFlow()
@@ -242,18 +246,49 @@ object FocusPermissionManager {
     }
 
     /**
-     * Prepares VPN or opens the system authorization dialog / settings.
+     * Returns the system consent intent for the VPN permission, or null when the app is already
+     * prepared (or the platform could not produce one).
+     *
+     * Callers must launch this intent with `startActivityForResult` — Compose screens should use
+     * [rememberVpnConsentRequester]. The confirmation dialog resolves the requesting app through
+     * `getCallingPackage()`, which Android only populates for result-launched activities; a plain
+     * `startActivity` therefore dismisses the dialog without recording consent.
      */
+    fun vpnConsentIntent(context: Context): Intent? {
+        return try {
+            VpnService.prepare(context)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Best-effort VPN permission request for non-Compose callers.
+     *
+     * Prefer [rememberVpnConsentRequester] from Compose. This still goes through
+     * [Activity.startActivityForResult] when the context can be unwrapped to an Activity, because
+     * that is what lets the system dialog attribute the request to FocusShield and store the
+     * user's choice.
+     */
+    @Suppress("DEPRECATION")
     fun requestVpnPermission(context: Context) {
+        val intent = vpnConsentIntent(context) ?: return
+        val activity = context.findActivity()
+        if (activity == null) {
+            openVpnSettings(context)
+            return
+        }
         try {
-            val intent = VpnService.prepare(context)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }
+            activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
         } catch (e: Exception) {
             openVpnSettings(context)
         }
+    }
+
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is android.content.ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 
     /**

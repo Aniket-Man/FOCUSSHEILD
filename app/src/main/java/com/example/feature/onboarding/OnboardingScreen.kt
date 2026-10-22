@@ -116,6 +116,7 @@ import com.example.core.design.LocalFocusColors
 import com.example.core.design.FocusSpacing
 import com.example.core.permission.AwaitPermissionGrantEffect
 import com.example.core.permission.OnboardingPermission
+import com.example.core.permission.rememberVpnConsentRequester
 import com.example.core.ui.FocusBrandMark
 import com.example.core.ui.FocusLottieAnimation
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -155,6 +156,23 @@ fun OnboardingScreen(
 
     fun refreshPermissions() {
         grantedStates = OnboardingPermission.flow.associateWith { it.isGranted(context) }
+    }
+
+    // VPN consent is a system dialog that must be started for result; see the helper for why a
+    // plain startActivity never records the grant. The callback lands here after the user answers.
+    val requestVpnConsent = rememberVpnConsentRequester {
+        awaitingPermission = null
+        refreshPermissions()
+    }
+
+    fun requestPermission(permission: OnboardingPermission) {
+        if (permission == OnboardingPermission.VPN_SERVICE) {
+            awaitingPermission = permission
+            requestVpnConsent()
+        } else {
+            awaitingPermission = permission
+            permission.request(context)
+        }
     }
 
     // Pull the app back to the front the moment the awaited permission flips to granted, so the
@@ -283,8 +301,7 @@ fun OnboardingScreen(
                         activePermission = activePermission,
                         allMandatoryGranted = allMandatoryGranted,
                         onAllow = { permission ->
-                            awaitingPermission = permission
-                            permission.request(context)
+                            requestPermission(permission)
                         },
                         onContinue = { goToPage(4) },
                         onSkip = { goToPage(4) }

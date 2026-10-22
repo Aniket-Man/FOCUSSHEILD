@@ -83,6 +83,7 @@ import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.permission.rememberVpnConsentRequester
 import com.example.core.ui.BottomTab
 import com.example.core.ui.FocusBottomNavigation
 
@@ -106,6 +107,9 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+    val requestVpnConsent = rememberVpnConsentRequester {
+        viewModel.checkAccessibilityStatus()
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -349,7 +353,7 @@ fun SettingsScreen(
                         icon = if (uiState.isVpnGranted) Icons.Rounded.CheckCircle else Icons.Rounded.Language,
                         iconTint = if (uiState.isVpnGranted) FocusColors.EmeraldSuccess else FocusColors.Primary,
                         onClick = {
-                            com.example.core.permission.FocusPermissionManager.requestVpnPermission(context)
+                            requestVpnConsent()
                         },
                         testTag = "settings_vpn_service_row"
                     )
