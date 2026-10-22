@@ -11,22 +11,26 @@ import okhttp3.Request
 import okhttp3.Response
 
 /**
- * Reads the newest release from either the GitHub Releases API or a FocusShield-owned feed URL.
+ * Reads the newest release from the public FocusShield releases repository or a feed URL.
  *
- * ### Why there are two modes
+ * ### Where releases come from
  *
- * GitHub answers **404** to `releases/latest` both for an empty release list and for a private
- * repository when the caller is unauthenticated, and this app ships **no** GitHub credential: a
- * token inside an APK can be extracted, and a leaked token is worse than a disabled feature. A 404
- * is therefore mapped to "nothing published" (→ UpToDate), never to a failure — so a typo'd slug or
- * private repo is silent rather than a retry loop, and the honest way to ship releases while the
- * repository stays private is the feed URL (2 below):
+ * The source repository stays private; signed APKs and their metadata are published to the public
+ * `Aniket-Man/FOCUSSHEILD-releases` repository. Its `releases/latest` endpoint is readable without
+ * authentication, which is deliberate: this app ships **no** GitHub credential, because a token
+ * inside an APK can be extracted and a leaked token is worse than a disabled feature.
  *
- *  1. **Make the repository public**, or
- *  2. **Point the app at a feed URL** that serves the release JSON — a small backend, a Supabase
- *     Edge Function, or any static host. Set `UPDATE_FEED_URL` in `.env` and rebuild; the payload may
- *     be GitHub-shaped (`tag_name`, `assets[]`) or normalised (`versionName`, `apkUrl`,
- *     `releaseNotes`, `releasePageUrl`). The URL must be **https** — see [UpdateUrlPolicy].
+ * Two build-time options exist:
+ *
+ *  1. **Default:** the public releases repository configured by [DEFAULT_REPO_SLUG].
+ *  2. **A feed URL** that serves the release JSON — a small backend, a Supabase Edge Function, or any
+ *     static host. Set `UPDATE_FEED_URL` in `.env` and rebuild; the payload may be GitHub-shaped
+ *     (`tag_name`, `assets[]`) or normalised (`versionName`, `apkUrl`, `releaseNotes`,
+ *     `releasePageUrl`). The URL must be **https** — see [UpdateUrlPolicy].
+ *
+ * GitHub answers **404** to `releases/latest` both for an empty release list and for a repository
+ * the caller cannot read. A 404 is therefore mapped to "nothing published" (→ UpToDate), never to a
+ * failure — a release published only to the private source repository is silently invisible.
  *
  * `UPDATE_REPO_SLUG` overrides the repository for forks. Both are read at build time (see
  * `app/build.gradle.kts`), never at runtime — nothing about the update source is user-configurable,
@@ -96,8 +100,11 @@ class GitHubReleaseRepository(
     )
 
     companion object {
-        /** Owner/repo of the default release feed. Overridable per build (`UPDATE_REPO_SLUG`). */
-        const val DEFAULT_REPO_SLUG = "Aniket-Man/FOCUSSHEILD"
+        /**
+         * Owner/repo of the public release feed. The source repository is private, so releases are
+         * published here and read unauthenticated. Overridable per build (`UPDATE_REPO_SLUG`).
+         */
+        const val DEFAULT_REPO_SLUG = "Aniket-Man/FOCUSSHEILD-releases"
 
         private const val API_BASE = "https://api.github.com"
 

@@ -10,27 +10,26 @@ actually find a release.
 
 ## 1. Why GitHub Releases
 
-Releases are the distribution channel the project already has. The updater reads
-`https://api.github.com/repos/Aniket-Man/FOCUSSHEILD/releases/latest` **unauthenticated**, so there
-is no credential of any kind inside the APK (§1, §15). The repository slug is a compile-time
-constant in `GitHubReleaseRepository`; nothing about the source is user-configurable.
+Releases are the distribution channel. The source repository stays private; signed APKs and their
+metadata are published to the public **`Aniket-Man/FOCUSSHEILD-releases`** repository. The updater
+reads `https://api.github.com/repos/Aniket-Man/FOCUSSHEILD-releases/releases/latest`
+**unauthenticated**, so there is no credential of any kind inside the APK (§1, §15). The repository
+slug is a compile-time constant in `GitHubReleaseRepository`; nothing about the source is
+user-configurable.
 
-> ⚠️ **Private repository ⇒ silent "up to date".** GitHub returns **404** for
-> `releases/latest` on a private repo to an unauthenticated caller, and §15 forbids embedding a PAT
-> to fix that. Until the repo is public, or the endpoint is replaced by a backend the app can call,
-> every check resolves to `404 → null` → "up to date" (§1/§4): the updater never *errors*, it just
-> never sees a release. This is the intended consequence of the security rule, not a bug — and it is
-> why the fetch sits behind an interface (§15).
+Publishing to the private source repository does **not** feed the updater: an unauthenticated caller
+receives **404** there, which the app maps to "up to date" (§1/§4). The public releases repository is
+the only channel the app reads by default.
 
-### 1.1 Making it work while the repository is private
+### 1.1 Configuring the source
 
-`GitHubReleaseRepository` now resolves its source at build time from two optional `.env` keys
+`GitHubReleaseRepository` resolves its source at build time from two optional `.env` keys
 (`app/build.gradle.kts` → `BuildConfig`), so no code change is needed to go live:
 
 | Key | Effect |
 | --- | --- |
 | `UPDATE_FEED_URL` | When set, this URL **replaces** the GitHub API call. Any host works — a small backend, a Supabase Edge Function, a static file. |
-| `UPDATE_REPO_SLUG` | `owner/repo` override for forks that publish their own releases. Defaults to `Aniket-Man/FOCUSSHEILD`. |
+| `UPDATE_REPO_SLUG` | `owner/repo` override for forks that publish their own releases. Defaults to `Aniket-Man/FOCUSSHEILD-releases`. |
 
 Both values are compile-time only: nothing about the update source is user-configurable, so a
 malicious app or intent cannot redirect the updater. A malformed feed URL fails loudly at the point
@@ -213,17 +212,29 @@ The first release is `versionCode 1` / `versionName "1.0.0"`; then `2` / `"1.0.1
 2. Build the **signed** release APK. Signing reads `STORE_PASSWORD` / `KEY_PASSWORD` from the
    environment; the keystore itself is untracked and must stay that way.
 3. **If the signed build fails, do not create a release.**
-4. Tag `v<versionName>`, create the GitHub Release, and attach the signed APK as an asset whose name
-   ends in `.apk` — the updater ignores every other asset (§3).
+4. Tag `v<versionName>`, create the GitHub Release **in `Aniket-Man/FOCUSSHEILD-releases`**, and
+   attach the signed APK as an asset whose name ends in `.apk` — the updater ignores every other
+   asset (§3). A release created only in the private source repository is invisible to the app.
 5. Release notes go in the release **body**; the app renders them in the update screen (§12).
+
+For a local publish, with `gh` authenticated against the public repository:
+
+```bash
+gh release create "v<versionName>" \
+  --repo Aniket-Man/FOCUSSHEILD-releases \
+  --title "FocusShield v<versionName>" \
+  --notes-file release-notes.md \
+  app-release.apk
+```
 
 Nothing is published without showing the versionCode, versionName, tag, APK filename and release
 notes for confirmation first.
 
 ## 10. Known limitations
 
-- Private repository ⇒ 404 ⇒ checks always answer "up to date": nothing is ever offered and no
-  error is raised (§1/§15 conflict, documented above).
+- The public releases repository is the only channel the updater reads. A release published only to
+  the private source repository is invisible: unauthenticated callers receive 404, so the app
+  answers "up to date" instead of raising an error (§1/§15).
 - The unauthenticated API is rate-limited to 60 requests/hour per IP. The 6-hour cooldown keeps a
   single device far below that.
 - Release notes are parsed as a small markdown subset (headings, bullets, `**bold**`, `` `code` ``)

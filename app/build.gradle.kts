@@ -22,9 +22,9 @@ fun optionalProperty(key: String): String {
 }
 // Release-feed configuration for the in-app updater. Both are optional and compile-time only:
 //   UPDATE_FEED_URL   — a backend/static URL serving the release JSON (GitHub-shaped or normalised).
-//                       This is how the updater works while the GitHub repository is private, since
-//                       no GitHub token may ship inside the APK (see docs/UPDATE_SYSTEM.md §1/§15).
-//   UPDATE_REPO_SLUG  — owner/repo override for forks that publish their own releases.
+//                       When empty, the updater reads the public releases repo unauthenticated; no
+//                       GitHub token may ship inside the APK (see docs/UPDATE_SYSTEM.md §1/§15).
+//   UPDATE_REPO_SLUG  — owner/repo override; defaults to Aniket-Man/FOCUSSHEILD-releases.
 val updateFeedUrl = optionalProperty("UPDATE_FEED_URL")
 val updateRepoSlug = optionalProperty("UPDATE_REPO_SLUG")
 

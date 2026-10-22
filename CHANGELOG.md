@@ -21,6 +21,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). `versionN
 * `NotificationBlockDecision` and `SingleFlightThrottle` — pure, unit-tested decision/throttle logic
   extracted from the notification blocker and the widget updater (#30).
 
+### Changed
+
+* The in-app updater now reads the public `Aniket-Man/FOCUSSHEILD-releases` repository. Signed APKs
+  are published there so the source repository stays private without embedding a GitHub token.
+
 ### Fixed
 
 * Midnight re-arm is no longer lost when the daily-reset database work throws; alarms are armed

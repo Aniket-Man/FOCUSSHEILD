@@ -64,6 +64,14 @@ class ReleaseFeedTest {
     }
 
     @Test
+    fun `the default repository is the public releases feed`() {
+        assertEquals(
+            "https://api.github.com/repos/Aniket-Man/FOCUSSHEILD-releases/releases/latest",
+            GitHubReleaseRepository().buildUrl()
+        )
+    }
+
+    @Test
     fun `a configured feed url replaces the GitHub call`() {
         val repo = GitHubReleaseRepository(feedUrl = "https://feed.example.com/focusshield/release.json")
         assertEquals("https://feed.example.com/focusshield/release.json", repo.buildUrl())

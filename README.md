@@ -1,7 +1,7 @@
 # FocusShield
 
 [![CI](https://github.com/Aniket-Man/FOCUSSHEILD/actions/workflows/ci.yml/badge.svg)](https://github.com/Aniket-Man/FOCUSSHEILD/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Aniket-Man/FOCUSSHEILD)](https://github.com/Aniket-Man/FOCUSSHEILD/releases)
+[![Release](https://img.shields.io/github/v/release/Aniket-Man/FOCUSSHEILD-releases)](https://github.com/Aniket-Man/FOCUSSHEILD-releases/releases)
 [![License: MIT](https://img.shields.io/github/license/Aniket-Man/FOCUSSHEILD)](LICENSE)
 
 **FocusShield** is an offline-first Android study companion. It runs timed focus sessions,
@@ -76,10 +76,15 @@ Copy `.env.example` to `.env` and fill in only what you need. The
 | --- | --- | --- |
 | `SUPABASE_URL` | Cloud sync endpoint | app runs fully offline |
 | `SUPABASE_ANON_KEY` | Cloud sync anon key | app runs fully offline |
-| `UPDATE_FEED_URL` | Release feed for the in-app updater | falls back to the public GitHub Releases API |
-| `UPDATE_REPO_SLUG` | `owner/repo` override for forks | defaults to `Aniket-Man/FOCUSSHEILD` |
+| `UPDATE_FEED_URL` | Release feed for the in-app updater | falls back to the public releases repository |
+| `UPDATE_REPO_SLUG` | `owner/repo` override for forks | defaults to `Aniket-Man/FOCUSSHEILD-releases` |
 
 `.env` is git-ignored; `.env.example` is tracked and documents every key.
+
+Signed releases are published to the public
+[`Aniket-Man/FOCUSSHEILD-releases`](https://github.com/Aniket-Man/FOCUSSHEILD-releases) repository so
+the in-app updater can read them unauthenticated. The source repository stays private and no GitHub
+token ships inside the APK.
 
 ### Signing / keystore bootstrap
 
