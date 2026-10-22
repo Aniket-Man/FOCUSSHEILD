@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan to eliminate UI lag and frame jitter, fix the 5-minute break timer freeze, guarantee reliable App Limit and Focus Session block overlays, and unify Home Screen Today's Plan with the Planner tab after removing the Home Add Study button.",
-  "updatedAt": "2026-10-20T05:03:45.263872250Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Implementation plan to remove preloaded session tags (Physics, Electrostatics, JEE goal), add editable custom Subject tag chips and Topic input in the Session Setup sheet, hide empty tags on the Active Session screen, and persist them to Session History.",
+  "updatedAt":  "2026-10-22T10:46:09.677478983Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

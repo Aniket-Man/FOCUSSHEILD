@@ -153,6 +153,18 @@ class AppLimitOverlayActivity : ComponentActivity() {
         if (!packageName.isNullOrBlank()) {
             try {
                 AppLimitManager.instance.onBlockerDismissedByUser(packageName)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        val activePkg = com.example.core.accessibility.FocusAccessibilityService.instance
+                            ?.rootInActiveWindow?.packageName?.toString()
+                        if (activePkg == null || activePkg != packageName) {
+                            AppLimitManager.instance.onUserLeftDismissedApp(
+                                dismissedPackage = packageName,
+                                observedPackage = activePkg?.takeIf { it.isNotBlank() } ?: "com.android.launcher3"
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }, 500L)
             } catch (e: Exception) {
                 android.util.Log.w("AppLimitOverlay", "Could not record blocker dismissal: ${e.message}")
             }

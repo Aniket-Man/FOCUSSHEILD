@@ -27,4 +27,7 @@ interface SubjectDao {
 
     @Query("SELECT COUNT(*) FROM study_subjects")
     suspend fun getSubjectCount(): Int
+
+    @Query("DELETE FROM study_subjects WHERE id = :id")
+    suspend fun deleteSubjectById(id: String)
 }

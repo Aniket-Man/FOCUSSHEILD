@@ -68,6 +68,10 @@ class FocusAccessibilityService : AccessibilityService() {
     private var currentPreferences = FocusPreferences()
     private val lastAppLimitCheckTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    fun clearAppLimitCheckDebounce(packageName: String) {
+        lastAppLimitCheckTimestamps.remove(packageName)
+    }
+
     /**
      * Approved-content watch-time capture. Every call site treats a missing tracker as "no capture"
      * rather than an error — blocking must never depend on analytics being available.
@@ -235,9 +239,42 @@ class FocusAccessibilityService : AccessibilityService() {
             // package) and the very next window-state change corrects any exotic mismatch.
             val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                     eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            val activeWindowPackage = if (rawPackageName != lastForegroundPackage || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+                try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+            } else {
+                null
+            }
+
+            // When SystemUI (e.g. gesture nav / recents) emits TYPE_WINDOWS_CHANGED during a Home
+            // transition, event.packageName is com.android.systemui (filtered out), while
+            // rootInActiveWindow is the newly active launcher or app. Propagate that active
+            // package so AppLimitManager and AppLimitReentryGate observe the exit immediately.
+            if (eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
+                !com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName) &&
+                activeWindowPackage != null &&
+                activeWindowPackage != lastForegroundPackage &&
+                com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(activeWindowPackage)
+            ) {
+                lastForegroundPackage = activeWindowPackage
+                blockerManager?.onForegroundPackageChanged(activeWindowPackage)
+                appLimitManager?.onForegroundPackageChanged(activeWindowPackage)
+            }
+
+            // A content/scroll/window change from a different package is only a real foreground
+            // switch if that package is actually the active window (or if this is an explicit
+            // TYPE_WINDOW_STATE_CHANGED and the active window does not contradict it). This stops
+            // background/auxiliary windows (GMS, quicksearchbox, PiP, overlays) from masquerading
+            // as foreground app switches and dismissing the floating App Limit blocker.
+            val isConfirmedActiveOrUncontradicted = activeWindowPackage == null ||
+                    activeWindowPackage == rawPackageName ||
+                    (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                            !com.example.feature.applimits.ui.AppLimitFloatingOverlayManager.isShowingFor(activeWindowPackage))
+
             val isTrackedPackageSwitch = rawPackageName != lastForegroundPackage &&
-                    com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName)
-            if (isWindowStateChange || lastForegroundPackage == null || isTrackedPackageSwitch) {
+                    com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName) &&
+                    isConfirmedActiveOrUncontradicted
+
+            if ((isWindowStateChange && isConfirmedActiveOrUncontradicted) || lastForegroundPackage == null || isTrackedPackageSwitch) {
                 if (lastForegroundPackage != null &&
                     YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage) &&
                     !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
@@ -391,6 +428,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 fallbackAppName = displayName,
                                 decision = ProtectionDecision.BLOCK_SHORTS
                             )
+                            evaluateAppLimitGate(rawPackageName, eventType, now)
                             return
                         }
                     }
@@ -453,6 +491,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                     )
                                 } catch (_: Exception) {}
                             }
+                            evaluateAppLimitGate(rawPackageName, eventType, now)
                             return
                         }
                     }
@@ -464,6 +503,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 // If recently redirected back from a blocked channel/short, allow a 2.5-second grace period
                 // so the YouTube UI can land on the previous screen without re-triggering blocks
                 if (youtubeBackNavigationPending || (now - lastYouTubeBlockTimestamp) < 2500L) {
+                    evaluateAppLimitGate(rawPackageName, eventType, now)
                     return
                 }
 
@@ -657,6 +697,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 youtubeResult = youtubeResult,
                                 matchedKeyword = decision.matchedKeyword
                             )
+                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
                             return
                         }
                     } catch (_: Exception) {}

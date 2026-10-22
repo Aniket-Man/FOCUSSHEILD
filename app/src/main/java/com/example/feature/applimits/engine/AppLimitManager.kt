@@ -295,9 +295,22 @@ class AppLimitManager private constructor(
     fun onLimitSaved(limit: AppLimitEntity) {
         if (limit.isEnabled) {
             enabledLimits = enabledLimits + (limit.packageName to limit)
+            reentryGate.clear(limit.packageName)
+            clearOverlayDebounce(limit.packageName)
+            limitBlockRecordedAt.remove(limit.packageName)
+            com.example.core.accessibility.FocusAccessibilityService.instance
+                ?.clearAppLimitCheckDebounce(limit.packageName)
         } else {
             forgetLimit(limit.packageName, "LIMIT_DISABLED")
         }
+    }
+
+    fun onUsageReset(packageName: String) {
+        reentryGate.clear(packageName)
+        clearOverlayDebounce(packageName)
+        limitBlockRecordedAt.remove(packageName)
+        com.example.core.accessibility.FocusAccessibilityService.instance
+            ?.clearAppLimitCheckDebounce(packageName)
     }
 
     fun onLimitDeleted(packageName: String) {
@@ -509,6 +522,7 @@ class AppLimitManager private constructor(
      */
     private fun onFocusShieldForeground(packageName: String) {
         currentForegroundPackage = packageName
+        reentryGate.onForegroundPackage(packageName)
         AppLimitFloatingOverlayManager.onForegroundPackageChanged(packageName)
 
         val session = _activeSession.value ?: return
@@ -777,10 +791,13 @@ class AppLimitManager private constructor(
      * fresh blocker over the app that was just declared allowed. Returns false if the write
      * failed, so the UI can keep the blocker up instead of silently reopening the app.
      */
-    suspend fun leaveBlockForToday(packageName: String): Boolean {
+    suspend fun leaveBlockForToday(packageName: String, alsoDisableLimit: Boolean = false): Boolean {
         return try {
             val todayDate = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, todayDate, true)
+            if (alsoDisableLimit) {
+                appLimitRepository.setLimitEnabled(packageName, false)
+            }
             reentryGate.clear(packageName)
             // Only retire the live session if it belongs to this app. Turning off app B for
             // today while a (paused) session for app A exists must not end A's session.
@@ -789,7 +806,7 @@ class AppLimitManager private constructor(
                 stopTicker()
                 clearPersistedSession()
             }
-            Log.i(tag, "App $packageName bypassed for the rest of today")
+            Log.i(tag, "App $packageName bypassed for the rest of today${if (alsoDisableLimit) " (and disabled)" else ""}")
             true
         } catch (e: Exception) {
             Log.e(tag, "Failed to bypass app $packageName for today: ${e.message}")
@@ -1251,7 +1268,9 @@ class AppLimitManager private constructor(
             var attempt = 0
 
             while (true) {
-                if (AppLimitOverlayActivity.isVisibleFor(packageName)) {
+                if (AppLimitOverlayActivity.isVisibleFor(packageName) ||
+                    AppLimitFloatingOverlayManager.isShowingFor(packageName)
+                ) {
                     Log.i(tag, "Blocker confirmed on screen for $packageName (after $attempt attempt(s))")
                     pendingOverlayIntents.remove(packageName)
                     _overlayLaunchWarning.value = null
@@ -1349,6 +1368,19 @@ class AppLimitManager private constructor(
     }
 
     /**
+     * Records that the user has genuinely left [dismissedPackage] after dismissing its blocker,
+     * even if the transition went through SystemUI/Recents or an OEM launcher whose accessibility
+     * event was filtered or coalesced.
+     */
+    fun onUserLeftDismissedApp(dismissedPackage: String, observedPackage: String) {
+        if (dismissedPackage.isBlank() || observedPackage.isBlank() || dismissedPackage == observedPackage) return
+        reentryGate.onForegroundPackage(observedPackage)
+        if (currentForegroundPackage == dismissedPackage) {
+            currentForegroundPackage = observedPackage
+        }
+    }
+
+    /**
      * One launch attempt. Prefers the accessibility service (an enabled service is exempt from the
      * background-activity-start restriction moreso than a plain app context), falling back to the
      * app context. Never assumes the attempt succeeded — see [startOverlayAndVerify].
@@ -1428,11 +1460,12 @@ class AppLimitManager private constructor(
         return try {
             val now = System.currentTimeMillis()
             val state = FocusBlockerManager.instance.getCurrentProtectionState(now)
+            val isBreakActive = state.isBreakActive && now < state.breakEndsAt
             FocusSessionAppLimitPolicy.sessionOwnsPackage(
                 sessionState = state.sessionState,
-                blockedPackages = state.blockedPackages,
+                blockedPackages = if (state.isAppBlockingEnabled) state.blockedPackages else emptySet(),
                 packageName = packageName,
-                isBreakActive = state.isBreakActive && now < state.breakEndsAt,
+                isBreakActive = isBreakActive,
                 isYouTubeStudyModeEnabled = state.isYouTubeStudyModeEnabled,
                 isBrowserStudyModeEnabled = state.isBrowserStudyModeEnabled
             )

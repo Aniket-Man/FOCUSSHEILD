@@ -73,6 +73,21 @@ object AppLimitFloatingOverlayManager {
             return
         }
         if (packageName != showing) {
+            // Guard against background/auxiliary window events (e.g. GMS, quicksearchbox, PiP,
+            // or transient overlays) firing while the limited app is still the active foreground
+            // window behind our non-focusable accessibility overlay.
+            if (!filter.isOwnApp(packageName)) {
+                val activeWindowPkg = try {
+                    com.example.core.accessibility.FocusAccessibilityService.instance
+                        ?.rootInActiveWindow?.packageName?.toString()
+                } catch (_: Exception) {
+                    null
+                }
+                if (activeWindowPkg == showing) {
+                    Log.d(TAG, "Ignoring transient package event $packageName while $showing is still the active window")
+                    return
+                }
+            }
             Log.i(TAG, "Foreground is now $packageName; dismissing floating blocker for $showing")
             hideOverlay()
         }
@@ -319,16 +334,92 @@ object AppLimitFloatingOverlayManager {
             View(context),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         )
-        topRow.addView(turnOffPill(context, packageName, appName))
+
+        // Wrapper for the dynamic content of the sheet (stats/options or confirmation)
+        val contentWrapper = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val turnOffPill = turnOffPill(context) {
+            showTurnOffConfirmation(
+                context = context,
+                packageName = packageName,
+                appName = appName,
+                streakDays = streakDays,
+                contentWrapper = contentWrapper,
+                onCancel = {
+                    // Rebuild the original content
+                    contentWrapper.removeAllViews()
+                    buildMainOverlayContent(
+                        context = context,
+                        packageName = packageName,
+                        appName = appName,
+                        mode = mode,
+                        usedMinutes = usedMinutes,
+                        remainingDailyMinutes = remainingDailyMinutes,
+                        dailyLimitMinutes = dailyLimitMinutes,
+                        emergencyUsesCount = emergencyUsesCount,
+                        emergencyUsesAllowed = emergencyUsesAllowed,
+                        isStrict = isStrict,
+                        streakDays = streakDays,
+                        contentWrapper = contentWrapper
+                    )
+                }
+            )
+        }
+        topRow.addView(turnOffPill)
         sheet.addView(topRow)
+
+        buildMainOverlayContent(
+            context = context,
+            packageName = packageName,
+            appName = appName,
+            mode = mode,
+            usedMinutes = usedMinutes,
+            remainingDailyMinutes = remainingDailyMinutes,
+            dailyLimitMinutes = dailyLimitMinutes,
+            emergencyUsesCount = emergencyUsesCount,
+            emergencyUsesAllowed = emergencyUsesAllowed,
+            isStrict = isStrict,
+            streakDays = streakDays,
+            contentWrapper = contentWrapper
+        )
+        sheet.addView(contentWrapper)
+
+        root.addView(sheet)
+        return root
+    }
+
+    /** Reusable logic to build the standard App Limit overlay content (stats, duration buttons, close app). */
+    private fun buildMainOverlayContent(
+        context: Context,
+        packageName: String,
+        appName: String,
+        mode: AppLimitOverlayMode,
+        usedMinutes: Int,
+        remainingDailyMinutes: Int,
+        dailyLimitMinutes: Int,
+        emergencyUsesCount: Int,
+        emergencyUsesAllowed: Int,
+        isStrict: Boolean,
+        streakDays: Int,
+        contentWrapper: LinearLayout
+    ) {
+        val density = context.resources.displayMetrics.density
+        fun dp(value: Int): Int = (value * density).toInt()
+        val isExhausted = mode == AppLimitOverlayMode.DAILY_LIMIT_REACHED
 
         // --- Strict-mode upsell banner (only when strict mode is off for this app) ---
         if (!isStrict) {
-            sheet.addView(strictModeBanner(context))
+            contentWrapper.addView(strictModeBanner(context))
         }
 
         // --- Usage stats card ---
-        sheet.addView(
+        contentWrapper.addView(
             statsCard(
                 context = context,
                 packageName = packageName,
@@ -353,16 +444,10 @@ object AppLimitFloatingOverlayManager {
             gravity = Gravity.CENTER
             setPadding(0, dp(18), 0, dp(12))
         }
-        sheet.addView(promptText)
+        contentWrapper.addView(promptText)
 
         if (!isExhausted) {
-            // Options are derived from the *actual* remaining allowance, using the same policy
-            // as the activity blocker. The previous fixed grid filtered against
-            // `remaining.coerceAtLeast(2)`, so one minute left still offered "2 mins", and no
-            // allowance at all fell through to a bogus "1 min" choice that the engine clamped to
-            // zero and immediately re-blocked.
             val options = AppLimitDurationOptions.forRemainingMinutes(remainingDailyMinutes)
-
             options.chunked(2).forEachIndexed { index, row ->
                 val durationRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -387,15 +472,11 @@ object AppLimitFloatingOverlayManager {
                     )
                 }
                 if (row.size == 1) {
-                    durationRow.addView(
-                        View(context),
-                        LinearLayout.LayoutParams(0, 0, 1f)
-                    )
+                    durationRow.addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
                 }
-                sheet.addView(durationRow)
+                contentWrapper.addView(durationRow)
             }
         } else {
-            // Daily limit reached: emergency pass if permitted
             val remainingEmergencies = (emergencyUsesAllowed - emergencyUsesCount).coerceAtLeast(0)
             if (remainingEmergencies > 0 && !isStrict) {
                 val emergencyBtn = TextView(context).apply {
@@ -423,7 +504,7 @@ object AppLimitFloatingOverlayManager {
                         }
                     }
                 }
-                sheet.addView(emergencyBtn)
+                contentWrapper.addView(emergencyBtn)
             }
         }
 
@@ -446,16 +527,111 @@ object AppLimitFloatingOverlayManager {
                 hideOverlay()
                 AppLimitManager.instance.onBlockerDismissedByUser(packageName)
                 goHome(context)
+                schedulePostDismissExitConfirmation(packageName)
             }
         }
-        sheet.addView(closeBtn)
+        contentWrapper.addView(closeBtn)
+    }
 
-        root.addView(sheet)
-        return root
+    /** Multi-step confirmation for turning off the limit (issue #68). */
+    private fun showTurnOffConfirmation(
+        context: Context,
+        packageName: String,
+        appName: String,
+        streakDays: Int,
+        contentWrapper: LinearLayout,
+        onCancel: () -> Unit
+    ) {
+        contentWrapper.removeAllViews()
+        val density = context.resources.displayMetrics.density
+        fun dp(value: Int): Int = (value * density).toInt()
+
+        // 1. Title & Message
+        val title = TextView(context).apply {
+            text = "Turn off $appName limit?"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        contentWrapper.addView(title)
+
+        val message = TextView(context).apply {
+            text = "Turning off resets your $streakDays-day discipline streak for this app. Are you sure?"
+            textSize = 15f
+            setTextColor(Color.parseColor("#94A3B8"))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), 0, dp(12), dp(24))
+        }
+        contentWrapper.addView(message)
+
+        // 2. Buttons: "For today" (disable), "Completely" (remove), "Cancel"
+        val optionForToday = TextView(context).apply {
+            text = "Turn off for the rest of today"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#26272D"))
+                cornerRadius = dp(28).toFloat()
+                setStroke(dp(1), Color.parseColor("#333642"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(56)
+            ).apply { bottomMargin = dp(12) }
+            setOnClickListener {
+                overlayScope.launch {
+                    val success = AppLimitManager.instance.leaveBlockForToday(packageName, alsoDisableLimit = true)
+                    if (success) {
+                        hideOverlay()
+                        Log.i(TAG, "Limit for $appName turned off for today (disabled)")
+                    } else {
+                        Toast.makeText(context, "Couldn't turn off limit", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        contentWrapper.addView(optionForToday)
+
+        val optionCompletely = TextView(context).apply {
+            text = "Turn off completely"
+            textSize = 15f
+            setTextColor(Color.parseColor("#F87171")) // soft red
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#2D1D1D"))
+                cornerRadius = dp(28).toFloat()
+                setStroke(dp(1), Color.parseColor("#4B2A2A"))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(56)
+            ).apply { bottomMargin = dp(12) }
+            setOnClickListener {
+                AppLimitManager.instance.removeLimitPermanently(packageName)
+                hideOverlay()
+                Log.i(TAG, "Limit for $appName removed permanently")
+            }
+        }
+        contentWrapper.addView(optionCompletely)
+
+        val cancelBtn = TextView(context).apply {
+            text = "Cancel"
+            textSize = 15f
+            setTextColor(Color.parseColor("#94A3B8"))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            setOnClickListener { onCancel() }
+        }
+        contentWrapper.addView(cancelBtn)
     }
 
     /** "Turn off" pill: power glyph + label; strict mode refuses with a toast (issue #68). */
-    private fun turnOffPill(context: Context, packageName: String, appName: String): View {
+    private fun turnOffPill(context: Context, onClick: () -> Unit): View {
         val pill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -466,7 +642,7 @@ object AppLimitFloatingOverlayManager {
             }
             isClickable = true
             isFocusable = true
-            setOnClickListener { onTurnOffClicked(context, packageName, appName) }
+            setOnClickListener { onClick() }
         }
         pill.addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_power_settings)
@@ -485,11 +661,16 @@ object AppLimitFloatingOverlayManager {
     }
 
     /**
-     * Turns the limited app's block off for today — unless strict mode forbids it, in which
-     * case the pill does nothing but explain why. Then it leaves to Home so the now-allowed
-     * app is not sitting behind the blocker.
+     * Shows a confirmation UI before turning off the limit (issue #68).
      */
-    private fun onTurnOffClicked(context: Context, packageName: String, appName: String) {
+    private fun onTurnOffClicked(
+        context: Context,
+        packageName: String,
+        appName: String,
+        streakDays: Int,
+        contentWrapper: LinearLayout,
+        onCancel: () -> Unit
+    ) {
         overlayScope.launch {
             val allowed = try {
                 AppLimitStrictModeEngine.instance.canTurnOffLimit(packageName)
@@ -504,26 +685,8 @@ object AppLimitFloatingOverlayManager {
                 ).show()
                 return@launch
             }
-            // Await the bypass write before leaving. The old code fired it into a detached
-            // coroutine and immediately removed the blocker, so the accessibility gate could
-            // re-read the still-unbypassed row and block the app again.
-            val bypassed = try {
-                AppLimitManager.instance.leaveBlockForToday(packageName)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to turn off limit for $packageName", e)
-                false
-            }
-            if (!bypassed) {
-                Toast.makeText(
-                    context,
-                    "Couldn't turn off $appName's limit. Please try again.",
-                    Toast.LENGTH_LONG
-                ).show()
-                return@launch
-            }
-            hideOverlay()
-            Log.i(TAG, "Limit for $appName ($packageName) turned off for today by the user")
-            goHome(context)
+
+            showTurnOffConfirmation(context, packageName, appName, streakDays, contentWrapper, onCancel)
         }
     }
 
@@ -811,6 +974,28 @@ object AppLimitFloatingOverlayManager {
             context.startActivity(homeIntent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to return home: ${e.message}")
+        }
+    }
+
+    /**
+     * Confirms that the user has left [dismissedPackage] after tapping "Close <app>", even if the
+     * Home transition was handled by SystemUI/Recents or an OEM launcher that did not emit a
+     * tracked window-state accessibility event.
+     */
+    private fun schedulePostDismissExitConfirmation(dismissedPackage: String) {
+        for (delayMs in longArrayOf(450L, 1000L)) {
+            mainHandler.postDelayed({
+                try {
+                    val activePkg = com.example.core.accessibility.FocusAccessibilityService.instance
+                        ?.rootInActiveWindow?.packageName?.toString()
+                    if (activePkg == null || activePkg != dismissedPackage) {
+                        AppLimitManager.instance.onUserLeftDismissedApp(
+                            dismissedPackage = dismissedPackage,
+                            observedPackage = activePkg?.takeIf { it.isNotBlank() } ?: "com.android.launcher3"
+                        )
+                    }
+                } catch (_: Exception) {}
+            }, delayMs)
         }
     }
 

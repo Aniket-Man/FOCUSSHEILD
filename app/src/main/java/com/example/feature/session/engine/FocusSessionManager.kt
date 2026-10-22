@@ -76,8 +76,8 @@ class FocusSessionManager(
      */
     fun startSession(
         mode: SessionMode,
-        subject: String = "Physics",
-        topic: String = "General Study",
+        subject: String = "",
+        topic: String = "",
         goal: String = "",
         plannedDurationMillis: Long = 60 * 60 * 1000L,
         pomodoroConfig: PomodoroConfig = PomodoroConfig(),
@@ -133,8 +133,8 @@ class FocusSessionManager(
         val session = FocusSession(
             id = UUID.randomUUID().toString(),
             mode = mode,
-            subject = subject.ifBlank { "General Study" },
-            topic = topic.ifBlank { "Practice & Review" },
+            subject = subject.trim(),
+            topic = topic.trim(),
             goal = goal,
             state = SessionState.RUNNING,
             startedAt = now,
@@ -241,8 +241,8 @@ class FocusSessionManager(
             }
 
             val mode = try { SessionMode.valueOf(modeStr) } catch (e: Exception) { SessionMode.TIMER }
-            val subject = prefs.getString("subject", "General Study") ?: "General Study"
-            val topic = prefs.getString("topic", "Practice") ?: "Practice"
+            val subject = prefs.getString("subject", "") ?: ""
+            val topic = prefs.getString("topic", "") ?: ""
             val goal = prefs.getString("goal", "") ?: ""
             val startedAt = prefs.getLong("startedAt", currentTimeProvider())
             val plannedDuration = prefs.getLong("plannedDurationMillis", 60 * 60 * 1000L)

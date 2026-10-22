@@ -50,39 +50,34 @@ class SubjectRepository(
         return topic
     }
 
-    suspend fun initializeDefaultSubjectsIfEmpty() {
-        if (subjectDao.getSubjectCount() == 0) {
-            val subjects = listOf(
-                SubjectEntity("physics", "Physics", "#7C3AED", "physics"),
-                SubjectEntity("chemistry", "Chemistry", "#F59E0B", "chemistry"),
-                SubjectEntity("mathematics", "Mathematics", "#22C55E", "mathematics"),
-                SubjectEntity("biology", "Biology", "#38BDF8", "biology")
-            )
-            subjectDao.insertAll(subjects)
-            subjects.forEach { subject ->
-                SyncTracker.enqueueUpsert(
-                    SyncTables.STUDY_SUBJECTS,
-                    subject.id,
-                    CloudJson.subjectToJson(subject).toString()
-                )
-            }
+    suspend fun renameSubject(subject: SubjectEntity, newName: String): SubjectEntity {
+        val trimmed = newName.trim()
+        val updated = subject.copy(name = trimmed)
+        subjectDao.updateSubject(updated)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_SUBJECTS,
+            updated.id,
+            CloudJson.subjectToJson(updated).toString()
+        )
+        return updated
+    }
 
-            val topics = listOf(
-                TopicEntity(UUID.randomUUID().toString(), "physics", "Electrostatics"),
-                TopicEntity(UUID.randomUUID().toString(), "physics", "Current Electricity"),
-                TopicEntity(UUID.randomUUID().toString(), "physics", "Magnetism"),
-                TopicEntity(UUID.randomUUID().toString(), "chemistry", "Chemical Bonding"),
-                TopicEntity(UUID.randomUUID().toString(), "chemistry", "Thermodynamics"),
-                TopicEntity(UUID.randomUUID().toString(), "mathematics", "Calculus"),
-                TopicEntity(UUID.randomUUID().toString(), "mathematics", "Algebra")
-            )
-            topicDao.insertAll(topics)
-            topics.forEach { topic ->
-                SyncTracker.enqueueUpsert(
-                    SyncTables.STUDY_TOPICS,
-                    topic.id,
-                    CloudJson.topicToJson(topic).toString()
-                )
+    suspend fun deleteSubject(subjectId: String) {
+        subjectDao.deleteSubjectById(subjectId)
+        topicDao.deleteTopicsForSubject(subjectId)
+        SyncTracker.enqueueDelete(SyncTables.STUDY_SUBJECTS, subjectId)
+    }
+
+    suspend fun initializeDefaultSubjectsIfEmpty() {
+        // Remove legacy preloaded subjects ("physics", "chemistry", "mathematics", "biology")
+        // so that only user-created tags appear.
+        val legacySeededIds = listOf("physics", "chemistry", "mathematics", "biology")
+        legacySeededIds.forEach { legacyId ->
+            val existing = subjectDao.getSubjectById(legacyId)
+            if (existing != null) {
+                subjectDao.deleteSubjectById(legacyId)
+                topicDao.deleteTopicsForSubject(legacyId)
+                SyncTracker.enqueueDelete(SyncTables.STUDY_SUBJECTS, legacyId)
             }
         }
     }

@@ -141,6 +141,8 @@ fun BlocksScreen(
 ) {
     val limitsState by appLimitsViewModel.uiState.collectAsStateWithLifecycle()
     val installedApps by appLimitsViewModel.installedApps.collectAsStateWithLifecycle()
+    val isAccessibilityEnabled by appLimitsViewModel.isAccessibilityEnabled.collectAsStateWithLifecycle()
+    val overlayLaunchWarning by appLimitsViewModel.overlayLaunchWarning.collectAsStateWithLifecycle()
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val strictLockMessage by appLimitsViewModel.strictLockMessage.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -151,6 +153,7 @@ fun BlocksScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 settingsViewModel.checkAccessibilityStatus()
                 settingsViewModel.checkDeviceAdminStatus()
+                appLimitsViewModel.checkAccessibilityStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -319,6 +322,72 @@ fun BlocksScreen(
                         )
                     }
 
+                    if (!isAccessibilityEnabled && limitsState.items.any { it.isEnabled }) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = FocusColors.AmberOrange.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, FocusColors.AmberOrange.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                        title = "App Limits Blocker",
+                                        description = "daily app usage limits and time-selection popups",
+                                        featureKey = AccessibilityHelper.FEATURE_APP_LIMITS,
+                                        onGranted = { appLimitsViewModel.checkAccessibilityStatus() }
+                                    )
+                                }
+                                .testTag("blocks_accessibility_warning_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Security,
+                                    contentDescription = "Accessibility Required",
+                                    tint = FocusColors.AmberOrange,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Accessibility Service is off",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = FocusColors.TextPrimary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                    Text(
+                                        text = "Tap to enable FocusShield in Accessibility Settings so App Limit overlays can appear.",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    overlayLaunchWarning?.let { warningText ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = FocusColors.AmberOrange.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, FocusColors.AmberOrange.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = warningText,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.TextPrimary,
+                                    fontSize = 12.sp
+                                ),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+
                     if (limitsState.items.isEmpty()) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -371,7 +440,20 @@ fun BlocksScreen(
                                 AppLimitCard(
                                     item = item,
                                     onToggle = { isEnabled ->
-                                        appLimitsViewModel.toggleLimit(item.packageName, isEnabled)
+                                        if (isEnabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                            appLimitsViewModel.toggleLimit(item.packageName, true)
+                                            pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                                title = "App Limits Blocker",
+                                                description = "daily app usage limits for ${item.appName}",
+                                                featureKey = AccessibilityHelper.FEATURE_APP_LIMITS,
+                                                onGranted = {
+                                                    appLimitsViewModel.toggleLimit(item.packageName, true)
+                                                    appLimitsViewModel.checkAccessibilityStatus()
+                                                }
+                                            )
+                                        } else {
+                                            appLimitsViewModel.toggleLimit(item.packageName, isEnabled)
+                                        }
                                     },
                                     onDelete = {
                                         appLimitsViewModel.deleteLimit(item.packageName)
@@ -737,18 +819,27 @@ fun BlocksScreen(
                 isOpenedFromAppSelection = openedFromAppSelection,
                 onClose = { handleConfigSheetBack() },
                 onSaveLimit = { dailyMinutes, isStrict, showReminders, emergencyAllowed ->
+                    val targetApp = selectedAppForConfig!!
                     if (isStrict && !blockUninstallEnabled) {
                         settingsViewModel.updateBlockUninstall(true)
                     }
                     appLimitsViewModel.saveLimit(
-                        packageName = selectedAppForConfig!!.packageName,
-                        appName = selectedAppForConfig!!.appName,
+                        packageName = targetApp.packageName,
+                        appName = targetApp.appName,
                         dailyLimitMinutes = dailyMinutes,
                         isStrictOverride = isStrict,
                         showRemindersBeforeLimit = showReminders,
                         emergencyUsesAllowed = emergencyAllowed
                     )
                     showConfigSheet = false
+                    if (!AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                        pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                            title = "App Limits Blocker",
+                            description = "daily app usage limits and time-selection popups for ${targetApp.appName}",
+                            featureKey = AccessibilityHelper.FEATURE_APP_LIMITS,
+                            onGranted = { appLimitsViewModel.checkAccessibilityStatus() }
+                        )
+                    }
                 }
             )
         }
@@ -1639,8 +1730,12 @@ private fun AppLimitCard(
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
+                val usedHrs = item.usedMinutes / 60
+                val usedMins = item.usedMinutes % 60
+                val usedStr = if (usedHrs > 0 && usedMins > 0) "${usedHrs}h ${usedMins}m" else if (usedHrs > 0) "${usedHrs}h" else "${usedMins}m"
+
                 Text(
-                    text = "$limitStr Limit • ${item.usedMinutes}m used today",
+                    text = "$limitStr Limit • $usedStr used today",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = if (item.isLimitReached) FocusColors.BlockedRed else FocusColors.TextSecondary,
                         fontSize = 12.sp,

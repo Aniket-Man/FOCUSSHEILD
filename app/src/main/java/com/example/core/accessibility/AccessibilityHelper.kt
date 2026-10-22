@@ -31,6 +31,7 @@ object AccessibilityHelper {
     const val FEATURE_UNINSTALL_PROTECTION = "uninstall_protection"
     const val FEATURE_SPLIT_SCREEN = "split_screen"
     const val FEATURE_FLOATING_WINDOW = "floating_window"
+    const val FEATURE_APP_LIMITS = "app_limits"
 
     private val _isServiceEnabledState = MutableStateFlow(false)
     val isServiceEnabledFlow: StateFlow<Boolean> = _isServiceEnabledState.asStateFlow()

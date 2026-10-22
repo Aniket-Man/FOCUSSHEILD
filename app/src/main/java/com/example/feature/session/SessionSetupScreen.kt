@@ -80,6 +80,7 @@ fun SessionSetupScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.setupState.collectAsStateWithLifecycle()
+    val customSubjects by viewModel.customSubjects.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var showProtectionSetupDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -139,14 +140,6 @@ fun SessionSetupScreen(
     val pomodoroBreakOptions = listOf(3, 5, 10)
     val pomodoroLongBreakOptions = listOf(15, 20, 30)
     val cycleOptions = listOf(2, 3, 4, 6)
-
-    val subjects = listOf("Physics", "Chemistry", "Mathematics", "Biology")
-    val topicSuggestions = when (uiState.selectedSubject) {
-        "Physics" -> listOf("Electrostatics", "Rotational Motion", "Ray Optics", "Thermodynamics")
-        "Chemistry" -> listOf("Chemical Bonding", "Organic Reactions", "Coordination Compounds", "Equilibrium")
-        "Mathematics" -> listOf("Calculus", "Coordinate Geometry", "Vectors & 3D", "Matrices")
-        else -> listOf("Genetics", "Human Physiology", "Plant Biology", "Biomolecules")
-    }
 
     Scaffold(
         topBar = {
@@ -497,49 +490,41 @@ fun SessionSetupScreen(
                 }
 
                 // 2. Subject Selection
-                Column {
-                    Text(
-                        text = "Subject",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            color = FocusColors.TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        subjects.forEach { subject ->
-                            val isSelected = uiState.selectedSubject == subject
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = {
-                                    viewModel.setSubject(subject)
-                                    viewModel.setTopic(
-                                        when (subject) {
-                                            "Physics" -> "Electrostatics"
-                                            "Chemistry" -> "Chemical Bonding"
-                                            "Mathematics" -> "Calculus"
-                                            else -> "Genetics"
-                                        }
-                                    )
-                                },
-                                label = { Text(subject) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = FocusColors.Primary,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = FocusColors.Surface,
-                                    labelColor = FocusColors.TextPrimary
-                                ),
-                                shape = FocusShapes.pill,
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = isSelected,
-                                    borderColor = FocusColors.CardBorder,
-                                    selectedBorderColor = FocusColors.Primary
-                                )
+                if (customSubjects.isNotEmpty()) {
+                    Column {
+                        Text(
+                            text = "Subject Tag (Optional)",
+                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = FocusColors.TextPrimary
                             )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            customSubjects.forEach { subjectEntity ->
+                                val isSelected = uiState.selectedSubject.equals(subjectEntity.name, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { viewModel.toggleSubjectTag(subjectEntity.name) },
+                                    label = { Text(subjectEntity.name) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = FocusColors.Primary,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = FocusColors.Surface,
+                                        labelColor = FocusColors.TextPrimary
+                                    ),
+                                    shape = FocusShapes.pill,
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected,
+                                        borderColor = FocusColors.CardBorder,
+                                        selectedBorderColor = FocusColors.Primary
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -547,7 +532,7 @@ fun SessionSetupScreen(
                 // 3. Topic Selection / Input
                 Column {
                     Text(
-                        text = "Topic",
+                        text = "Topic (Optional)",
                         style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = FocusColors.TextPrimary
@@ -557,7 +542,7 @@ fun SessionSetupScreen(
                     OutlinedTextField(
                         value = uiState.selectedTopic,
                         onValueChange = { viewModel.setTopic(it) },
-                        placeholder = { Text("e.g. Electrostatics") },
+                        placeholder = { Text("Enter topic...") },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -570,32 +555,6 @@ fun SessionSetupScreen(
                             unfocusedContainerColor = FocusColors.Surface
                         )
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Topic quick suggestions chips
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        topicSuggestions.forEach { suggestion ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(FocusShapes.pill)
-                                    .background(FocusColors.SurfaceVariant)
-                                    .clickable { viewModel.setTopic(suggestion) }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = suggestion,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary,
-                                        fontSize = 11.5.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
                 }
 
                 // 4. Session Goal

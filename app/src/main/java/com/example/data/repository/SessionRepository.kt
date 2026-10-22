@@ -77,12 +77,21 @@ class SessionRepository(
 
         val pureStudyDuration = actualStudyDurationMillis.coerceAtLeast(0L)
 
+        val cleanSubject = session.subject.trim()
+        val cleanTopic = session.topic.trim()
+        val sessionTitle = when {
+            cleanSubject.isNotBlank() && cleanTopic.isNotBlank() -> "$cleanSubject - $cleanTopic"
+            cleanSubject.isNotBlank() -> cleanSubject
+            cleanTopic.isNotBlank() -> cleanTopic
+            else -> "${session.mode.label} Session"
+        }
+
         val record = SessionRecordEntity(
             id = session.id,
             mode = session.mode,
-            title = "${session.subject} - ${session.topic}",
-            subject = session.subject,
-            topic = session.topic,
+            title = sessionTitle,
+            subject = cleanSubject,
+            topic = cleanTopic,
             goal = session.goal,
             plannedDurationMillis = session.plannedDurationMillis,
             actualDurationMillis = pureStudyDuration,

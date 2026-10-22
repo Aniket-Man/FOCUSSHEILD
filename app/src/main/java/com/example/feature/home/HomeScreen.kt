@@ -562,9 +562,11 @@ private fun HomeSessionSection(
         FocusSessionCard(
             isActive = session.isSessionActive,
             timeString = session.timeRemainingString,
-            subjectName = session.subject,
+            subjectName = session.subject.ifBlank { "Focus Session" },
             subtitleText = session.pomodoroCycleText
-                ?: if (session.isSessionActive) "${session.topic} • Active" else null,
+                ?: if (session.isSessionActive) {
+                    if (session.topic.isNotBlank()) "${session.topic} • Active" else "Active Session"
+                } else null,
             isPaused = session.isPaused,
             onTogglePause = { viewModel.toggleSessionPause() },
             onCardClick = {

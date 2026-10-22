@@ -377,85 +377,95 @@ fun FocusSessionSummaryScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Subject, Topic & Session Goal Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(FocusShapes.large)
-                    .background(FocusColors.Surface)
-                    .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.large)
-                    .padding(18.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Subject",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.TextSecondary
-                            )
-                        )
-                        Text(
-                            text = summaryData.subject,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = FocusColors.TextPrimary
-                            )
-                        )
-                    }
+            // Subject, Topic & Session Goal Card (only shown when at least one is set)
+            val hasSubjectOrTopicOrGoal = summaryData.subject.isNotBlank() ||
+                summaryData.topic.isNotBlank() ||
+                summaryData.goal.isNotBlank()
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Topic",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.TextSecondary
-                            )
-                        )
-                        Text(
-                            text = summaryData.topic,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = FocusColors.TextPrimary
-                            )
-                        )
-                    }
-
-                    if (summaryData.goal.isNotBlank()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(FocusShapes.medium)
-                                .background(FocusColors.SurfaceSubtle)
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Flag,
-                                contentDescription = null,
-                                tint = FocusColors.Primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = summaryData.goal,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextPrimary,
-                                    fontWeight = FontWeight.Medium
+            if (hasSubjectOrTopicOrGoal) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(FocusShapes.large)
+                        .background(FocusColors.Surface)
+                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.large)
+                        .padding(18.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (summaryData.subject.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Subject",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = FocusColors.TextSecondary
+                                    )
                                 )
-                            )
+                                Text(
+                                    text = summaryData.subject,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = FocusColors.TextPrimary
+                                    )
+                                )
+                            }
+                        }
+
+                        if (summaryData.topic.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Topic",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = FocusColors.TextSecondary
+                                    )
+                                )
+                                Text(
+                                    text = summaryData.topic,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = FocusColors.TextPrimary
+                                    )
+                                )
+                            }
+                        }
+
+                        if (summaryData.goal.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(FocusShapes.medium)
+                                    .background(FocusColors.SurfaceSubtle)
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Flag,
+                                    contentDescription = null,
+                                    tint = FocusColors.Primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = summaryData.goal,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = FocusColors.TextPrimary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // 2x2 Grid: Key Telemetry Metrics
             Row(

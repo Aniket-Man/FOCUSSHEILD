@@ -17,4 +17,7 @@ interface TopicDao {
 
     @Query("SELECT * FROM study_topics WHERE subjectId = :subjectId ORDER BY name ASC")
     fun getTopicsForSubjectFlow(subjectId: String): Flow<List<TopicEntity>>
+
+    @Query("DELETE FROM study_topics WHERE subjectId = :subjectId")
+    suspend fun deleteTopicsForSubject(subjectId: String)
 }

@@ -469,143 +469,158 @@ fun ActiveSessionScreen(
                     ) {
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 1. Session Context (Subject & Topic & Mode)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // 1. Session Context (Subject & Topic & Mode) — hidden if no tags or status pills are active
+                val hasHeaderPills = uiState.subject.isNotBlank() ||
+                    uiState.isStrictModeEnabled ||
+                    uiState.isStudyChannelsEnabled ||
+                    uiState.mode == SessionMode.POMODORO
+                val hasHeaderContext = hasHeaderPills || uiState.topic.isNotBlank() || uiState.goal.isNotBlank()
+
+                if (hasHeaderContext) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Subject Pill
-                        Box(
-                            modifier = Modifier
-                                .clip(FocusShapes.pill)
-                                .background(FocusColors.PrimaryContainer)
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
+                        if (hasHeaderPills) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Subject Pill (only shown if user set a Subject tag)
+                                if (uiState.subject.isNotBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(FocusShapes.pill)
+                                            .background(FocusColors.PrimaryContainer)
+                                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = uiState.subject,
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                color = FocusColors.Primary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                    }
+                                }
+
+                                // Strict Mode Pill
+                                if (uiState.isStrictModeEnabled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(FocusShapes.pill)
+                                            .background(FocusColors.CoralWarning.copy(alpha = 0.12f))
+                                            .border(1.dp, FocusColors.CoralWarning.copy(alpha = 0.3f), FocusShapes.pill)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Security,
+                                                contentDescription = null,
+                                                tint = FocusColors.CoralWarning,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = "Strict Shield",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = FocusColors.CoralWarning,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.5.sp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // YouTube Study Mode Pill
+                                if (uiState.isStudyChannelsEnabled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(FocusShapes.pill)
+                                            .background(FocusColors.EmeraldSuccess.copy(alpha = 0.12f))
+                                            .border(1.dp, FocusColors.EmeraldSuccess.copy(alpha = 0.3f), FocusShapes.pill)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.SmartDisplay,
+                                                contentDescription = null,
+                                                tint = FocusColors.EmeraldSuccess,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = "Study Mode",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = FocusColors.EmeraldSuccess,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.5.sp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Pomodoro Cycle Pill (if Pomodoro) with Crossfade
+                                if (uiState.mode == SessionMode.POMODORO) {
+                                    Crossfade(
+                                        targetState = uiState.currentCycle to uiState.totalCycles,
+                                        animationSpec = tween(350),
+                                        label = "pomodoro_cycle_crossfade"
+                                    ) { (cycle, totalCycles) ->
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(FocusShapes.pill)
+                                                .background(FocusColors.AmberOrange.copy(alpha = 0.15f))
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Cycle $cycle of $totalCycles",
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    color = FocusColors.AmberOrange,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.5.sp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (uiState.topic.isNotBlank()) {
+                            if (hasHeaderPills) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                             Text(
-                                text = uiState.subject,
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    color = FocusColors.Primary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
+                                text = uiState.topic,
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = FocusColors.TextPrimary,
+                                                    fontSize = 24.sp
+                                ),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        // Strict Mode Pill
-                        if (uiState.isStrictModeEnabled) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(FocusShapes.pill)
-                                    .background(FocusColors.CoralWarning.copy(alpha = 0.12f))
-                                    .border(1.dp, FocusColors.CoralWarning.copy(alpha = 0.3f), FocusShapes.pill)
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Security,
-                                        contentDescription = null,
-                                        tint = FocusColors.CoralWarning,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "Strict Shield",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FocusColors.CoralWarning,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.5.sp
-                                        )
-                                    )
-                                }
-                            }
+                        if (uiState.goal.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = uiState.goal,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.TextSecondary,
+                                    fontSize = 13.sp
+                                ),
+                                textAlign = TextAlign.Center
+                            )
                         }
-
-                        // YouTube Study Mode Pill
-                        if (uiState.isStudyChannelsEnabled) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(FocusShapes.pill)
-                                    .background(FocusColors.EmeraldSuccess.copy(alpha = 0.12f))
-                                    .border(1.dp, FocusColors.EmeraldSuccess.copy(alpha = 0.3f), FocusShapes.pill)
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.SmartDisplay,
-                                        contentDescription = null,
-                                        tint = FocusColors.EmeraldSuccess,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "Study Mode",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FocusColors.EmeraldSuccess,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.5.sp
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
-                        // Pomodoro Cycle Pill (if Pomodoro) with Crossfade
-                        if (uiState.mode == SessionMode.POMODORO) {
-                            Crossfade(
-                                targetState = uiState.currentCycle to uiState.totalCycles,
-                                animationSpec = tween(350),
-                                label = "pomodoro_cycle_crossfade"
-                            ) { (cycle, totalCycles) ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(FocusShapes.pill)
-                                        .background(FocusColors.AmberOrange.copy(alpha = 0.15f))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = "Cycle $cycle of $totalCycles",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            color = FocusColors.AmberOrange,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.5.sp
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = uiState.topic,
-                        style = MaterialTheme.typography.headlineLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 24.sp
-                        ),
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    if (uiState.goal.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = uiState.goal,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontSize = 13.sp
-                            ),
-                            textAlign = TextAlign.Center
-                        )
                     }
                 }
 
@@ -1165,7 +1180,7 @@ private fun BreakActiveView(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Resting from ${uiState.subject}",
+                text = if (uiState.subject.isNotBlank()) "Resting from ${uiState.subject}" else "Taking a Study Break",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = FocusColors.TextPrimary,
@@ -1392,24 +1407,29 @@ private fun SessionCompletedView(
                 .padding(FocusSpacing.lg)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Subject & Topic",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary
+                val subjectTopicSummary = listOf(uiState.subject, uiState.topic)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" • ")
+                if (subjectTopicSummary.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Subject & Topic",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = FocusColors.TextSecondary
+                            )
                         )
-                    )
-                    Text(
-                        text = "${uiState.subject} • ${uiState.topic}",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary
+                        Text(
+                            text = subjectTopicSummary,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = FocusColors.TextPrimary
+                            )
                         )
-                    )
+                    }
                 }
 
                 Row(

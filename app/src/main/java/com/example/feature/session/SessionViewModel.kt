@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
 import com.example.core.util.TimeFormatter
+import com.example.data.local.entity.SubjectEntity
 import com.example.data.model.SessionMode
 import com.example.data.repository.SessionRepository
 import com.example.feature.session.domain.FocusSession
@@ -49,9 +50,9 @@ data class SessionSetupState(
     val isBlockSplitScreenEnabled: Boolean = false,
     val isBlockFloatingWindowEnabled: Boolean = false,
     val isDeepFocusExpanded: Boolean = true,
-    val selectedSubject: String = "Physics",
-    val selectedTopic: String = "Electrostatics",
-    val sessionGoal: String = "Solve 20 JEE Advanced problems",
+    val selectedSubject: String = "",
+    val selectedTopic: String = "",
+    val sessionGoal: String = "",
     val isAppBlockingEnabled: Boolean = true,
     val isStrictModeEnabled: Boolean = false,
     val strictModeConfig: StrictModeConfig = StrictModeConfig(),
@@ -71,8 +72,8 @@ data class ActiveSessionUiState(
     val activeSession: FocusSession? = null,
     val sessionState: SessionState = SessionState.IDLE,
     val mode: SessionMode = SessionMode.TIMER,
-    val subject: String = "Physics",
-    val topic: String = "Electrostatics",
+    val subject: String = "",
+    val topic: String = "",
     val goal: String = "",
     val activeTimeString: String = "01:00:00",
     val isSessionRunning: Boolean = false,
@@ -113,7 +114,20 @@ class SessionViewModel(
      */
     val pendingSessionSummary: StateFlow<SessionSummaryData?> = _pendingSessionSummary.asStateFlow()
 
+    private val _customSubjects = MutableStateFlow<List<SubjectEntity>>(emptyList())
+    val customSubjects: StateFlow<List<SubjectEntity>> = _customSubjects.asStateFlow()
+
     init {
+        // Observe user-created subject tags from SubjectRepository
+        viewModelScope.launch {
+            try {
+                FocusShieldApp.instance.subjectRepository.activeSubjects.collectLatest { subjects ->
+                    _customSubjects.value = subjects
+                }
+            } catch (e: Exception) {
+                // Ignore in isolated unit test environments without Application context
+            }
+        }
         // Observe global preferences to keep setup state in sync
         viewModelScope.launch {
             try {
@@ -316,6 +330,59 @@ class SessionViewModel(
 
     fun setSubject(subject: String) {
         _setupState.update { it.copy(selectedSubject = subject) }
+    }
+
+    fun toggleSubjectTag(tagName: String) {
+        _setupState.update {
+            val next = if (it.selectedSubject.equals(tagName, ignoreCase = true)) "" else tagName
+            it.copy(selectedSubject = next)
+        }
+    }
+
+    fun addCustomSubjectTag(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        _setupState.update { it.copy(selectedSubject = trimmed) }
+        viewModelScope.launch {
+            try {
+                val existing = _customSubjects.value.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
+                if (existing == null) {
+                    FocusShieldApp.instance.subjectRepository.addSubject(trimmed)
+                }
+            } catch (e: Exception) { }
+        }
+    }
+
+    fun renameCustomSubjectTag(subject: SubjectEntity, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        _setupState.update {
+            if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
+                it.copy(selectedSubject = trimmed)
+            } else {
+                it
+            }
+        }
+        viewModelScope.launch {
+            try {
+                FocusShieldApp.instance.subjectRepository.renameSubject(subject, trimmed)
+            } catch (e: Exception) { }
+        }
+    }
+
+    fun deleteCustomSubjectTag(subject: SubjectEntity) {
+        _setupState.update {
+            if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
+                it.copy(selectedSubject = "")
+            } else {
+                it
+            }
+        }
+        viewModelScope.launch {
+            try {
+                FocusShieldApp.instance.subjectRepository.deleteSubject(subject.id)
+            } catch (e: Exception) { }
+        }
     }
 
     fun setTopic(topic: String) {

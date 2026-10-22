@@ -370,20 +370,22 @@ private fun SessionHistoryCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = session.subject,
+                        text = session.subject.ifBlank { "${session.mode.label} Session" },
                         style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = FocusColors.TextPrimary,
                             fontSize = 16.sp
                         )
                     )
-                    Text(
-                        text = session.topic,
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 13.sp
+                    if (session.topic.isNotBlank()) {
+                        Text(
+                            text = session.topic,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                color = FocusColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
                         )
-                    )
+                    }
                 }
 
                 // Status Badge
@@ -471,20 +473,22 @@ private fun SessionDetailSheetContent(
         ) {
             Column {
                 Text(
-                    text = session.subject,
+                    text = session.subject.ifBlank { "${session.mode.label} Session" },
                     style = androidx.compose.material3.MaterialTheme.typography.headlineSmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = FocusColors.TextPrimary,
                         fontSize = 22.sp
                     )
                 )
-                Text(
-                    text = session.topic,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 15.sp
+                if (session.topic.isNotBlank()) {
+                    Text(
+                        text = session.topic,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
+                            color = FocusColors.TextSecondary,
+                            fontSize = 15.sp
+                        )
                     )
-                )
+                }
             }
 
             IconButton(onClick = onClose) {

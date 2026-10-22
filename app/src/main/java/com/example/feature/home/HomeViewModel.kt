@@ -63,8 +63,8 @@ data class HomeSessionUiState(
     val isSessionActive: Boolean = false,
     val isPaused: Boolean = false,
     val timeRemainingString: String = "00:00:00",
-    val subject: String = "Physics",
-    val topic: String = "Electrostatics",
+    val subject: String = "",
+    val topic: String = "",
     val pomodoroCycleText: String? = null
 )
 
@@ -341,8 +341,8 @@ class HomeViewModel(
             isSessionActive = isActive,
             isPaused = sessionState == SessionState.PAUSED,
             timeRemainingString = displayTime,
-            subject = activeSession?.subject ?: "Physics",
-            topic = activeSession?.topic ?: "Electrostatics",
+            subject = activeSession?.subject ?: "",
+            topic = activeSession?.topic ?: "",
             pomodoroCycleText = pomodoroText
         )
     }.distinctUntilChanged().stateIn(

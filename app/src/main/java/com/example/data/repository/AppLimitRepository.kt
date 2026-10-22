@@ -67,6 +67,8 @@ class AppLimitRepository(
             updatedAt = System.currentTimeMillis()
         )
         appLimitDao.insertOrUpdate(entity)
+        // Reset bypass status so re-adding/re-enabling works immediately
+        setBypassedForToday(packageName, bypassed = false)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(entity)
         } catch (_: Exception) {}
@@ -90,6 +92,11 @@ class AppLimitRepository(
     suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean) {
         appLimitDao.setEnabled(packageName, isEnabled)
 
+        if (isEnabled) {
+            // Reset bypass status so re-enabling works immediately
+            setBypassedForToday(packageName, bypassed = false)
+        }
+
         try {
             if (isEnabled) {
                 appLimitDao.getLimitByPackage(packageName)?.let {
@@ -105,6 +112,11 @@ class AppLimitRepository(
 
     suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
         appLimitDao.updateDailyLimitMinutes(packageName, minutes)
+        try {
+            appLimitDao.getLimitByPackage(packageName)?.let {
+                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(it)
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun updateStrictMode(packageName: String, isStrict: Boolean) {
@@ -159,6 +171,9 @@ class AppLimitRepository(
             )
             dailyAppUsageDao.insertOrUpdate(updated)
         }
+        try {
+            com.example.feature.applimits.engine.AppLimitManager.instance.onUsageReset(packageName)
+        } catch (_: Exception) {}
     }
 
     /**

@@ -27,23 +27,37 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
+import com.example.data.local.entity.SubjectEntity
 import com.example.data.model.SessionMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.feature.session.SessionSetupState
@@ -132,6 +147,7 @@ fun FocusSessionSetupSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
+    val customSubjects by viewModel.customSubjects.collectAsStateWithLifecycle()
 
     // rememberSaveable, not remember: a rotation (or any configuration change) used to throw the
     // user back to the main page of the sheet, losing whichever sub-sheet they were filling in
@@ -239,7 +255,13 @@ fun FocusSessionSetupSheet(
                 SetupSubView.MAIN -> {
                     FocusSetupMainContent(
                         setupState = setupState,
+                        customSubjects = customSubjects,
                         onModeSelected = { viewModel.selectMode(it) },
+                        onToggleSubjectTag = { viewModel.toggleSubjectTag(it) },
+                        onAddSubjectTag = { viewModel.addCustomSubjectTag(it) },
+                        onRenameSubjectTag = { subject, newName -> viewModel.renameCustomSubjectTag(subject, newName) },
+                        onDeleteSubjectTag = { viewModel.deleteCustomSubjectTag(it) },
+                        onTopicChange = { viewModel.setTopic(it) },
                         onOpenFocusTimePicker = { activeSubView = SetupSubView.FOCUS_TIME },
                         onOpenBreakPicker = { activeSubView = SetupSubView.BREAK },
                         onOpenSelectApps = { activeSubView = SetupSubView.SELECT_APPS },
@@ -402,10 +424,17 @@ fun FocusSessionSetupSheet(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FocusSetupMainContent(
     setupState: SessionSetupState,
+    customSubjects: List<SubjectEntity>,
     onModeSelected: (SessionMode) -> Unit,
+    onToggleSubjectTag: (String) -> Unit,
+    onAddSubjectTag: (String) -> Unit,
+    onRenameSubjectTag: (SubjectEntity, String) -> Unit,
+    onDeleteSubjectTag: (SubjectEntity) -> Unit,
+    onTopicChange: (String) -> Unit,
     onOpenFocusTimePicker: () -> Unit,
     onOpenBreakPicker: () -> Unit,
     onOpenSelectApps: () -> Unit,
@@ -421,9 +450,159 @@ private fun FocusSetupMainContent(
 ) {
     val context = LocalContext.current
     var installedBrowsers by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
+    var showAddTagDialog by remember { mutableStateOf(false) }
+    var newTagName by remember { mutableStateOf("") }
+    var editingSubject by remember { mutableStateOf<SubjectEntity?>(null) }
+    var editTagName by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         installedBrowsers = InstalledAppsProvider.getInstalledBrowsers(context)
+    }
+
+    if (showAddTagDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAddTagDialog = false
+                newTagName = ""
+            },
+            containerColor = FocusColors.Surface,
+            titleContentColor = FocusColors.TextPrimary,
+            textContentColor = FocusColors.TextSecondary,
+            title = {
+                Text(
+                    text = "New Subject Tag",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = newTagName,
+                    onValueChange = { newTagName = it },
+                    placeholder = { Text("e.g. Coding, Math, Reading") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = FocusColors.Primary,
+                        unfocusedBorderColor = FocusColors.CardBorderSubtle,
+                        focusedTextColor = FocusColors.TextPrimary,
+                        unfocusedTextColor = FocusColors.TextPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newTagName.isNotBlank()) {
+                            onAddSubjectTag(newTagName.trim())
+                            newTagName = ""
+                            showAddTagDialog = false
+                        }
+                    },
+                    enabled = newTagName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FocusColors.Primary,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Save Tag", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAddTagDialog = false
+                        newTagName = ""
+                    }
+                ) {
+                    Text("Cancel", color = FocusColors.TextSecondary)
+                }
+            }
+        )
+    }
+
+    editingSubject?.let { subjectToEdit ->
+        AlertDialog(
+            onDismissRequest = { editingSubject = null },
+            containerColor = FocusColors.Surface,
+            titleContentColor = FocusColors.TextPrimary,
+            textContentColor = FocusColors.TextSecondary,
+            title = {
+                Text(
+                    text = "Edit Subject Tag",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editTagName,
+                        onValueChange = { editTagName = it },
+                        placeholder = { Text("Tag name") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FocusColors.Primary,
+                            unfocusedBorderColor = FocusColors.CardBorderSubtle,
+                            focusedTextColor = FocusColors.TextPrimary,
+                            unfocusedTextColor = FocusColors.TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(FocusColors.CoralWarning.copy(alpha = 0.12f))
+                            .clickable {
+                                onDeleteSubjectTag(subjectToEdit)
+                                editingSubject = null
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = "Delete tag",
+                            tint = FocusColors.CoralWarning,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Delete Tag",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                color = FocusColors.CoralWarning,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editTagName.isNotBlank()) {
+                            onRenameSubjectTag(subjectToEdit, editTagName.trim())
+                            editingSubject = null
+                        }
+                    },
+                    enabled = editTagName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FocusColors.Primary,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Save", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingSubject = null }) {
+                    Text("Cancel", color = FocusColors.TextSecondary)
+                }
+            }
+        )
     }
 
     Column(
@@ -483,6 +662,244 @@ private fun FocusSetupMainContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // CARD 0: Session Tags (Subject & Topic) Card
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp)),
+            color = FocusColors.SurfaceVariant
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Label,
+                            contentDescription = null,
+                            tint = FocusColors.Primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Session Tag & Topic",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                color = FocusColors.TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        )
+                    }
+                    if (setupState.selectedSubject.isNotBlank() || setupState.selectedTopic.isNotBlank()) {
+                        Text(
+                            text = "Clear",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = FocusColors.Primary,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    if (setupState.selectedSubject.isNotBlank()) {
+                                        onToggleSubjectTag(setupState.selectedSubject)
+                                    }
+                                    if (setupState.selectedTopic.isNotBlank()) {
+                                        onTopicChange("")
+                                    }
+                                }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "Optional",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.TextMuted
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Subject Tag",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = FocusColors.TextSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    customSubjects.forEach { subject ->
+                        val isSelected = setupState.selectedSubject.equals(subject.name, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    if (isSelected) FocusColors.PrimaryContainer else FocusColors.Surface
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) FocusColors.Primary else FocusColors.CardBorderSubtle,
+                                    shape = CircleShape
+                                )
+                                .clickable { onToggleSubjectTag(subject.name) }
+                                .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = subject.name,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = if (isSelected) FocusColors.Primary else FocusColors.TextPrimary,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 13.sp
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            editingSubject = subject
+                                            editTagName = subject.name
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Edit,
+                                        contentDescription = "Edit ${subject.name}",
+                                        tint = if (isSelected) FocusColors.Primary else FocusColors.TextMuted,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // If a subject is set from a Study Plan that isn't in customSubjects yet, show it
+                    val hasMatchingCustom = customSubjects.any {
+                        it.name.equals(setupState.selectedSubject, ignoreCase = true)
+                    }
+                    if (setupState.selectedSubject.isNotBlank() && !hasMatchingCustom) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(FocusColors.PrimaryContainer)
+                                .border(1.dp, FocusColors.Primary, CircleShape)
+                                .clickable { onToggleSubjectTag(setupState.selectedSubject) }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = setupState.selectedSubject,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.Primary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            )
+                        }
+                    }
+
+                    // "+ Add Tag" Chip
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(FocusColors.Surface)
+                            .border(
+                                width = 1.dp,
+                                color = FocusColors.Primary.copy(alpha = 0.5f),
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                newTagName = ""
+                                showAddTagDialog = true
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = "Add Tag",
+                                tint = FocusColors.Primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Add Tag",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.Primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "Topic",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = FocusColors.TextSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = setupState.selectedTopic,
+                    onValueChange = onTopicChange,
+                    placeholder = {
+                        Text(
+                            text = "Enter topic (e.g., Chapter 1, Problem Set)...",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = FocusColors.TextMuted,
+                                fontSize = 13.sp
+                            )
+                        )
+                    },
+                    singleLine = true,
+                    trailingIcon = if (setupState.selectedTopic.isNotBlank()) {
+                        {
+                            IconButton(
+                                onClick = { onTopicChange("") },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Clear topic",
+                                    tint = FocusColors.TextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    } else null,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = FocusColors.Primary,
+                        unfocusedBorderColor = FocusColors.CardBorderSubtle,
+                        focusedContainerColor = FocusColors.Surface,
+                        unfocusedContainerColor = FocusColors.Surface,
+                        focusedTextColor = FocusColors.TextPrimary,
+                        unfocusedTextColor = FocusColors.TextPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // CARD 1: Core Session Settings Card
         Surface(
             modifier = Modifier
@@ -511,7 +928,7 @@ private fun FocusSetupMainContent(
                         Text(
                             text = when (setupState.selectedMode) {
                                 SessionMode.TIMER -> "${setupState.durationMinutes} mins"
-                                SessionMode.STOPWATCH -> "0 -> Γê₧"
+                                SessionMode.STOPWATCH -> "0 -> ∞"
                                 SessionMode.POMODORO -> "${setupState.pomodoroFocusMinutes} mins"
                             },
                             style = MaterialTheme.typography.bodyLarge.copy(
