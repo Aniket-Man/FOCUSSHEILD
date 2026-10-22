@@ -84,7 +84,8 @@ Copy `.env.example` to `.env` and fill in only what you need. The
 Signed releases are published to the public
 [`Aniket-Man/FOCUSSHEILD-releases`](https://github.com/Aniket-Man/FOCUSSHEILD-releases) repository so
 the in-app updater can read them unauthenticated. The source repository stays private and no GitHub
-token ships inside the APK.
+token ships inside the APK. Publishing a release there with a higher `versionCode` / `versionName`
+than the installed build is what makes the app offer the update.
 
 ### Signing / keystore bootstrap
 
