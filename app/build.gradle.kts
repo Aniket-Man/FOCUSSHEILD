@@ -27,13 +27,6 @@ fun optionalProperty(key: String): String {
 //   UPDATE_REPO_SLUG  — owner/repo override; defaults to Aniket-Man/FOCUSSHEILD-releases.
 val updateFeedUrl = optionalProperty("UPDATE_FEED_URL")
 val updateRepoSlug = optionalProperty("UPDATE_REPO_SLUG")
-val updateFirebaseProjectId = optionalProperty("UPDATE_FIREBASE_PROJECT_ID")
-val updateFirebaseApiKey = optionalProperty("UPDATE_FIREBASE_API_KEY")
-val updateFirebaseStorageBucket = optionalProperty("UPDATE_FIREBASE_STORAGE_BUCKET")
-val updateFirebaseAppId = optionalProperty("UPDATE_FIREBASE_APP_ID")
-val updateFirebaseDatabaseId = optionalProperty("UPDATE_FIREBASE_DATABASE_ID")
-val updateChannelToken = optionalProperty("UPDATE_CHANNEL_TOKEN")
-val updateConnectionToken = optionalProperty("UPDATE_CONNECTION_TOKEN")
 
 android {
   namespace = "com.example"
@@ -52,13 +45,6 @@ android {
 
     buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeedUrl\"")
     buildConfigField("String", "UPDATE_REPO_SLUG", "\"$updateRepoSlug\"")
-    buildConfigField("String", "UPDATE_FIREBASE_PROJECT_ID", "\"$updateFirebaseProjectId\"")
-    buildConfigField("String", "UPDATE_FIREBASE_API_KEY", "\"$updateFirebaseApiKey\"")
-    buildConfigField("String", "UPDATE_FIREBASE_STORAGE_BUCKET", "\"$updateFirebaseStorageBucket\"")
-    buildConfigField("String", "UPDATE_FIREBASE_APP_ID", "\"$updateFirebaseAppId\"")
-    buildConfigField("String", "UPDATE_FIREBASE_DATABASE_ID", "\"$updateFirebaseDatabaseId\"")
-    buildConfigField("String", "UPDATE_CHANNEL_TOKEN", "\"$updateChannelToken\"")
-    buildConfigField("String", "UPDATE_CONNECTION_TOKEN", "\"$updateConnectionToken\"")
   }
 
   signingConfigs {
@@ -141,13 +127,6 @@ secrets {
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
   ignoreList.add("UPDATE_FEED_URL")
   ignoreList.add("UPDATE_REPO_SLUG")
-  ignoreList.add("UPDATE_FIREBASE_PROJECT_ID")
-  ignoreList.add("UPDATE_FIREBASE_API_KEY")
-  ignoreList.add("UPDATE_FIREBASE_STORAGE_BUCKET")
-  ignoreList.add("UPDATE_FIREBASE_APP_ID")
-  ignoreList.add("UPDATE_FIREBASE_DATABASE_ID")
-  ignoreList.add("UPDATE_CHANNEL_TOKEN")
-  ignoreList.add("UPDATE_CONNECTION_TOKEN")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

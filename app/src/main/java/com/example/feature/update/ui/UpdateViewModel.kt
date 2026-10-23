@@ -2,7 +2,6 @@ package com.example.feature.update.ui
 
 import android.content.Intent
 import androidx.lifecycle.ViewModel
-import com.example.feature.update.domain.UpdateChannel
 import com.example.feature.update.domain.UpdateInfo
 import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.engine.UpdateManager
@@ -31,12 +30,6 @@ class UpdateViewModel @Inject constructor(
     /** Non-null after the app restarts onto a newly installed update until dismissed. */
     val completedUpdate: StateFlow<UpdateInfo?> = manager.completedUpdate
 
-    /** Currently selected update server track (Production, Beta, Pre-Release, Alpha, Internal). */
-    val selectedChannel: StateFlow<UpdateChannel> = manager.selectedChannel
-
-    /** All published releases fetched for the active update channel (newest first). */
-    val releaseHistory: StateFlow<List<UpdateInfo>> = manager.releaseHistory
-
     init {
         // Show a cached offer (or a completed download) immediately, without re-hitting the network.
         manager.refreshFromCache()
@@ -44,9 +37,6 @@ class UpdateViewModel @Inject constructor(
 
     /** Manual "Check for updates" — ignores the cooldown and may report a failure. */
     fun checkForUpdates() = manager.checkManually()
-
-    /** Switches the active update channel track and immediately checks for updates on that track. */
-    fun selectUpdateChannel(channel: UpdateChannel) = manager.selectUpdateChannel(channel)
 
     /** "Later" on the popup. The update stays available and the red dot stays lit. */
     fun onLater() = manager.dismissPrompt()

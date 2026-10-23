@@ -604,6 +604,9 @@ fun ProfileScreen(
 
                 // About FocusShield
                 item {
+                    val installedVersion = updateViewModel.installedVersionName.ifBlank {
+                        com.example.BuildConfig.VERSION_NAME
+                    }
                     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
                     val updateSubtitle = when (val s = updateState) {
                         is com.example.feature.update.domain.UpdateState.Downloaded ->
@@ -611,9 +614,9 @@ fun ProfileScreen(
                         is com.example.feature.update.domain.UpdateState.Downloading ->
                             "Downloading update…"
                         is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
-                            "New release v${s.info.versionName} available on GitHub"
+                            "New release v${s.info.versionName} available — Tap to update"
                         else ->
-                            "Check GitHub Releases for new FocusShield versions"
+                            "Installed v$installedVersion • Check for new FocusShield versions"
                     }
 
                     Column(
@@ -664,7 +667,7 @@ fun ProfileScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "FocusShield v1.3",
+                                        text = "FocusShield v$installedVersion",
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = FocusColors.TextPrimary

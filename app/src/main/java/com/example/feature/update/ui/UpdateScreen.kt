@@ -86,7 +86,6 @@ fun UpdateScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val releaseHistory by viewModel.releaseHistory.collectAsStateWithLifecycle()
 
     // Android only shows the installer UI for an app the user has allowed to install unknown apps.
     // We never bypass it — we explain it and deep-link into the setting (prompt.txt §10).
@@ -118,6 +117,10 @@ fun UpdateScreen(
             // screen stuck in Installing; the validated APK can still be installed later.
             viewModel.cancelInstall()
         }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.checkForUpdates()
     }
 
     fun startInstall() {
@@ -266,14 +269,6 @@ fun UpdateScreen(
                     message = "Check whether a newer version of FocusShield is available.",
                     showCheckButton = true,
                     onCheck = { viewModel.checkForUpdates() }
-                )
-            }
-
-            if (releaseHistory.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(FocusSpacing.lg))
-                ReleaseHistorySection(
-                    releases = releaseHistory,
-                    installedVersionName = viewModel.installedVersionName
                 )
             }
 

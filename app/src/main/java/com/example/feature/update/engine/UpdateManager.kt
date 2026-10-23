@@ -1,8 +1,6 @@
 package com.example.feature.update.engine
 
 import android.content.Context
-import com.example.feature.update.data.CompositeUpdateRepository
-import com.example.feature.update.data.ExternalFirebaseUpdateConfig
 import com.example.feature.update.data.UpdateChecker
 import com.example.feature.update.data.UpdateCheckResult
 import com.example.feature.update.data.UpdateDownloadException
@@ -24,7 +22,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -52,8 +49,7 @@ class UpdateManager(
     private val scope: CoroutineScope,
     private val installedVersionName: String,
     /** The running build's `versionCode`; must agree with what the checker compares. */
-    private val installedVersionCode: Int? = null,
-    private val compositeRepository: CompositeUpdateRepository? = null
+    private val installedVersionCode: Int? = null
 ) {
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -69,24 +65,6 @@ class UpdateManager(
      */
     private val _completedUpdate = MutableStateFlow<UpdateInfo?>(null)
     val completedUpdate: StateFlow<UpdateInfo?> = _completedUpdate.asStateFlow()
-
-    /** Active update server configuration. */
-    private val _externalFirebaseConfig = MutableStateFlow<ExternalFirebaseUpdateConfig?>(
-        ExternalFirebaseUpdateConfig.fromBuildConfig()
-    )
-    val externalFirebaseConfig: StateFlow<ExternalFirebaseUpdateConfig?> =
-        _externalFirebaseConfig.asStateFlow()
-
-    /** Currently selected update server track (Production, Beta, Pre-Release, Alpha, Internal). */
-    private val _selectedChannel = MutableStateFlow(
-        ExternalFirebaseUpdateConfig.fromBuildConfig().selectedUpdateChannel
-    )
-    val selectedChannel: StateFlow<com.example.feature.update.domain.UpdateChannel> =
-        _selectedChannel.asStateFlow()
-
-    /** All past releases fetched from the release server for the selected channel (newest first). */
-    private val _releaseHistory = MutableStateFlow<List<UpdateInfo>>(emptyList())
-    val releaseHistory: StateFlow<List<UpdateInfo>> = _releaseHistory.asStateFlow()
 
     /** Serialises checks so a resume-triggered check cannot race a manual one. */
     private val checkMutex = Mutex()
@@ -109,11 +87,6 @@ class UpdateManager(
     fun restore(): Job = scope.launch {
         val needsFreshCheck = stateMutex.withLock {
             val prefs = preferences.current()
-            _selectedChannel.value = prefs.selectedChannel
-            _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
-            prefs.releaseHistoryJson?.let(::decodeHistory)?.takeIf { it.isNotEmpty() }?.let {
-                _releaseHistory.value = it
-            }
             val rawInfo = prefs.latestInfoJson
             val restored = rawInfo?.let(::decodeInfo)
             val pendingCompleted = prefs.pendingInstallInfoJson?.let(::decodeInfo)
@@ -221,7 +194,6 @@ class UpdateManager(
             if (isUpdateFlowBusy()) return@withLock
             val result = checker.check(manual = false, forceForeground = forceForeground)
             stateMutex.withLock { applyResult(result, manual = false) }
-            refreshReleaseHistoryQuietly()
         }
     }
 
@@ -242,84 +214,6 @@ class UpdateManager(
             stateMutex.withLock { _state.value = UpdateState.Checking }
             val result = checker.check(manual = true)
             stateMutex.withLock { applyResult(result, manual = true) }
-            refreshReleaseHistoryQuietly()
-        }
-    }
-
-    /**
-     * Switches the active update channel (`production`, `beta`, `prerelease`, `alpha`, `internal`),
-     * clears any cached offer or release history from the previous channel, and immediately checks
-     * the release server for updates on the selected track.
-     */
-    fun selectUpdateChannel(channel: com.example.feature.update.domain.UpdateChannel): Job {
-        downloadJob?.cancel()
-        downloadJob = null
-        return scope.launch {
-            checkMutex.withLock {
-                stateMutex.withLock {
-                    preferences.setSelectedUpdateChannel(channel)
-                    current = null
-                    installCandidate = null
-                    downloadManager.cleanUpObsolete(keepName = null)
-                    UpdateNotificationHelper.clear(context)
-                    _selectedChannel.value = channel
-                    val updatedConfig = (_externalFirebaseConfig.value
-                        ?: ExternalFirebaseUpdateConfig.fromBuildConfig()).withChannel(channel)
-                    _externalFirebaseConfig.value = updatedConfig
-                    _releaseHistory.value = emptyList()
-                    _showDot.value = false
-                    _state.value = UpdateState.Checking
-                }
-                val result = checker.check(manual = true)
-                stateMutex.withLock { applyResult(result, manual = true) }
-                refreshReleaseHistoryQuietly()
-            }
-        }
-    }
-
-    /**
-     * Parses and saves an external update configuration and immediately triggers an update check.
-     */
-    fun applyExternalFirebaseToken(
-        rawInput: String,
-        onResult: (Result<ExternalFirebaseUpdateConfig>) -> Unit = {}
-    ) {
-        val parsed = ExternalFirebaseUpdateConfig.parseFlexibleInput(
-            rawInput = rawInput,
-            sourceLabel = "Release Server"
-        )
-        if (parsed == null || !parsed.isValid) {
-            onResult(
-                Result.failure(
-                    IllegalArgumentException(
-                        "Invalid update server configuration."
-                    )
-                )
-            )
-            return
-        }
-        scope.launch {
-            stateMutex.withLock {
-                val activeChannel = parsed.selectedUpdateChannel
-                preferences.setSelectedUpdateChannel(activeChannel)
-                preferences.setExternalFirebaseConfigJson(parsed.toJsonString())
-                _selectedChannel.value = activeChannel
-                _externalFirebaseConfig.value = parsed.withChannel(activeChannel)
-            }
-            onResult(Result.success(parsed))
-            checkManually()
-        }
-    }
-
-    private suspend fun refreshReleaseHistoryQuietly() {
-        val repo = compositeRepository ?: return
-        try {
-            val list = repo.fetchReleaseHistory()
-            stateMutex.withLock {
-                _releaseHistory.value = list
-                preferences.setReleaseHistoryJson(encodeHistory(list))
-            }
-        } catch (_: Exception) {
         }
     }
 
@@ -583,8 +477,6 @@ class UpdateManager(
                 }
 
                 val prefs = preferences.current()
-                _selectedChannel.value = prefs.selectedChannel
-                _externalFirebaseConfig.value = prefs.activeExternalFirebaseConfig()
                 val rawInfo = prefs.latestInfoJson
                 val info = current ?: rawInfo?.let(::decodeInfo)
 
@@ -704,25 +596,5 @@ class UpdateManager(
         }
     } catch (_: Exception) {
         null
-    }
-
-    private fun encodeHistory(list: List<UpdateInfo>): String {
-        val arr = JSONArray()
-        list.forEach { info ->
-            arr.put(JSONObject(encodeInfo(info)))
-        }
-        return arr.toString()
-    }
-
-    private fun decodeHistory(raw: String): List<UpdateInfo> = try {
-        val arr = JSONArray(raw)
-        buildList {
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                decodeInfo(obj.toString())?.let(::add)
-            }
-        }
-    } catch (_: Exception) {
-        emptyList()
     }
 }

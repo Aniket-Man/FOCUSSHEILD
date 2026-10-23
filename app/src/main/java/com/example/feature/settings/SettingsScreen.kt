@@ -880,7 +880,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "FocusShield v1.0",
+                                text = "FocusShield v${com.example.BuildConfig.VERSION_NAME}",
                                 style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = FocusColors.TextPrimary

@@ -164,40 +164,6 @@ class UpdateLifecycleTest {
         }
     }
 
-    @Test
-    fun `switching update channel persists new track, clears old channel offer, and fetches new channel release`() = runTest {
-        val preferences = newPreferences()
-        val repository = MutableRepository(release("1.5.0"))
-        val manager = newManager(preferences, repository, installedVersion = "1.4.0")
-
-        manager.checkManually().join()
-        assertEquals(
-            "1.5.0",
-            (manager.state.value as UpdateState.UpdateAvailable).info.versionName
-        )
-        assertEquals(
-            com.example.feature.update.domain.UpdateChannel.PRODUCTION,
-            manager.selectedChannel.value
-        )
-
-        // Admin publishes a Beta release on the Beta server track; user switches dropdown to BETA
-        repository.latest = release("1.6.0-beta.1")
-        manager.selectUpdateChannel(com.example.feature.update.domain.UpdateChannel.BETA).join()
-
-        assertEquals(
-            com.example.feature.update.domain.UpdateChannel.BETA,
-            manager.selectedChannel.value
-        )
-        assertEquals(
-            "beta",
-            preferences.current().activeExternalFirebaseConfig().normalizedChannel
-        )
-        assertEquals(
-            "1.6.0-beta.1",
-            (manager.state.value as UpdateState.UpdateAvailable).info.versionName
-        )
-    }
-
     private fun TestScope.newPreferences(): UpdatePreferences =
         UpdatePreferences(dataStore = FakeDataStore(), now = { 1_000_000L })
 

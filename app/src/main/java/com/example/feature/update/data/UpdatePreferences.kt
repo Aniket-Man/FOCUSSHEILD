@@ -59,27 +59,8 @@ data class UpdatePrefs(
     /** Installed version string recorded on the previous launch to detect post-update restarts. */
     val lastInstalledVersion: String? = null,
     /** Serialized UpdateInfo of the release that was just installed, used for the post-restart What's New dialog. */
-    val pendingInstallInfoJson: String? = null,
-    /** User-pasted external Firebase connection config JSON (overrides or supplements .env). */
-    val externalFirebaseConfigJson: String? = null,
-    /** Cached JSON array of past releases from the external Firebase update server. */
-    val releaseHistoryJson: String? = null,
-    /** Selected update server track (`production`, `beta`, `prerelease`, `alpha`, `internal`). */
-    val selectedChannelKey: String = com.example.feature.update.domain.UpdateChannel.PRODUCTION.key
-) {
-    val selectedChannel: com.example.feature.update.domain.UpdateChannel
-        get() = com.example.feature.update.domain.UpdateChannel.fromKey(selectedChannelKey)
-
-    /**
-     * Resolves the active update server configuration and applies the user's selected
-     * [selectedChannel] so update checks only fetch releases from that track.
-     */
-    fun activeExternalFirebaseConfig(): ExternalFirebaseUpdateConfig {
-        val base = ExternalFirebaseUpdateConfig.fromStoredJson(externalFirebaseConfigJson)
-            ?: ExternalFirebaseUpdateConfig.fromBuildConfig()
-        return base.withChannel(selectedChannel)
-    }
-}
+    val pendingInstallInfoJson: String? = null
+)
 
 class UpdatePreferences internal constructor(
     private val dataStore: DataStore<Preferences>,
@@ -101,9 +82,6 @@ class UpdatePreferences internal constructor(
         val ETAG = stringPreferencesKey("etag")
         val LAST_INSTALLED_VERSION = stringPreferencesKey("last_installed_version")
         val PENDING_INSTALL_INFO_JSON = stringPreferencesKey("pending_install_info_json")
-        val EXTERNAL_FIREBASE_CONFIG_JSON = stringPreferencesKey("external_firebase_config_json")
-        val RELEASE_HISTORY_JSON = stringPreferencesKey("release_history_json")
-        val SELECTED_UPDATE_CHANNEL = stringPreferencesKey("selected_update_channel")
     }
 
     val flow: Flow<UpdatePrefs> = dataStore.data
@@ -121,11 +99,7 @@ class UpdatePreferences internal constructor(
                 latestInfoJson = prefs[Keys.LATEST_INFO_JSON],
                 etag = prefs[Keys.ETAG],
                 lastInstalledVersion = prefs[Keys.LAST_INSTALLED_VERSION],
-                pendingInstallInfoJson = prefs[Keys.PENDING_INSTALL_INFO_JSON],
-                externalFirebaseConfigJson = prefs[Keys.EXTERNAL_FIREBASE_CONFIG_JSON],
-                releaseHistoryJson = prefs[Keys.RELEASE_HISTORY_JSON],
-                selectedChannelKey = prefs[Keys.SELECTED_UPDATE_CHANNEL]
-                    ?: ExternalFirebaseUpdateConfig.fromBuildConfig().normalizedChannel
+                pendingInstallInfoJson = prefs[Keys.PENDING_INSTALL_INFO_JSON]
             )
         }
 
@@ -163,45 +137,6 @@ class UpdatePreferences internal constructor(
     suspend fun setPendingInstallInfoJson(json: String?) {
         dataStore.edit { prefs ->
             if (json == null) prefs.remove(Keys.PENDING_INSTALL_INFO_JSON) else prefs[Keys.PENDING_INSTALL_INFO_JSON] = json
-        }
-    }
-
-    /**
-     * Persists the user's selected [com.example.feature.update.domain.UpdateChannel] and clears
-     * any cached offer/history from the previous channel so the next check fetches strictly from
-     * the newly selected track.
-     */
-    suspend fun setSelectedUpdateChannel(channel: com.example.feature.update.domain.UpdateChannel) {
-        dataStore.edit { prefs ->
-            prefs[Keys.SELECTED_UPDATE_CHANNEL] = channel.key
-            prefs.remove(Keys.DOWNLOADED_VERSION)
-            prefs.remove(Keys.DOWNLOADED_PATH)
-            prefs.remove(Keys.LATEST_INFO_JSON)
-            prefs.remove(Keys.RELEASE_HISTORY_JSON)
-            prefs.remove(Keys.ETAG)
-            prefs[Keys.LAST_CHECK_TIME] = 0L
-        }
-    }
-
-    suspend fun setExternalFirebaseConfigJson(json: String?) {
-        dataStore.edit { prefs ->
-            if (json.isNullOrBlank()) {
-                prefs.remove(Keys.EXTERNAL_FIREBASE_CONFIG_JSON)
-            } else {
-                prefs[Keys.EXTERNAL_FIREBASE_CONFIG_JSON] = json
-            }
-            prefs.remove(Keys.ETAG)
-            prefs[Keys.LAST_CHECK_TIME] = 0L
-        }
-    }
-
-    suspend fun setReleaseHistoryJson(json: String?) {
-        dataStore.edit { prefs ->
-            if (json.isNullOrBlank()) {
-                prefs.remove(Keys.RELEASE_HISTORY_JSON)
-            } else {
-                prefs[Keys.RELEASE_HISTORY_JSON] = json
-            }
         }
     }
 

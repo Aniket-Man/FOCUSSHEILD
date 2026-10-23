@@ -107,32 +107,17 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
     val updateRepository by lazy {
         com.example.feature.update.data.GitHubReleaseRepository.fromConfig()
     }
-    val compositeUpdateRepository by lazy {
-        com.example.feature.update.data.CompositeUpdateRepository(
-            gitHubRepository = updateRepository,
-            runtimeConfigProvider = { updateManagerExternalConfigSnapshot }
-        )
-    }
-
-    @Volatile
-    private var updateManagerExternalConfigSnapshot: com.example.feature.update.data.ExternalFirebaseUpdateConfig? =
-        com.example.feature.update.data.ExternalFirebaseUpdateConfig.fromBuildConfig()
-
     val updateDownloadManager by lazy {
         com.example.feature.update.data.UpdateDownloadManager(
             this,
-            allowedHosts = updateRepository.apkHostAllowList(),
-            allowedHostsProvider = { compositeUpdateRepository.apkHostAllowList() },
-            chunkedDownloader = { uri, partialFile, onProgress ->
-                compositeUpdateRepository.downloadChunkedApk(uri, partialFile, onProgress)
-            }
+            allowedHosts = updateRepository.apkHostAllowList()
         )
     }
     val updateManager by lazy {
         com.example.feature.update.engine.UpdateManager(
             context = this,
             checker = com.example.feature.update.data.UpdateChecker(
-                repository = compositeUpdateRepository,
+                repository = updateRepository,
                 preferences = updatePreferences,
                 installedVersionName = BuildConfig.VERSION_NAME,
                 installedVersionCode = BuildConfig.VERSION_CODE,
@@ -142,8 +127,7 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             downloadManager = updateDownloadManager,
             scope = applicationScope,
             installedVersionName = BuildConfig.VERSION_NAME,
-            installedVersionCode = BuildConfig.VERSION_CODE,
-            compositeRepository = compositeUpdateRepository
+            installedVersionCode = BuildConfig.VERSION_CODE
         )
     }
 
@@ -331,15 +315,8 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Restore cached update state (including post-update What's New detection) and schedule
         // continuous 15-minute background checks + immediate launch check.
         applicationScope.launch {
-            updateManager.externalFirebaseConfig.collect { cfg ->
-                updateManagerExternalConfigSnapshot = cfg
-            }
-        }
-        applicationScope.launch {
             try {
-                updateManagerExternalConfigSnapshot = updatePreferences.current().activeExternalFirebaseConfig()
                 updateManager.restore().join()
-                updateManagerExternalConfigSnapshot = updateManager.externalFirebaseConfig.value
                 updateManager.checkInBackground(forceForeground = true)
             } catch (e: Exception) {
                 android.util.Log.w("FocusShieldApp", "Update check startup error: ${e.message}")
