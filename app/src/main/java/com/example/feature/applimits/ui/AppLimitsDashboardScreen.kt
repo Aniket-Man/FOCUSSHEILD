@@ -562,21 +562,43 @@ private fun AppLimitCard(
                         )
                         if (!item.isBypassedToday) {
                             DropdownMenuItem(
-                                text = { Text("Unlock for Rest of Today") },
+                                text = {
+                                    Text(
+                                        if (item.isStrictOverride) "Unlock (Strict Locked)" else "Unlock for Rest of Today",
+                                        color = if (item.isStrictOverride) FocusColors.TextMuted else FocusColors.TextPrimary
+                                    )
+                                },
                                 onClick = {
                                     showMenu = false
                                     onUnlockToday()
                                 },
-                                leadingIcon = { Icon(Icons.Rounded.LockOpen, contentDescription = null) }
+                                leadingIcon = {
+                                    Icon(
+                                        if (item.isStrictOverride) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                                        contentDescription = null,
+                                        tint = if (item.isStrictOverride) FocusColors.AmberOrange else FocusColors.TextPrimary
+                                    )
+                                }
                             )
                         }
                         DropdownMenuItem(
-                            text = { Text("Delete Limit", color = FocusColors.BlockedRed) },
+                            text = {
+                                Text(
+                                    if (item.isStrictOverride) "Delete (Strict Locked)" else "Delete Limit",
+                                    color = if (item.isStrictOverride) FocusColors.TextMuted else FocusColors.BlockedRed
+                                )
+                            },
                             onClick = {
                                 showMenu = false
                                 onDelete()
                             },
-                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = FocusColors.BlockedRed) }
+                            leadingIcon = {
+                                Icon(
+                                    if (item.isStrictOverride) Icons.Rounded.Lock else Icons.Rounded.Delete,
+                                    contentDescription = null,
+                                    tint = if (item.isStrictOverride) FocusColors.AmberOrange else FocusColors.BlockedRed
+                                )
+                            }
                         )
                     }
                 }

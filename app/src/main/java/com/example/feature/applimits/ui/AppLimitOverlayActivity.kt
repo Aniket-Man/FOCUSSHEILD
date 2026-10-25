@@ -278,6 +278,14 @@ class AppLimitOverlayActivity : ComponentActivity() {
                         },
                         onTurnOffAndResetStreak = {
                             lifecycleScope.launch {
+                                if (data.isStrict || !AppLimitStrictModeEngine.instance.canTurnOffLimit(data.packageName)) {
+                                    Toast.makeText(
+                                        applicationContext,
+                                        "Strict Mode is on: ${data.appName}'s limit cannot be turned off or removed",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    return@launch
+                                }
                                 // The bypass row must exist before the blocker steps aside and
                                 // the app is reopened. Firing this write into a detached scope
                                 // let the gate re-evaluate first and block the app again.

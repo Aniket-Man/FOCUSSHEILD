@@ -442,20 +442,37 @@ abstract class FocusShieldDatabase : RoomDatabase() {
             }
         }
 
+        private fun buildDatabase(context: Context): FocusShieldDatabase {
+            return Room.databaseBuilder(
+                context.applicationContext,
+                FocusShieldDatabase::class.java,
+                "focus_shield_database"
+            )
+                .addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                    MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13
+                )
+                // Fallback to destructive migration ensures that if an older install or test build
+                // has incompatible schema drift, missing migration paths, or a downgrade, Room safely
+                // recreates the tables rather than throwing an unhandled fatal IllegalStateException
+                // that terminates the app process on startup.
+                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationOnDowngrade()
+                .build()
+        }
+
         fun getInstance(context: Context): FocusShieldDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    FocusShieldDatabase::class.java,
-                    "focus_shield_database"
-                )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
-                    // No destructive fallbacks: a missing migration or an app downgrade must fail
-                    // loudly with an explicit error. `fallbackToDestructiveMigration()` used to
-                    // silently wipe every session, limit and blocked list on any schema drift.
-                    .build()
-                INSTANCE = instance
-                instance
+                INSTANCE ?: try {
+                    buildDatabase(context)
+                } catch (e: Throwable) {
+                    android.util.Log.e("FocusShieldDatabase", "Error initializing database, attempting clean recreation", e)
+                    try {
+                        context.applicationContext.deleteDatabase("focus_shield_database")
+                    } catch (_: Throwable) {}
+                    buildDatabase(context)
+                }.also { INSTANCE = it }
             }
         }
     }

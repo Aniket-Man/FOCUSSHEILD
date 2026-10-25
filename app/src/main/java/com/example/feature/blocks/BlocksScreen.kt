@@ -452,11 +452,27 @@ fun BlocksScreen(
                                                 }
                                             )
                                         } else {
-                                            appLimitsViewModel.toggleLimit(item.packageName, isEnabled)
+                                            if (!isEnabled && item.isStrictOverride) {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Strict Mode Active: ${item.appName} limit is locked and cannot be disabled.",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            } else {
+                                                appLimitsViewModel.toggleLimit(item.packageName, isEnabled)
+                                            }
                                         }
                                     },
                                     onDelete = {
-                                        appLimitsViewModel.deleteLimit(item.packageName)
+                                        if (item.isStrictOverride) {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Strict Mode Active: ${item.appName} limit cannot be removed while Strict Mode is active.",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        } else {
+                                            appLimitsViewModel.deleteLimit(item.packageName)
+                                        }
                                     },
                                     onClick = {
                                         if (item.isStrictOverride) {

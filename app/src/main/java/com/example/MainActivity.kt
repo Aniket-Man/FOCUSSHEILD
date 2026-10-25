@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.example.core.design.FocusShieldTheme
 import com.example.core.navigation.FocusNavGraph
 import com.example.data.preferences.FocusPreferences
@@ -24,6 +25,7 @@ import com.example.feature.update.notification.UpdateNotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -37,9 +39,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MyApplication)
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        handleIncomingIntent(intent)
+        try {
+            super.onCreate(savedInstanceState)
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "Error in super.onCreate with savedInstanceState, retrying with null", e)
+            super.onCreate(null)
+        }
+        runCatching { enableEdgeToEdge() }
+        runCatching { handleIncomingIntent(intent) }
 
         setContent {
             val permissionLauncher = rememberLauncherForActivityResult(
@@ -58,7 +65,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val app = application as FocusShieldApp
+            val app = (application as? FocusShieldApp) ?: FocusShieldApp.instance
             val preferences by app.preferencesRepository.preferencesFlow.collectAsStateWithLifecycle(
                 initialValue = FocusPreferences()
             )
@@ -87,10 +94,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        com.example.core.accessibility.AccessibilityHelper.updateState(this)
-        com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this)
-        com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance?.syncWithPreferences()
-        (application as? FocusShieldApp)?.updateManager?.checkInBackground(forceForeground = true)
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { com.example.core.accessibility.AccessibilityHelper.updateState(this@MainActivity) }
+            runCatching { com.example.core.accessibility.AccessibilityHelper.executePendingGrants(this@MainActivity) }
+            runCatching { com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance?.syncWithPreferences() }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

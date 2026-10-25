@@ -803,6 +803,12 @@ fun SettingsScreen(
                                             lastSyncAtMillis = uiState.lastSyncAtMillis,
                                             onSyncNow = viewModel::syncNow
                                         )
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        com.example.core.ui.SyncStatusLabel(
+                                            onSyncNow = viewModel::syncNow
+                                        )
                                     }
                                 }
                             }

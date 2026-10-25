@@ -227,6 +227,13 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
         emergencyUsesAllowed: Int = 1
     ) {
         viewModelScope.launch {
+            val existing = appLimitRepository.getLimitByPackage(packageName)
+            if (existing?.isStrictOverride == true) {
+                if (!isStrictOverride || dailyLimitMinutes > existing.dailyLimitMinutes) {
+                    _strictLockMessage.value = "Strict Mode Active: ${existing.appName} limit cannot be relaxed while Strict Mode is active."
+                    return@launch
+                }
+            }
             appLimitRepository.saveLimit(
                 packageName = packageName,
                 appName = appName,
@@ -242,6 +249,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun updateStrictMode(packageName: String, isStrict: Boolean) {
         viewModelScope.launch {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            if (!isStrict && limit?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: ${limit.appName} is locked in Strict Mode and cannot be turned off."
+                return@launch
+            }
             appLimitRepository.updateStrictMode(packageName, isStrict)
         }
     }

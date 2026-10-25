@@ -260,4 +260,13 @@ class AppLimitFloatingOverlayManagerTest {
         assertFalse(containsText(root, "🚨 Use Emergency Pass (1 left)"))
         assertTrue(containsText(root, "Close Some App"))
     }
+
+    @Test
+    fun `a strict-mode overlay shows strict locked pill instead of turn off`() {
+        show(isStrict = true)
+        val root = currentOverlayView()
+
+        assertTrue(containsText(root, "Strict Locked"))
+        assertFalse(containsText(root, "Turn off"))
+    }
 }

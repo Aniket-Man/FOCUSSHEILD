@@ -793,6 +793,11 @@ class AppLimitManager private constructor(
      */
     suspend fun leaveBlockForToday(packageName: String, alsoDisableLimit: Boolean = false): Boolean {
         return try {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            if (limit != null && limit.isStrictOverride) {
+                Log.w(tag, "Strict Mode is active: refusing to leave block for today for $packageName")
+                return false
+            }
             val todayDate = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, todayDate, true)
             if (alsoDisableLimit) {
@@ -821,6 +826,11 @@ class AppLimitManager private constructor(
      */
     fun removeLimitPermanently(packageName: String) {
         scope.launch {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            if (limit != null && limit.isStrictOverride) {
+                Log.w(tag, "Strict Mode is active: refusing to permanently remove limit for $packageName")
+                return@launch
+            }
             appLimitRepository.deleteLimit(packageName)
             Log.i(tag, "App limit for $packageName permanently removed")
         }

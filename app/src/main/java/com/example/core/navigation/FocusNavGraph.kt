@@ -83,12 +83,21 @@ fun FocusNavGraph(
     updateViewModel: UpdateViewModel? = null
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    val resolvedUpdateVm: UpdateViewModel = updateViewModel ?: hiltViewModel()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val resolvedUpdateVm: UpdateViewModel = updateViewModel ?: runCatching {
+        hiltViewModel<UpdateViewModel>()
+    }.getOrElse {
+        val app = context.applicationContext as FocusShieldApp
+        androidx.lifecycle.viewmodel.compose.viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return UpdateViewModel(app.updateManager, com.example.BuildConfig.VERSION_NAME) as T
+            }
+        })
+    }
     val updateState by resolvedUpdateVm.state.collectAsStateWithLifecycle()
     val showUpdateDot by resolvedUpdateVm.showDot.collectAsStateWithLifecycle()
     val completedUpdate by resolvedUpdateVm.completedUpdate.collectAsStateWithLifecycle()
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     // App-wide installer launcher so "Install & Restart" works directly from the push modal or
     // the Home banner as well as the dedicated UpdateScreen.
@@ -221,7 +230,10 @@ fun FocusNavGraph(
         onOpenUpdatesHandled()
     }
 
-    val permissionStatus = androidx.compose.runtime.remember { FocusPermissionManager.getPermissionStatus(context) }
+    val permissionStatus = androidx.compose.runtime.remember {
+        runCatching { FocusPermissionManager.getPermissionStatus(context) }
+            .getOrDefault(com.example.core.permission.ProtectionPermissionStatus())
+    }
     val corePermissionsGranted = permissionStatus.isAccessibilityEnabled &&
             permissionStatus.isUsageAccessGranted &&
             permissionStatus.isOverlayGranted &&
@@ -231,7 +243,10 @@ fun FocusNavGraph(
     // authoritative flag so it re-reads instead of pinning a stale one-shot value captured
     // at first composition (e.g. after process recreation, issue #18).
     val isCompletedOnboardingSync = androidx.compose.runtime.remember(settingsState.preferences.hasCompletedOnboarding) {
-        FocusShieldApp.instance.preferencesRepository.isCompletedOnboardingSync()
+        runCatching {
+            (context.applicationContext as? FocusShieldApp)?.preferencesRepository?.isCompletedOnboardingSync()
+                ?: FocusShieldApp.instance.preferencesRepository.isCompletedOnboardingSync()
+        }.getOrDefault(false)
     }
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 

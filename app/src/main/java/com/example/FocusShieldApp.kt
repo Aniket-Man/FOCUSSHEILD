@@ -155,15 +155,22 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         super.onCreate()
         instance = this
 
+        // Install process-wide crash logger so any unexpected fatal exception is preserved for diagnostics
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e("FocusShieldApp", "FATAL CRASH on thread ${thread.name}: ${throwable.message}", throwable)
+            try {
+                val crashFile = java.io.File(filesDir, "crash_log.txt")
+                crashFile.writeText(android.util.Log.getStackTraceString(throwable))
+            } catch (_: Throwable) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         // The cloud layer is optional: a fresh clone (and CI) has no google-services.json,
         // so the FirebaseInitProvider never runs and wiring sync below would throw from
-        // FirebaseApp.getInstance(). Register a placeholder app in that case — cloud
-        // features then construct cleanly and their absent network calls fail gracefully
-        // (issue #31: a fresh clone must boot and test green). With a real
-        // google-services.json the provider has already initialized Firebase before this
-        // runs, so this is a no-op on developer/user builds.
-        if (FirebaseApp.getApps(this).isEmpty()) {
-            runCatching {
+        // FirebaseApp.getInstance(). Register a placeholder app in that case.
+        runCatching {
+            if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(
                     this,
                     FirebaseOptions.Builder()
@@ -173,167 +180,229 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                         .build()
                 )
             }
+        }.onFailure {
+            android.util.Log.w("FocusShieldApp", "FirebaseApp initialization skipped: ${it.message}")
         }
 
         // Initialize AccessibilityHelper reactive state & system observers
-        com.example.core.accessibility.AccessibilityHelper.init(this)
+        runCatching {
+            com.example.core.accessibility.AccessibilityHelper.init(this)
+        }.onFailure {
+            android.util.Log.w("FocusShieldApp", "AccessibilityHelper init error: ${it.message}")
+        }
 
         // Connectivity monitoring (drives cloud sync retries)
-        connectivityMonitor.start()
+        runCatching {
+            connectivityMonitor.start()
+        }.onFailure {
+            android.util.Log.w("FocusShieldApp", "ConnectivityMonitor start error: ${it.message}")
+        }
 
-        // Cloud sync wiring: the outbox needs the database before any repository write can enqueue,
-        // and the gateway + document-dirty observer must be live before the first seed-init write.
-        // onPendingChanged is set last so a repository enqueue always finds a wired trigger.
-        SyncTracker.init(database, applicationScope)
-        syncGateway.start()
-        preferencesObserver.start(applicationScope)
-        SyncTracker.onPendingChanged = { syncGateway.requestSync() }
+        // Cloud sync wiring: safely initialize outbox, observers, and periodic API SyncWorker
+        runCatching {
+            SyncTracker.init(database, applicationScope)
+            syncGateway.start()
+            preferencesObserver.start(applicationScope)
+            SyncTracker.onPendingChanged = { syncGateway.requestSync() }
+            com.example.cloud.sync.SyncWorker.schedulePeriodicSync(this)
+        }.onFailure {
+            android.util.Log.w("FocusShieldApp", "Cloud sync initialization error: ${it.message}")
+        }
+
+        applicationScope.launch {
+            try {
+                syncGateway.lastSyncAtMillis.collect { lastAt ->
+                    if (lastAt > 0L) {
+                        com.example.cloud.sync.SyncWorker.recordSyncSuccess(this@FocusShieldApp, lastAt)
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
 
         // Automatically update Scholar Profile picture & display name from Gmail / Google account upon sign-in
         applicationScope.launch {
-            authRepository.authState.collect { authState ->
-                if (authState is AuthState.Authenticated) {
-                    val photoUrl = authState.photoUrl
-                    val displayName = authState.displayName
-                    if (!photoUrl.isNullOrBlank()) {
-                        preferencesRepository.updateUserPhotoUri(photoUrl)
-                    }
-                    if (displayName.isNotBlank()) {
-                        val currentName = preferencesRepository.preferencesFlow.first().userName
-                        if (currentName.isBlank() || currentName == "Focus Scholar") {
-                            preferencesRepository.updateUserName(displayName)
+            try {
+                authRepository.authState.collect { authState ->
+                    if (authState is AuthState.Authenticated) {
+                        val photoUrl = authState.photoUrl
+                        val displayName = authState.displayName
+                        if (!photoUrl.isNullOrBlank()) {
+                            preferencesRepository.updateUserPhotoUri(photoUrl)
+                        }
+                        if (displayName.isNotBlank()) {
+                            val currentName = preferencesRepository.preferencesFlow.first().userName
+                            if (currentName.isBlank() || currentName == "Focus Scholar") {
+                                preferencesRepository.updateUserName(displayName)
+                            }
                         }
                     }
                 }
-            }
+            } catch (_: Throwable) {}
         }
 
-        // Periodic cloud auto-save. The foreground loop inside SyncGateway honours the user's
-        // cadence (15s–5min) while the app is alive; WorkManager covers the app-closed case, where
-        // Android's 15-minute periodic floor applies. Both are cancelled the moment the user signs
-        // out or turns auto-save off, so a local-only install schedules no work at all.
+        // Periodic cloud auto-save scheduler
         applicationScope.launch {
-            combine(
-                preferencesRepository.preferencesFlow,
-                authRepository.authState
-            ) { prefs, authState ->
-                prefs.autoSaveIntervalSeconds to
-                    (prefs.isAutoSaveToCloudEnabled && authState is AuthState.Authenticated)
-            }
-                .distinctUntilChanged()
-                .collect { (seconds, shouldRun) ->
-                    if (shouldRun) {
-                        AutoSaveScheduler.schedule(this@FocusShieldApp, seconds)
-                    } else {
-                        AutoSaveScheduler.cancel(this@FocusShieldApp)
+            try {
+                combine(
+                    preferencesRepository.preferencesFlow,
+                    authRepository.authState
+                ) { prefs, authState ->
+                    prefs.autoSaveIntervalSeconds to
+                        (prefs.isAutoSaveToCloudEnabled && authState is AuthState.Authenticated)
+                }
+                    .distinctUntilChanged()
+                    .collect { (seconds, shouldRun) ->
+                        if (shouldRun) {
+                            AutoSaveScheduler.schedule(this@FocusShieldApp, seconds)
+                        } else {
+                            AutoSaveScheduler.cancel(this@FocusShieldApp)
+                        }
+                    }
+            } catch (_: Throwable) {}
+        }
+
+        // Lifecycle observer for sync flushing
+        runCatching {
+            ProcessLifecycleOwner.get().lifecycle.addObserver(
+                object : DefaultLifecycleObserver {
+                    override fun onStop(owner: LifecycleOwner) {
+                        applicationScope.launch { syncGateway.flushPending() }
                     }
                 }
+            )
+        }.onFailure {
+            android.util.Log.w("FocusShieldApp", "ProcessLifecycleOwner observer registration error: ${it.message}")
         }
 
-        // A flush as the process leaves the foreground means the last few seconds of a session are
-        // usually already on Firestore by the time the user switches away.
-        ProcessLifecycleOwner.get().lifecycle.addObserver(
-            object : DefaultLifecycleObserver {
-                override fun onStop(owner: LifecycleOwner) {
-                    applicationScope.launch { syncGateway.flushPending() }
-                }
-            }
-        )
-
-        // Restore any previously-signed-in cloud session (no-op when not configured / signed out)
-        // and ensure preloaded Session Summary live-writing quotes exist in Cloud Firestore.
+        // Restore any previously-signed-in cloud session first; defer heavy Firestore quote seeding
+        // until after initial UI frames have settled.
         applicationScope.launch {
             try {
                 authRepository.restoreOnStart()
-            } catch (_: Exception) {
-            }
+            } catch (_: Throwable) {}
+            kotlinx.coroutines.delay(2200L)
             try {
                 com.example.data.repository.SessionQuoteRepository.ensurePreloadedInFirestore()
-            } catch (_: Exception) {
-            }
+            } catch (_: Throwable) {}
         }
 
         // Initialize blocker manager with dependencies
-        FocusBlockerManager.initialize(
-            appContext = this,
-            blockedAppRepository = blockedAppRepository,
-            blockedAttemptRepository = blockedAttemptRepository,
-            studyChannelRepository = studyChannelRepository
-        )
+        runCatching {
+            FocusBlockerManager.initialize(
+                appContext = this,
+                blockedAppRepository = blockedAppRepository,
+                blockedAttemptRepository = blockedAttemptRepository,
+                studyChannelRepository = studyChannelRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "FocusBlockerManager init error: ${it.message}")
+        }
 
         // Initialize App Limit Manager & Strict Mode Engine
-        com.example.feature.applimits.engine.AppLimitManager.initialize(
-            appContext = this,
-            appLimitRepository = appLimitRepository,
-            preferencesRepository = preferencesRepository,
-            blockedAttemptRepository = blockedAttemptRepository
-        )
-        // Re-arm a temporary App Limit session that outlived the process. Without this the timer
-        // (and the "time's up" blocker it raises) died with the process, so a session the user had
-        // chosen simply never ended.
-        try {
-            com.example.feature.applimits.engine.AppLimitManager.instance.restoreSessionFromDisk()
-        } catch (e: Exception) {
-            android.util.Log.e("FocusShieldApp", "Error restoring app limit session on startup: ${e.message}")
+        runCatching {
+            com.example.feature.applimits.engine.AppLimitManager.initialize(
+                appContext = this,
+                appLimitRepository = appLimitRepository,
+                preferencesRepository = preferencesRepository,
+                blockedAttemptRepository = blockedAttemptRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "AppLimitManager init error: ${it.message}")
         }
-        com.example.feature.applimits.engine.AppLimitStrictModeEngine.initialize(
-            context = this,
-            repository = appLimitRepository
-        )
+
+        applicationScope.launch {
+            runCatching {
+                com.example.feature.applimits.engine.AppLimitManager.instance.restoreSessionFromDisk()
+            }.onFailure { e ->
+                android.util.Log.e("FocusShieldApp", "Error restoring app limit session on startup: ${e.message}")
+            }
+        }
+
+        runCatching {
+            com.example.feature.applimits.engine.AppLimitStrictModeEngine.initialize(
+                context = this,
+                repository = appLimitRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "AppLimitStrictModeEngine init error: ${it.message}")
+        }
 
         // Initialize Website Blocker Engine
-        com.example.feature.websiteblocker.engine.WebsiteBlockerEngine.initialize(
-            appContext = this,
-            websiteRepository = blockedWebsiteRepository,
-            preferencesRepository = preferencesRepository
-        )
+        runCatching {
+            com.example.feature.websiteblocker.engine.WebsiteBlockerEngine.initialize(
+                appContext = this,
+                websiteRepository = blockedWebsiteRepository,
+                preferencesRepository = preferencesRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "WebsiteBlockerEngine init error: ${it.message}")
+        }
 
         // Initialize Notification Blocker Engine
-        com.example.feature.notificationblocker.engine.NotificationBlockerEngine.initialize(
-            appContext = this,
-            preferencesRepository = preferencesRepository,
-            blockedAttemptRepository = blockedAttemptRepository
-        )
+        runCatching {
+            com.example.feature.notificationblocker.engine.NotificationBlockerEngine.initialize(
+                appContext = this,
+                preferencesRepository = preferencesRepository,
+                blockedAttemptRepository = blockedAttemptRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "NotificationBlockerEngine init error: ${it.message}")
+        }
 
-        // Initialize YouTube Study Mode dwell capture (approved-content watch time)
-        com.example.feature.youtube.engine.YouTubeStudyDwellTracker.initialize(
-            analyticsRepository = analyticsRepository,
-            blockedAttemptRepository = blockedAttemptRepository
-        )
+        // Initialize YouTube Study Mode dwell capture
+        runCatching {
+            com.example.feature.youtube.engine.YouTubeStudyDwellTracker.initialize(
+                analyticsRepository = analyticsRepository,
+                blockedAttemptRepository = blockedAttemptRepository
+            )
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "YouTubeStudyDwellTracker init error: ${it.message}")
+        }
 
         // Initialize Anti-Uninstall Engine (Device Admin protection)
-        com.example.core.engine.AntiUninstallEngine.getInstance(this)
+        runCatching {
+            com.example.core.engine.AntiUninstallEngine.getInstance(this)
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "AntiUninstallEngine init error: ${it.message}")
+        }
 
-        // Initialize Block Protection (always-on tamper guard during active sessions)
-        com.example.feature.blocker.protection.BlockProtectionManager.initialize()
+        // Initialize Block Protection
+        runCatching {
+            com.example.feature.blocker.protection.BlockProtectionManager.initialize()
+        }.onFailure {
+            android.util.Log.e("FocusShieldApp", "BlockProtectionManager init error: ${it.message}")
+        }
 
         // Initialize session, protection, and update notification channels
-        com.example.feature.session.notification.SessionNotificationHelper.initialize(this)
-        com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this)
-        com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
+        runCatching { com.example.feature.session.notification.SessionNotificationHelper.initialize(this) }
+        runCatching { com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this) }
+        runCatching { com.example.feature.update.notification.UpdateNotificationHelper.initialize(this) }
 
-        // Restore cached update state (including post-update What's New detection) and schedule
-        // continuous 15-minute background checks + immediate launch check.
+        // Restore cached update state quickly, then defer network update check & WorkManager scheduling
+        // until after Splash-to-Home transition completes.
         applicationScope.launch {
             try {
                 updateManager.restore().join()
+                kotlinx.coroutines.delay(2500L)
                 updateManager.checkInBackground(forceForeground = true)
-            } catch (e: Exception) {
+                runCatching {
+                    com.example.feature.update.work.UpdateCheckScheduler.schedule(this@FocusShieldApp)
+                }
+            } catch (e: Throwable) {
                 android.util.Log.w("FocusShieldApp", "Update check startup error: ${e.message}")
             }
-        }
-        try {
-            com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
-        } catch (_: Throwable) {
         }
 
         // Re-check automatically when connectivity returns
         applicationScope.launch {
-            connectivityMonitor.isOnline.collect { online ->
-                if (online) {
-                    updateManager.checkInBackground(forceForeground = false)
+            try {
+                connectivityMonitor.isOnline.collect { online ->
+                    if (online) {
+                        updateManager.checkInBackground(forceForeground = false)
+                    }
                 }
-            }
+            } catch (_: Throwable) {}
         }
 
         // Restore any active session from disk that was running prior to process restart
@@ -342,11 +411,12 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             if (restored != null && (restored.isRunning || restored.isPaused)) {
                 com.example.feature.session.service.FocusSessionForegroundService.start(this)
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             android.util.Log.e("FocusShieldApp", "Error restoring active session on startup: ${e.message}")
         }
 
-        // Prepopulate default initial subjects, study plans, and approved study channels if empty
+        // Prepopulate default initial subjects, study plans, and approved study channels if empty,
+        // and stagger network logo pre-caching so it never competes with initial Room queries.
         applicationScope.launch {
             try {
                 subjectRepository.initializeDefaultSubjectsIfEmpty()
@@ -364,7 +434,9 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                 com.example.feature.session.notification.StudyPlanAlarmScheduler.scheduleMidnightDailyReset(
                     this@FocusShieldApp
                 )
-                // Pre-cache educational channel logos to internal storage disk for instant offline loading
+
+                // Wait for the Home screen to finish rendering before downloading/precaching channel logos
+                kotlinx.coroutines.delay(3000L)
                 ChannelLogoStorageManager.precacheAllChannels(this@FocusShieldApp, database.studyChannelDao())
             } catch (e: Exception) {
                 android.util.Log.e("FocusShieldApp", "Error during background startup initialization: ${e.message}")

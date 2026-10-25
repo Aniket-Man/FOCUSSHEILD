@@ -160,7 +160,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // 1. Header (Logo, Brand, Slogan, Quick Theme Switcher, Notifications, Avatar)
-            item {
+            item(key = "home_header", contentType = "header") {
                 Box(modifier = Modifier.padding(bottom = 10.dp)) {
                     FocusHeader(
                         photoUri = uiState.userPhotoUri,
@@ -182,7 +182,7 @@ fun HomeScreen(
                 updateState is com.example.feature.update.domain.UpdateState.Downloading ||
                 updateState is com.example.feature.update.domain.UpdateState.Downloaded
             if (showBanner) {
-                item(key = "home_update_banner") {
+                item(key = "home_update_banner", contentType = "update_banner") {
                     HomeUpdateBanner(
                         updateState = updateState,
                         onPrimaryAction = onUpdateBannerAction,
@@ -195,7 +195,7 @@ fun HomeScreen(
             }
 
             // 2. Focus Session Banner Card (purple gradient card)
-            item {
+            item(key = "home_session_section", contentType = "session_card") {
                 HomeSessionSection(
                     viewModel = viewModel,
                     onNavigateToActiveSession = onNavigateToActiveSession,
@@ -204,7 +204,7 @@ fun HomeScreen(
             }
 
             // 3. Two Stats Cards Row: Today's Study & Phone Usage
-            item {
+            item(key = "home_stats_row", contentType = "stats_row") {
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
@@ -220,7 +220,7 @@ fun HomeScreen(
             }
 
             // 4. Quick Actions Section (Balanced 2-Column Grid matching screenshot)
-            item {
+            item(key = "home_quick_actions", contentType = "quick_actions") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -312,7 +312,7 @@ fun HomeScreen(
             // Only the section header/summary is one item; every plan row is its own lazy item.
             // Previously the whole list lived inside a single Column item, so it was composed and
             // measured in full on every dashboard update.
-            item(key = "today_plan_header") {
+            item(key = "today_plan_header", contentType = "plan_header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -407,7 +407,7 @@ fun HomeScreen(
             }
 
             if (uiState.studyPlan.isEmpty()) {
-                item(key = "today_plan_empty") {
+                item(key = "today_plan_empty", contentType = "plan_empty") {
                     TodayPlanEmptyState(
                         onNavigateToPlannerTab = onNavigateToPlannerTab,
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -416,7 +416,8 @@ fun HomeScreen(
             } else {
                 items(
                     items = uiState.studyPlan,
-                    key = { plan -> "today_plan_${plan.id}" }
+                    key = { plan -> "today_plan_${plan.id}" },
+                    contentType = { "study_plan_row" }
                 ) { planItem ->
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                         StudyPlanRow(

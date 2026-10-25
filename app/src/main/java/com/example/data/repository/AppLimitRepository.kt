@@ -83,6 +83,11 @@ class AppLimitRepository(
      * thing the user gets by leaving the limit off — nothing reads these rows without a limit config.
      */
     suspend fun deleteLimit(packageName: String) {
+        val limit = appLimitDao.getLimitByPackage(packageName)
+        if (limit?.isStrictOverride == true) {
+            android.util.Log.w("AppLimitRepository", "Strict Mode is active: refusing to delete limit for $packageName")
+            return
+        }
         appLimitDao.deleteByPackage(packageName)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
@@ -90,6 +95,13 @@ class AppLimitRepository(
     }
 
     suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean) {
+        if (!isEnabled) {
+            val limit = appLimitDao.getLimitByPackage(packageName)
+            if (limit?.isStrictOverride == true) {
+                android.util.Log.w("AppLimitRepository", "Strict Mode is active: refusing to disable limit for $packageName")
+                return
+            }
+        }
         appLimitDao.setEnabled(packageName, isEnabled)
 
         if (isEnabled) {
@@ -238,6 +250,13 @@ class AppLimitRepository(
     }
 
     suspend fun setBypassedForToday(packageName: String, dateString: String = getTodayDateString(), bypassed: Boolean) {
+        if (bypassed) {
+            val limit = appLimitDao.getLimitByPackage(packageName)
+            if (limit?.isStrictOverride == true) {
+                android.util.Log.w("AppLimitRepository", "Strict Mode is active: refusing to bypass limit for $packageName for today")
+                return
+            }
+        }
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
         if (existing == null) {
             val limit = appLimitDao.getLimitByPackage(packageName)

@@ -8,4 +8,9 @@
     <string name="usage_widget_description">Tracks today\'s focus time progress toward your daily study goal.</string>
     <string name="unlock_widget_label">Phone Unlocks</string>
     <string name="unlock_widget_description">Counts today\'s phone unlocks compared to your weekly average.</string>
+    <string name="loading_content_description">Loading content</string>
+    <string name="sync_status_refresh_description">Synchronize data now</string>
+    <string name="sync_status_syncing">Syncing data…</string>
 </resources>
+
+
