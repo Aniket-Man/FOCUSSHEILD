@@ -96,6 +96,228 @@ import com.example.data.repository.StudyPlanRepository
  * Screen 1: FocusShield Home Dashboard.
  * Accurately implements the reference design with comprehensive Today's Plan management.
  */
+
+@Composable
+private fun HomeSessionSection(
+    viewModel: HomeViewModel,
+    onNavigateToActiveSession: () -> Unit,
+    onStartSession: () -> Unit
+) {
+    val session by viewModel.sessionUiState.collectAsStateWithLifecycle()
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = FocusSpacing.screenHorizontal)
+            .padding(bottom = 10.dp)
+    ) {
+        FocusSessionCard(
+            isActive = session.isSessionActive,
+            timeString = session.timeRemainingString,
+            subjectName = session.subject.ifBlank { "Focus Session" },
+            subtitleText = session.pomodoroCycleText
+                ?: if (session.isSessionActive) {
+                    if (session.topic.isNotBlank()) "${session.topic} • Active" else "Active Session"
+                } else null,
+            isPaused = session.isPaused,
+            onTogglePause = { viewModel.toggleSessionPause() },
+            onCardClick = {
+                if (session.isSessionActive) {
+                    onNavigateToActiveSession()
+                } else {
+                    onStartSession()
+                }
+            },
+            onStartSessionClick = onStartSession
+        )
+    }
+}
+
+
+@Composable
+private fun TodayPlanEmptyState(
+    onNavigateToPlannerTab: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = FocusShapes.card,
+        color = FocusColors.Surface,
+        border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onNavigateToPlannerTab() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CalendarToday,
+                contentDescription = null,
+                tint = FocusColors.TextMuted,
+                modifier = Modifier.size(32.dp)
+            )
+            Text(
+                text = "No study plans for today",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    color = FocusColors.TextPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
+            Text(
+                text = "Tap here to open the Planner and schedule your focus blocks for today",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = FocusColors.TextSecondary,
+                    textAlign = TextAlign.Center
+                )
+            )
+        }
+    }
+}
+    updateState: com.example.feature.update.domain.UpdateState,
+    onPrimaryAction: () -> Unit,
+    onOpenDetails: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accentColor = when (updateState) {
+        is com.example.feature.update.domain.UpdateState.Downloaded -> FocusColors.EmeraldSuccess
+        is com.example.feature.update.domain.UpdateState.Downloading -> FocusColors.CyanBlue
+        else -> FocusColors.Primary
+    }
+
+    val titleText = when (updateState) {
+        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
+            "Update v${updateState.info.versionName} Available"
+        is com.example.feature.update.domain.UpdateState.Downloading -> {
+            val pct = updateState.progress.percent
+            if (pct != null) "Downloading Update ($pct%)" else "Downloading Update…"
+        }
+        is com.example.feature.update.domain.UpdateState.Downloaded ->
+            "Update v${updateState.info.versionName} Ready — Restart App"
+        else -> "Update Available"
+    }
+
+    val subtitleText = when (updateState) {
+        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
+            "A new GitHub release is ready to download and install."
+        is com.example.feature.update.domain.UpdateState.Downloading ->
+            "Downloading in the background. Tap to view live progress."
+        is com.example.feature.update.domain.UpdateState.Downloaded ->
+            "Download complete! Tap to install and restart FocusShield."
+        else -> ""
+    }
+
+    val actionLabel = when (updateState) {
+        is com.example.feature.update.domain.UpdateState.UpdateAvailable -> "Update"
+        is com.example.feature.update.domain.UpdateState.Downloading -> "Progress"
+        is com.example.feature.update.domain.UpdateState.Downloaded -> "Restart"
+        else -> "Open"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(FocusShapes.card)
+            .background(accentColor.copy(alpha = 0.10f))
+            .border(1.dp, accentColor.copy(alpha = 0.30f), FocusShapes.card)
+            .clickable { onOpenDetails() }
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .testTag("home_update_banner")
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accentColor.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Rounded.NotificationsActive,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = titleText,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = FocusColors.TextPrimary,
+                            fontSize = 14.sp
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = subtitleText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = FocusColors.TextSecondary,
+                            fontSize = 11.sp
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = accentColor,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onPrimaryAction() }
+                        .testTag("home_update_banner_action_button")
+                ) {
+                    Text(
+                        text = actionLabel,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = FocusColors.TextOnDark,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        ),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                }
+            }
+
+            if (updateState is com.example.feature.update.domain.UpdateState.Downloading) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val barModifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(50))
+                if (updateState.progress.isDeterminate) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { updateState.progress.fraction },
+                        modifier = barModifier,
+                        color = accentColor,
+                        trackColor = FocusColors.SurfaceSubtle
+                    )
+                } else {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        modifier = barModifier,
+                        color = accentColor,
+                        trackColor = FocusColors.SurfaceSubtle
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
@@ -142,23 +364,6 @@ fun HomeScreen(
         )
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(FocusColors.Background)
-            .testTag("home_screen")
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-            // The floating bottom dock is drawn as an overlay, so content extends behind it,
-            // while the clearance padding ensures the final items rest above the dock.
-            contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp + 48.dp),
-            // 10dp between items; the four sections above Today's Plan add another 10dp so their
-            // original 20dp rhythm is unchanged, while plan rows keep the tighter 10dp spacing.
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
             // 1. Header (Logo, Brand, Slogan, Quick Theme Switcher, Notifications, Avatar)
             item(key = "home_header", contentType = "header") {
                 Box(modifier = Modifier.padding(bottom = 10.dp)) {
@@ -440,7 +645,7 @@ fun HomeScreen(
             }
 
         }
-
+        
         FocusBottomNavigation(
             selectedTab = BottomTab.FOCUS,
             onTabSelected = { tab ->
@@ -549,6 +754,7 @@ fun HomeScreen(
         )
     }
 
+
     // Scratch Card / Mystery Box Reward Dialog (earned upon completing eligible study session)
     val pendingScratchCard by sessionViewModel.pendingScratchCard.collectAsStateWithLifecycle()
     pendingScratchCard?.let { card ->
@@ -566,84 +772,7 @@ fun HomeScreen(
  * Keeping the collection here means the 500 ms ticker invalidates this card alone; the dashboard
  * above and below it is not recomposed while a session runs.
  */
-@Composable
-private fun HomeSessionSection(
-    viewModel: HomeViewModel,
-    onNavigateToActiveSession: () -> Unit,
-    onStartSession: () -> Unit
-) {
-    val session by viewModel.sessionUiState.collectAsStateWithLifecycle()
 
-    Box(
-        modifier = Modifier
-            .padding(horizontal = FocusSpacing.screenHorizontal)
-            .padding(bottom = 10.dp)
-    ) {
-        FocusSessionCard(
-            isActive = session.isSessionActive,
-            timeString = session.timeRemainingString,
-            subjectName = session.subject.ifBlank { "Focus Session" },
-            subtitleText = session.pomodoroCycleText
-                ?: if (session.isSessionActive) {
-                    if (session.topic.isNotBlank()) "${session.topic} • Active" else "Active Session"
-                } else null,
-            isPaused = session.isPaused,
-            onTogglePause = { viewModel.toggleSessionPause() },
-            onCardClick = {
-                if (session.isSessionActive) {
-                    onNavigateToActiveSession()
-                } else {
-                    onStartSession()
-                }
-            },
-            onStartSessionClick = onStartSession
-        )
-    }
-}
-
-@Composable
-private fun TodayPlanEmptyState(
-    onNavigateToPlannerTab: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = FocusShapes.card,
-        color = FocusColors.Surface,
-        border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { onNavigateToPlannerTab() }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.CalendarToday,
-                contentDescription = null,
-                tint = FocusColors.TextMuted,
-                modifier = Modifier.size(32.dp)
-            )
-            Text(
-                text = "No study plans for today",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = FocusColors.TextPrimary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            )
-            Text(
-                text = "Tap here to open the Planner and schedule your focus blocks for today",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = FocusColors.TextSecondary,
-                    textAlign = TextAlign.Center
-                )
-            )
-        }
-    }
-}
 
 /**
  * Comprehensive Dialog for Adding & Editing Study Plans
@@ -1187,148 +1316,6 @@ fun AllTimeStudyBatchCard(
     }
 }
 
-@Composable
-private fun HomeUpdateBanner(
-    updateState: com.example.feature.update.domain.UpdateState,
-    onPrimaryAction: () -> Unit,
-    onOpenDetails: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val accentColor = when (updateState) {
-        is com.example.feature.update.domain.UpdateState.Downloaded -> FocusColors.EmeraldSuccess
-        is com.example.feature.update.domain.UpdateState.Downloading -> FocusColors.CyanBlue
-        else -> FocusColors.Primary
-    }
-
-    val titleText = when (updateState) {
-        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
-            "Update v${updateState.info.versionName} Available"
-        is com.example.feature.update.domain.UpdateState.Downloading -> {
-            val pct = updateState.progress.percent
-            if (pct != null) "Downloading Update ($pct%)" else "Downloading Update…"
-        }
-        is com.example.feature.update.domain.UpdateState.Downloaded ->
-            "Update v${updateState.info.versionName} Ready — Restart App"
-        else -> "Update Available"
-    }
-
-    val subtitleText = when (updateState) {
-        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
-            "A new GitHub release is ready to download and install."
-        is com.example.feature.update.domain.UpdateState.Downloading ->
-            "Downloading in the background. Tap to view live progress."
-        is com.example.feature.update.domain.UpdateState.Downloaded ->
-            "Download complete! Tap to install and restart FocusShield."
-        else -> ""
-    }
-
-    val actionLabel = when (updateState) {
-        is com.example.feature.update.domain.UpdateState.UpdateAvailable -> "Update"
-        is com.example.feature.update.domain.UpdateState.Downloading -> "Progress"
-        is com.example.feature.update.domain.UpdateState.Downloaded -> "Restart"
-        else -> "Open"
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(FocusShapes.card)
-            .background(accentColor.copy(alpha = 0.10f))
-            .border(1.dp, accentColor.copy(alpha = 0.30f), FocusShapes.card)
-            .clickable { onOpenDetails() }
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .testTag("home_update_banner")
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(accentColor.copy(alpha = 0.18f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Rounded.NotificationsActive,
-                        contentDescription = null,
-                        tint = accentColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = titleText,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 14.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = subtitleText,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 11.sp
-                        ),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = accentColor,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onPrimaryAction() }
-                        .testTag("home_update_banner_action_button")
-                ) {
-                    Text(
-                        text = actionLabel,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            color = FocusColors.TextOnDark,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        ),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                    )
-                }
-            }
-
-            if (updateState is com.example.feature.update.domain.UpdateState.Downloading) {
-                Spacer(modifier = Modifier.height(8.dp))
-                val barModifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(50))
-                if (updateState.progress.isDeterminate) {
-                    androidx.compose.material3.LinearProgressIndicator(
-                        progress = { updateState.progress.fraction },
-                        modifier = barModifier,
-                        color = accentColor,
-                        trackColor = FocusColors.SurfaceSubtle
-                    )
-                } else {
-                    androidx.compose.material3.LinearProgressIndicator(
-                        modifier = barModifier,
-                        color = accentColor,
-                        trackColor = FocusColors.SurfaceSubtle
-                    )
-                }
-            }
-        }
-    }
 }
 
 
