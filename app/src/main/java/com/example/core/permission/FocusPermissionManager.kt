@@ -1,12 +1,10 @@
 package com.example.core.permission
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.net.VpnService
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
@@ -36,7 +34,6 @@ data class ProtectionPermissionStatus(
      * minutes late" is explained instead of surprising.
      */
     val isExactAlarmGranted: Boolean = true,
-    val isVpnGranted: Boolean = false,
     val areMandatoryGranted: Boolean = false
 )
 
@@ -49,9 +46,6 @@ data class ProtectionPermissionStatus(
  * 4. "Battery Optimization Exemption" (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) to run in background without being killed when swiped from recents
  */
 object FocusPermissionManager {
-
-    /** Arbitrary request code for the legacy Activity.startActivityForResult VPN path. */
-    private const val VPN_PERMISSION_REQUEST_CODE = 0x5650
 
     private val _permissionStatusFlow = MutableStateFlow(ProtectionPermissionStatus())
     val permissionStatusFlow: StateFlow<ProtectionPermissionStatus> = _permissionStatusFlow.asStateFlow()
@@ -234,78 +228,6 @@ object FocusPermissionManager {
     }
 
     /**
-     * Checks if VPN permission has been prepared/granted by the user.
-     * When VpnService.prepare(context) == null, permission is granted.
-     */
-    fun isVpnPermissionGranted(context: Context): Boolean {
-        return try {
-            VpnService.prepare(context) == null
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Returns the system consent intent for the VPN permission, or null when the app is already
-     * prepared (or the platform could not produce one).
-     *
-     * Callers must launch this intent with `startActivityForResult` — Compose screens should use
-     * [rememberVpnConsentRequester]. The confirmation dialog resolves the requesting app through
-     * `getCallingPackage()`, which Android only populates for result-launched activities; a plain
-     * `startActivity` therefore dismisses the dialog without recording consent.
-     */
-    fun vpnConsentIntent(context: Context): Intent? {
-        return try {
-            VpnService.prepare(context)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Best-effort VPN permission request for non-Compose callers.
-     *
-     * Prefer [rememberVpnConsentRequester] from Compose. This still goes through
-     * [Activity.startActivityForResult] when the context can be unwrapped to an Activity, because
-     * that is what lets the system dialog attribute the request to FocusShield and store the
-     * user's choice.
-     */
-    @Suppress("DEPRECATION")
-    fun requestVpnPermission(context: Context) {
-        val intent = vpnConsentIntent(context) ?: return
-        val activity = context.findActivity()
-        if (activity == null) {
-            openVpnSettings(context)
-            return
-        }
-        try {
-            activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
-        } catch (e: Exception) {
-            openVpnSettings(context)
-        }
-    }
-
-    private tailrec fun Context.findActivity(): Activity? = when (this) {
-        is Activity -> this
-        is android.content.ContextWrapper -> baseContext.findActivity()
-        else -> null
-    }
-
-    /**
-     * Opens Android System VPN Settings.
-     */
-    fun openVpnSettings(context: Context) {
-        try {
-            val intent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            openAppDetailsSettings(context)
-        }
-    }
-
-    /**
      * Brings the existing FocusShield task back to the foreground without recreating it,
      * so the app resumes on the same screen after granting permissions in Settings or dialogs.
      */
@@ -336,7 +258,6 @@ object FocusPermissionManager {
         val notificationListener = isNotificationListenerGranted(context)
         val batteryIgnored = isBatteryOptimizationIgnored(context)
         val exactAlarms = isExactAlarmGranted(context)
-        val vpn = isVpnPermissionGranted(context)
         val mandatory = if (requiresBlocking) (overlay && accessibility) else true
 
         val status = ProtectionPermissionStatus(
@@ -347,7 +268,6 @@ object FocusPermissionManager {
             isNotificationListenerGranted = notificationListener,
             isBatteryOptimizationIgnored = batteryIgnored,
             isExactAlarmGranted = exactAlarms,
-            isVpnGranted = vpn,
             areMandatoryGranted = mandatory
         )
         _permissionStatusFlow.value = status

@@ -26,7 +26,6 @@ data class SettingsUiState(
     val isAccessibilityEnabled: Boolean = false,
     val isBatteryOptimizationIgnored: Boolean = false,
     val isNotificationListenerGranted: Boolean = false,
-    val isVpnGranted: Boolean = false,
     val allTimeStudyTimeMillis: Long = 0L,
     val formattedAllTimeStudyTime: String = "0m",
     /** Badge id to the instant it was earned, derived from synced session history. */
@@ -60,15 +59,13 @@ class SettingsViewModel(
     private val _isAccessibilityEnabled = MutableStateFlow(false)
     private val _isBatteryOptimizationIgnored = MutableStateFlow(false)
     private val _isNotificationListenerGranted = MutableStateFlow(false)
-    private val _isVpnGranted = MutableStateFlow(false)
 
     private data class InnerSettingsState(
         val prefs: FocusPreferences,
         val blockedAppsCount: Int,
         val isAccessibilityEnabled: Boolean,
         val isBatteryOptimizationIgnored: Boolean,
-        val isNotificationListenerGranted: Boolean,
-        val isVpnGranted: Boolean
+        val isNotificationListenerGranted: Boolean
     )
 
     /** Account + cloud-sync state shown by the "Account & Cloud Sync" section. */
@@ -109,15 +106,14 @@ class SettingsViewModel(
             blockedAppRepository.enabledBlockedApps,
             _isAccessibilityEnabled,
             _isBatteryOptimizationIgnored,
-            combine(_isNotificationListenerGranted, _isVpnGranted) { notif, vpn -> Pair(notif, vpn) }
-        ) { prefs, blockedList, accessibilityEnabled, batteryIgnored, notifAndVpn ->
+            _isNotificationListenerGranted
+        ) { prefs, blockedList, accessibilityEnabled, batteryIgnored, notificationListener ->
             InnerSettingsState(
                 prefs = prefs,
                 blockedAppsCount = blockedList.size,
                 isAccessibilityEnabled = accessibilityEnabled,
                 isBatteryOptimizationIgnored = batteryIgnored,
-                isNotificationListenerGranted = notifAndVpn.first,
-                isVpnGranted = notifAndVpn.second
+                isNotificationListenerGranted = notificationListener
             )
         },
         analyticsRepository.todaySummaryFlow,
@@ -129,7 +125,6 @@ class SettingsViewModel(
             isAccessibilityEnabled = inner.isAccessibilityEnabled,
             isBatteryOptimizationIgnored = inner.isBatteryOptimizationIgnored,
             isNotificationListenerGranted = inner.isNotificationListenerGranted,
-            isVpnGranted = inner.isVpnGranted,
             allTimeStudyTimeMillis = summary.allTimeStudyTimeMillis,
             formattedAllTimeStudyTime = summary.formattedAllTimeStudyTime,
             badgeUnlockTimes = summary.badgeUnlockTimes,
@@ -199,7 +194,6 @@ class SettingsViewModel(
         _isAccessibilityEnabled.value = enabled
         _isBatteryOptimizationIgnored.value = com.example.core.permission.FocusPermissionManager.isBatteryOptimizationIgnored(getApplication())
         _isNotificationListenerGranted.value = com.example.core.permission.FocusPermissionManager.isNotificationListenerGranted(getApplication())
-        _isVpnGranted.value = com.example.core.permission.FocusPermissionManager.isVpnPermissionGranted(getApplication())
     }
 
     fun updateTimerDefault(minutes: Int) {

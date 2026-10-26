@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -152,6 +153,56 @@ fun FocusScheduleDialog(
     }
     val selectedDays = remember { mutableStateListOf<String>().apply { addAll(initialSelectedDays) } }
 
+    // One validation path for both the sticky footer button and the header shortcut. The header
+    // copy stays reachable while the keyboard is open, which previously hid the footer action on
+    // smaller screens when filling a schedule in manually.
+    fun saveSchedule() {
+        if (title.isBlank()) {
+            titleError = "Enter a schedule name"
+            return
+        }
+        val days = if (repeatEnabled) {
+            selectedDays.joinToString(",")
+        } else {
+            SimpleDateFormat("EEE", Locale.ENGLISH).format(selectedDate).uppercase(Locale.ENGLISH)
+        }
+        if (repeatEnabled && selectedDays.isEmpty()) {
+            titleError = "Select at least one repeat day"
+            return
+        }
+        // Time validation, before anything is written. The picker emits HH:mm, but a
+        // stored/edited value can be anything (e.g. a schedule synced from another
+        // device), and a zero-length window is invalid rather than a 24-hour session:
+        // both are refused here so the repository never has to silently correct data.
+        val startMinutes = com.example.feature.session.notification.ScheduleTime
+            .parseToMinutesOrNull(startTime)
+        val endMinutes = com.example.feature.session.notification.ScheduleTime
+            .parseToMinutesOrNull(endTime)
+        if (startMinutes == null || endMinutes == null) {
+            titleError = "Enter a start and end time as HH:mm"
+            return
+        }
+        if (startMinutes == endMinutes) {
+            titleError = "End time must differ from the start time"
+            return
+        }
+        onSave(
+            title.trim(),
+            days,
+            startTime,
+            endTime,
+            isAutoStart,
+            selectedMode,
+            tag.trim().ifBlank { "Untagged" },
+            repeatEnabled,
+            selectedDate.time,
+            breakMinutes,
+            description.trim(),
+            selectedBlockedPackages,
+            blockNotifications
+        )
+    }
+
     val palette = LocalFocusColors.current
     val isDark = palette.isDark
 
@@ -183,6 +234,7 @@ fun FocusScheduleDialog(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
+                    .imePadding()
             ) {
                 // Header: "New Schedule" / "Edit Schedule" + ✕ Close
                 Row(
@@ -198,16 +250,29 @@ fun FocusScheduleDialog(
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Close",
-                            tint = textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { saveSchedule() },
+                            modifier = Modifier.testTag("save_schedule_header_button")
+                        ) {
+                            Text(
+                                text = "Save",
+                                color = FocusColors.Primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Close",
+                                tint = textPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
 
@@ -764,52 +829,7 @@ fun FocusScheduleDialog(
 
                 // Sticky Bottom Save Button
                 Button(
-                    onClick = {
-                        if (title.isBlank()) {
-                            titleError = "Enter a schedule name"
-                            return@Button
-                        }
-                        val days = if (repeatEnabled) {
-                            selectedDays.joinToString(",")
-                        } else {
-                            SimpleDateFormat("EEE", Locale.ENGLISH).format(selectedDate).uppercase(Locale.ENGLISH)
-                        }
-                        if (repeatEnabled && selectedDays.isEmpty()) {
-                            titleError = "Select at least one repeat day"
-                            return@Button
-                        }
-                        // Time validation, before anything is written. The picker emits HH:mm, but a
-                        // stored/edited value can be anything (e.g. a schedule synced from another
-                        // device), and a zero-length window is invalid rather than a 24-hour session:
-                        // both are refused here so the repository never has to silently correct data.
-                        val startMinutes = com.example.feature.session.notification.ScheduleTime
-                            .parseToMinutesOrNull(startTime)
-                        val endMinutes = com.example.feature.session.notification.ScheduleTime
-                            .parseToMinutesOrNull(endTime)
-                        if (startMinutes == null || endMinutes == null) {
-                            titleError = "Enter a start and end time as HH:mm"
-                            return@Button
-                        }
-                        if (startMinutes == endMinutes) {
-                            titleError = "End time must differ from the start time"
-                            return@Button
-                        }
-                        onSave(
-                            title.trim(),
-                            days,
-                            startTime,
-                            endTime,
-                            isAutoStart,
-                            selectedMode,
-                            tag.trim().ifBlank { "Untagged" },
-                            repeatEnabled,
-                            selectedDate.time,
-                            breakMinutes,
-                            description.trim(),
-                            selectedBlockedPackages,
-                            blockNotifications
-                        )
-                    },
+                    onClick = { saveSchedule() },
                     shape = RoundedCornerShape(32.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = saveBtnBg,

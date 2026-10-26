@@ -118,6 +118,10 @@ class SessionViewModel(
     val customSubjects: StateFlow<List<SubjectEntity>> = _customSubjects.asStateFlow()
 
     init {
+        // A summary the user never answered (app swiped away on the summary screen) is restored
+        // before any collector runs, so the splash redirect can open it again on this launch.
+        restorePendingSessionSummary()
+
         // Observe user-created subject tags from SubjectRepository
         viewModelScope.launch {
             try {
@@ -164,7 +168,7 @@ class SessionViewModel(
             sessionManager.activeSession.collectLatest { session ->
                 if (session != null && session.state == SessionState.COMPLETED) {
                     val summary = buildSummaryData(session, isCompleted = true, isCancelled = false)
-                    _pendingSessionSummary.value = summary
+                    cachePendingSessionSummary(summary)
                     fetchDistractionsBlockedCountAsync(session.id)
                     try {
                         val context = FocusShieldApp.instance
@@ -781,7 +785,7 @@ class SessionViewModel(
         if (current != null) {
             // Build summary data for user review and explicit Save/Don't Save decision
             val summary = buildSummaryData(current, isCompleted = true, isCancelled = false)
-            _pendingSessionSummary.value = summary
+            cachePendingSessionSummary(summary)
             fetchDistractionsBlockedCountAsync(current.id)
         }
         return current
@@ -804,7 +808,7 @@ class SessionViewModel(
         if (current != null) {
             // Build summary data for user review and explicit Save/Don't Save decision
             val summary = buildSummaryData(current, isCompleted = false, isCancelled = true)
-            _pendingSessionSummary.value = summary
+            cachePendingSessionSummary(summary)
             fetchDistractionsBlockedCountAsync(current.id)
         }
         return current
@@ -856,13 +860,43 @@ class SessionViewModel(
         )
     }
 
+    private fun restorePendingSessionSummary() {
+        try {
+            val restored = PendingSessionSummaryStore.load(FocusShieldApp.instance) ?: return
+            _pendingSessionSummary.value = restored
+            fetchDistractionsBlockedCountAsync(restored.sessionId)
+        } catch (e: Exception) {
+            // Ignore in isolated unit test environments without Application context
+        }
+    }
+
+    /**
+     * Shows [summary] and mirrors it to disk until the user answers Save / Don't Save.
+     */
+    private fun cachePendingSessionSummary(summary: SessionSummaryData) {
+        _pendingSessionSummary.value = summary
+        try {
+            PendingSessionSummaryStore.save(FocusShieldApp.instance, summary)
+        } catch (e: Exception) {
+            // Ignore in isolated unit test environments without Application context
+        }
+    }
+
     private fun fetchDistractionsBlockedCountAsync(sessionId: String) {
         viewModelScope.launch {
             try {
                 val db = FocusShieldApp.instance.database
                 val count = db.blockedAttemptDao().getAttemptCountForSession(sessionId)
                 _pendingSessionSummary.update { current ->
-                    current?.copy(distractionsBlockedCount = count)
+                    current?.copy(distractionsBlockedCount = count)?.also { updated ->
+                        // Keep the persisted copy in step with the async count so a relaunch
+                        // restores the same summary the user was looking at.
+                        try {
+                            PendingSessionSummaryStore.save(FocusShieldApp.instance, updated)
+                        } catch (e: Exception) {
+                            // Ignore in isolated unit test environments
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 // Ignore in isolated unit test environments
@@ -883,7 +917,10 @@ class SessionViewModel(
                     session = session,
                     isCompleted = summary?.isCompleted ?: true,
                     isCancelled = summary?.isCancelled ?: false,
-                    forcedActualDuration = summary?.pureStudyDurationMillis
+                    forcedActualDuration = summary?.pureStudyDurationMillis,
+                    // A restored summary can be saved hours after the session actually ended;
+                    // keep the history row on the time the user saw, not the save tap.
+                    forcedEndTime = summary?.endedAt?.takeIf { it > 0L }
                 )
             }
             resetToIdle()
@@ -907,6 +944,7 @@ class SessionViewModel(
         try {
             val context = FocusShieldApp.instance
             sessionManager.clearActiveSessionFromDisk(context)
+            PendingSessionSummaryStore.clear(context)
             com.example.feature.session.service.FocusSessionForegroundService.stop(context)
         } catch (e: Exception) { }
     }
@@ -915,7 +953,8 @@ class SessionViewModel(
         session: FocusSession,
         isCompleted: Boolean,
         isCancelled: Boolean,
-        forcedActualDuration: Long? = null
+        forcedActualDuration: Long? = null,
+        forcedEndTime: Long? = null
     ) {
         // Atomic check-and-add: add() returns false if already present, preventing duplicate persists.
         if (!persistedSessionIds.add(session.id)) return
@@ -940,7 +979,7 @@ class SessionViewModel(
                 actualStudyDurationMillis = finalStudyTime,
                 isCompleted = isCompleted,
                 isCancelled = isCancelled,
-                endTime = System.currentTimeMillis()
+                endTime = forcedEndTime ?: System.currentTimeMillis()
             )
         } catch (e: Exception) {
             // Room persistence logged safely

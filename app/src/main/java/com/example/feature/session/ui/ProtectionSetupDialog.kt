@@ -24,14 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,7 +63,6 @@ import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
-import com.example.core.permission.rememberVpnConsentRequester
 
 /**
  * Educational setup & permission verification dialog shown before starting a protected session.
@@ -87,9 +83,6 @@ fun ProtectionSetupDialog(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isAccessibilityActive by com.example.core.accessibility.AccessibilityHelper.isServiceEnabledFlow.collectAsState()
-    val requestVpnConsent = rememberVpnConsentRequester {
-        onRefreshPermissions()
-    }
 
     // 1. Immediately refresh whenever service connects or flow emits
     LaunchedEffect(isAccessibilityActive) {
@@ -238,24 +231,7 @@ fun ProtectionSetupDialog(
                     testTag = "battery_optimization_permission_item"
                 )
 
-                // 4. VPN Service (Website Shield 24/7)
-                PermissionItemCard(
-                    title = "VPN Service (Website Shield)",
-                    description = if (permissionStatus.isVpnGranted) {
-                        "24/7 system-wide adult & distraction website blocking active."
-                    } else {
-                        "Enables 24/7 system-wide blocking of adult & NSFW websites. Tap to allow."
-                    },
-                    icon = Icons.Rounded.Language,
-                    isGranted = permissionStatus.isVpnGranted,
-                    isRequired = false,
-                    onClick = {
-                        requestVpnConsent()
-                    },
-                    testTag = "vpn_permission_item"
-                )
-
-                // 5. Exact alarms (optional, but the difference between "starts at 09:00" and
+                // 4. Exact alarms (optional, but the difference between "starts at 09:00" and
                 // "starts some time after 09:00" for automated schedules).
                 PermissionItemCard(
                     title = "Exact alarms",

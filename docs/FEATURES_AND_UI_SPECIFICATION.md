@@ -22,7 +22,6 @@
 | :--- | :--- | :--- | :--- |
 | **Accessibility Engine** | `FocusAccessibilityService` | `BIND_ACCESSIBILITY_SERVICE` | Real-time window inspection, package routing, node tree evaluation, YouTube recommendation interception, and synthetic gesture injection (`GLOBAL_ACTION_BACK`). |
 | **Session Foreground Service** | `FocusSessionForegroundService` | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `FOREGROUND_SERVICE_DATA_SYNC`, `WAKE_LOCK` | Non-killable background study timer, ambient sound controller, and persistent lock enforcement across screen-off transitions. |
-| **DNS Packet Filter VPN** | `AdultDnsVpnService` | `BIND_VPN_SERVICE` | System-level local loopback VPN that intercepts DNS queries (UDP/TCP port 53) to sinkhole adult, gambling, and custom blacklisted domains without remote server proxies. |
 | **Notification Interceptor** | `FocusNotificationListenerService` | `BIND_NOTIFICATION_LISTENER_SERVICE` | Intercepts, cancels, and caches non-whitelisted notifications during active focus sessions into a post-session vault. |
 | **Anti-Uninstall Device Admin** | `FocusDeviceAdminReceiver` | `BIND_DEVICE_ADMIN` | Prevents unauthorized uninstallation or force-closing of FocusShield while an active Strict Mode session is locked. |
 | **Alarm & Schedule Dispatcher** | `FocusScheduleReceiver`, `StudyPlanReminderReceiver`, `BootAndDailyResetReceiver` | `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK` | Exact and inexact alarm dispatching via `AlarmManager` for scheduled timetable intervals, daily usage resets, and study reminders. |
@@ -249,17 +248,17 @@ Screen.Splash (Root Entrance)
 ### 3.13 Website & Domain Blocker (`Screen.WebsiteBlocker`)
 - **Source File:** `com.example.feature.websiteblocker.ui.WebsiteBlockerScreen.kt`
 - **ViewModel:** `WebsiteBlockerViewModel.kt`
-- **Service:** `AdultDnsVpnService.kt`
-- **Purpose:** System-wide domain name filtering across all Android browsers (Chrome, Firefox, Samsung Internet, Edge, etc.).
+- **Engine:** `WebsiteBlockerEngine.kt`
+- **Purpose:** Blocks user-listed distracting domains and adult content encountered in Android browsers.
 - **UI Components:**
-  - One-tap master shield toggle for Adult & Explicit Content protection.
   - Custom domain blacklist input field (e.g., `reddit.com`, `twitter.com`, `twitch.tv`).
-  - Category toggle switches: Adult / Pornography, Gambling & Betting, Social Networks.
-  - VPN Connection Status banner showing packets inspected and queries sinkholed.
+  - Quick-add pills for common distracting sites.
+  - Per-site enable/disable switch and delete action.
+  - Accessibility permission banner explaining why browser URL inspection is required.
 - **Technical Engine:**
-  - Operates locally via `VpnService` by routing device DNS requests (port 53) through a local tun interface.
-  - Resolves prohibited domain queries to `127.0.0.1` (NXDOMAIN loopback), instantly killing browser HTTP requests before connection establishment.
-  - Zero third-party telemetry: No user traffic is routed to external servers, ensuring complete privacy.
+  - The Accessibility Service inspects browser address bars and passes the current URL to `WebsiteBlockerEngine` for evaluation.
+  - Manual matches are blocked with an in-app block screen; during focus sessions the family-DNS adult-content classifier also runs automatically.
+  - No VPN or local tunnel is involved.
 
 ### 3.14 Daily App Limits Dashboard (`Screen.AppLimits`)
 - **Source File:** `com.example.feature.applimits.ui.AppLimitsDashboardScreen.kt`

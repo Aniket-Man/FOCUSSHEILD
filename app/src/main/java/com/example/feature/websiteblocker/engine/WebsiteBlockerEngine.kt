@@ -127,11 +127,6 @@ class WebsiteBlockerEngine private constructor(
             preferencesRepository: com.example.data.preferences.FocusPreferencesRepository
         ): WebsiteBlockerEngine {
             return INSTANCE ?: synchronized(this) {
-                com.example.feature.websiteblocker.vpn.AdultFilteringEngine.initialize(
-                    appContext,
-                    preferencesRepository,
-                    websiteRepository
-                )
                 val instance = WebsiteBlockerEngine(appContext, websiteRepository, preferencesRepository)
                 INSTANCE = instance
                 instance
@@ -149,18 +144,6 @@ class WebsiteBlockerEngine private constructor(
         internal fun evaluateAutoAdult(rawUrl: String, domain: String): WebsiteBlockDecision.Blocked? {
             val cleanDomain = domain.trim().lowercase()
             if (cleanDomain.isBlank()) return null
-
-            // 1. Check local VPN / filtering engine matcher if initialized. Static rules
-            // only: the dynamic family-DNS verdict has its own step below so a first-visit
-            // sinkhole block is attributed to "Family DNS Filter", not the VPN matcher.
-            val vpnEngine = com.example.feature.websiteblocker.vpn.AdultFilteringEngine.instance
-            if (vpnEngine != null && vpnEngine.shouldBlockDomain(cleanDomain, includeDynamicVerdict = false)) {
-                return WebsiteBlockDecision.Blocked(
-                    domain = cleanDomain,
-                    engineType = "ADULT_AUTOMATIC",
-                    reason = "Adult Content Filter (18+ Shield)"
-                )
-            }
 
             // Offline lexical / corpus / TLD classifier (fast path, no network).
             val lexicalResult = AdultLexicalClassifier.isAdultContent(rawUrl, cleanDomain)

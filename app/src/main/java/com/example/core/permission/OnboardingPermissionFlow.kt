@@ -51,12 +51,6 @@ enum class OnboardingPermission(
             "This exemption is what lets a session survive you closing the app.",
         isMandatory = true
     ),
-    VPN_SERVICE(
-        title = "VPN service permission",
-        rationale = "This blocks adult and harmful websites across all apps 24/7.",
-        whyItMatters = "Android requires VPN permission so FocusShield can filter network DNS requests locally on your device without sending any data to external servers. This provides continuous 24/7 protection across all browsers and apps without needing an active focus session.",
-        isMandatory = false
-    ),
     NOTIFICATIONS(
         title = "Notification permission",
         rationale = "This shows your live focus timer and break reminders.",
@@ -71,7 +65,6 @@ enum class OnboardingPermission(
         ACCESSIBILITY -> FocusPermissionManager.isAccessibilityServiceEnabled(context)
         USAGE_ACCESS -> FocusPermissionManager.isUsageAccessGranted(context)
         BACKGROUND -> FocusPermissionManager.isBatteryOptimizationIgnored(context)
-        VPN_SERVICE -> FocusPermissionManager.isVpnPermissionGranted(context)
         NOTIFICATIONS -> FocusPermissionManager.isNotificationPermissionGranted(context)
     }
 
@@ -83,7 +76,6 @@ enum class OnboardingPermission(
         ACCESSIBILITY -> FocusPermissionManager.openAccessibilitySettings(context)
         USAGE_ACCESS -> FocusPermissionManager.openUsageAccessSettings(context)
         BACKGROUND -> FocusPermissionManager.requestIgnoreBatteryOptimization(context)
-        VPN_SERVICE -> FocusPermissionManager.requestVpnPermission(context)
         NOTIFICATIONS -> FocusPermissionManager.openNotificationSettings(context)
     }
 

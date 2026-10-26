@@ -811,6 +811,9 @@ private fun SuggestedScheduleCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
+            // The whole suggestion is the action, not just the small "+ Add" pill: tapping the
+            // suggested time range now applies that timing instead of doing nothing.
+            .clickable { onAdd() }
             .testTag("suggested_schedule_${preset.id}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(

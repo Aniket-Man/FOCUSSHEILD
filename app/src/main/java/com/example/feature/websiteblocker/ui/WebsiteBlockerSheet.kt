@@ -1,13 +1,7 @@
 package com.example.feature.websiteblocker.ui
 
-import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,18 +30,15 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.PublicOff
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,10 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,9 +91,7 @@ import coil.request.ImageRequest
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.LocalFocusColors
-import com.example.core.permission.FocusPermissionManager
 import com.example.data.local.entity.BlockedWebsiteEntity
-import kotlinx.coroutines.delay
 
 /**
  * Clean dashed border around rounded rectangle matching the YouTube Channel popup theme.
@@ -210,62 +196,10 @@ fun WebsiteBlockerSheetContent(
     val stoneBtnBg = if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)
     val stoneBtnBorder = if (isDark) Color(0xFF3F3F46) else Color(0xFFCBD5E1)
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Auto Adult Shield, 1: Custom Websites
-
-    val vpnLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val granted = (result.resultCode == Activity.RESULT_OK) || FocusPermissionManager.isVpnPermissionGranted(context)
-        if (granted) {
-            viewModel.onVpnPermissionGranted()
-        } else {
-            viewModel.onVpnPermissionDenied()
-        }
-    }
-
-    LaunchedEffect(state.vpnPrepareIntent) {
-        val intent = state.vpnPrepareIntent ?: return@LaunchedEffect
-        try {
-            vpnLauncher.launch(intent)
-        } catch (_: Exception) {
-            try {
-                val settingsIntent = Intent(Settings.ACTION_VPN_SETTINGS).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                context.startActivity(settingsIntent)
-            } catch (_: Exception) {
-                FocusPermissionManager.openAppDetailsSettings(context)
-            }
-        }
-        viewModel.consumeVpnPrepareIntent()
-    }
-
-    // Await VPN permission grant if the user is redirected to system settings
-    LaunchedEffect(state.isAwaitingVpnPermission) {
-        if (!state.isAwaitingVpnPermission) return@LaunchedEffect
-        val deadline = System.currentTimeMillis() + 5 * 60 * 1000L
-        while (System.currentTimeMillis() < deadline && state.isAwaitingVpnPermission) {
-            if (FocusPermissionManager.isVpnPermissionGranted(context)) {
-                // Automatically bring app back to front!
-                FocusPermissionManager.bringFocusShieldToFront(context)
-                viewModel.onVpnPermissionGranted()
-                return@LaunchedEffect
-            }
-            delay(350L)
-        }
-    }
-
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.checkPermissions()
-                if (state.isAwaitingVpnPermission) {
-                    if (FocusPermissionManager.isVpnPermissionGranted(context)) {
-                        viewModel.onVpnPermissionGranted()
-                    } else {
-                        viewModel.onVpnPermissionDenied()
-                    }
-                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -278,7 +212,6 @@ fun WebsiteBlockerSheetContent(
         "facebook.com", "instagram.com", "reddit.com",
         "twitter.com", "tiktok.com", "gambling.com"
     )
-    val protectedBrowsers = listOf("Chrome", "Firefox", "Edge", "Brave", "Opera", "Samsung", "DuckDuckGo")
 
     Column(
         modifier = modifier
@@ -308,7 +241,7 @@ fun WebsiteBlockerSheetContent(
             // Main title matching YouTube popup typography
             item {
                 Text(
-                    text = "Block adult sites and websites\nyou distract from",
+                    text = "Block distracting websites\nacross your browser",
                     color = textPrimary,
                     fontSize = 22.sp,
                     lineHeight = 28.sp,
@@ -463,314 +396,7 @@ fun WebsiteBlockerSheetContent(
                 }
             }
 
-            // Permission status card (VPN Service for 24/7 Adult Blocking)
-            item {
-                if (!state.isVpnPermissionGranted) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 18.dp)
-                            .sheetDashedBorder(
-                                color = Color(0xFF6366F1),
-                                cornerRadius = 16.dp
-                            )
-                            .background(
-                                color = if (isDark) Color(0xFF1E1B4B).copy(alpha = 0.5f) else Color(0xFFEEF2FF),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .padding(16.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF6366F1).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Language,
-                                        contentDescription = null,
-                                        tint = Color(0xFF6366F1),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "VPN Service Permission Required",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            color = textPrimary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = "24/7 adult website blocking without focus session",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = textSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    )
-                                }
-                            }
-
-                            Text(
-                                text = "FocusShield runs a local on-device DNS filter to block adult websites across all browsers even outside focus sessions. No traffic leaves your device.",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = textSecondary,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
-                            )
-
-                            Button(
-                                onClick = {
-                                    viewModel.toggleAutoAdultBlocking(true)
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = stoneBtnBg,
-                                    contentColor = textPrimary
-                                ),
-                                border = BorderStroke(1.dp, stoneBtnBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .testTag("website_blocker_grant_vpn_permission_btn")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Security,
-                                        contentDescription = null,
-                                        tint = Color(0xFF6366F1),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Grant VPN Permission",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 18.dp)
-                            .sheetDashedBorder(
-                                color = Color(0xFF10B981),
-                                cornerRadius = 14.dp
-                            )
-                            .background(
-                                color = if (isDark) Color(0xFF0E2218) else Color(0xFFECFDF5),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "VPN Service active & filtering adult websites 24/7",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF10B981),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Tabs Selector: Auto 18+ Blocker vs Custom Website Blocklist
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 18.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(searchBg)
-                        .padding(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(if (selectedTab == 0) cardBg else Color.Transparent)
-                            .clickable { selectedTab = 0 }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "18+ Adult Shield",
-                                color = if (selectedTab == 0) textPrimary else textSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium
-                            )
-                            if (state.isAutoAdultBlockingEnabled) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFEF4444))
-                                )
-                            }
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(if (selectedTab == 1) cardBg else Color.Transparent)
-                            .clickable { selectedTab = 1 }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Custom Blocklist (${state.manualBlockedWebsites.size})",
-                                color = if (selectedTab == 1) textPrimary else textSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Tab 0: Automatic Adult Blocker Section
-            if (selectedTab == 0) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .sheetDashedBorder(
-                                color = if (state.isAutoAdultBlockingEnabled) Color(0xFFEF4444) else cardBorder,
-                                cornerRadius = 18.dp
-                            )
-                            .background(cardBg, RoundedCornerShape(18.dp))
-                            .padding(18.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Adult18PlusBadgeNew(isEnabled = state.isAutoAdultBlockingEnabled)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = "Block adult & NSFW sites",
-                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                color = textPrimary,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = if (state.isAutoAdultBlockingEnabled) "Active Real-Time Protection" else "Protection Disabled",
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                color = if (state.isAutoAdultBlockingEnabled) Color(0xFFEF4444) else textSecondary,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                Switch(
-                                    checked = state.isAutoAdultBlockingEnabled,
-                                    onCheckedChange = { viewModel.toggleAutoAdultBlocking(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = FocusColors.ToggleGreen,
-                                        uncheckedThumbColor = textSecondary,
-                                        uncheckedTrackColor = searchBg
-                                    ),
-                                    modifier = Modifier.testTag("toggle_auto_adult_blocker")
-                                )
-                            }
-
-                            Text(
-                                text = "Automatically blocks explicit, 18+ pornographic, and adult content across all supported browsers with zero configuration.",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = textSecondary,
-                                    fontSize = 13.sp,
-                                    lineHeight = 18.sp
-                                )
-                            )
-
-                            // Protected Browsers Tags
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = "Supported Browsers:",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = textSecondary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp
-                                    )
-                                )
-
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    protectedBrowsers.forEach { browser ->
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(searchBg)
-                                                .border(1.dp, searchBorder, RoundedCornerShape(8.dp))
-                                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                                        ) {
-                                            Text(
-                                                text = browser,
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    color = textSecondary,
-                                                    fontSize = 11.sp
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Tab 1: Custom Blocklist & Quick Add
-            if (selectedTab == 1) {
+            // Custom Blocklist & Quick Add
                 // Input box styled like YouTube channels search bar
                 item {
                     Box(
@@ -980,7 +606,6 @@ fun WebsiteBlockerSheetContent(
                         )
                     }
                 }
-            }
         }
 
         // Bottom "Done" button matching YouTube study channels manager sheet
@@ -1164,35 +789,5 @@ private fun WebsiteItemCard(
                 )
             }
         }
-    }
-}
-
-@Composable
-fun Adult18PlusBadgeNew(
-    isEnabled: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val isDark = LocalFocusColors.current.isDark
-    Box(
-        modifier = modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(if (isEnabled) Color(0xFF321218) else if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0))
-            .border(
-                1.5.dp,
-                if (isEnabled) Color(0xFFEF4444) else Color.Transparent,
-                CircleShape
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "18+",
-            style = MaterialTheme.typography.labelMedium.copy(
-                color = if (isEnabled) Color(0xFFFCA5A5) else FocusColors.TextMuted,
-                fontWeight = FontWeight.Black,
-                fontSize = 12.sp,
-                letterSpacing = (-0.5).sp
-            )
-        )
     }
 }

@@ -83,6 +83,9 @@ fun FocusNavGraph(
     updateViewModel: UpdateViewModel? = null
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    // Collected rather than read once from the StateFlow: restoring the snapshot in
+    // SessionViewModel.init and the splash gate must agree even across a recomposition.
+    val pendingSessionSummary by sessionViewModel.pendingSessionSummary.collectAsStateWithLifecycle()
     val resolvedUpdateVm: UpdateViewModel = updateViewModel ?: hiltViewModel()
     val updateState by resolvedUpdateVm.state.collectAsStateWithLifecycle()
     val showUpdateDot by resolvedUpdateVm.showDot.collectAsStateWithLifecycle()
@@ -236,6 +239,16 @@ fun FocusNavGraph(
     val isCompletedOnboarding = isCompletedOnboardingSync || settingsState.preferences.hasCompletedOnboarding
 
     val nextDestinationAfterSplash = if (isCompletedOnboarding) Screen.Home.route else Screen.Onboarding.route
+
+    // A completed session awaiting Save / Don't Save survives process death. Re-open its summary
+    // after the splash instead of dropping the user on Home with an unrecorded session.
+    val splashDestination = if (
+        isCompletedOnboarding && pendingSessionSummary != null
+    ) {
+        Screen.SessionSummary.route
+    } else {
+        nextDestinationAfterSplash
+    }
 
     NavHost(
         navController = navController,
@@ -463,11 +476,12 @@ fun FocusNavGraph(
                     onSaveSession = {
                         sessionViewModel.savePendingSession {
                             val isSignedIn = FocusShieldApp.instance.authRepository.currentUserEmail() != null
-                            if (isSignedIn) {
-                                navigateBackHome()
-                            } else {
+                            // Always remove the answered summary first. Otherwise a signed-out user
+                            // sent to Account could press Back and land on a stale summary that is
+                            // already recorded (or, after a restore, leave Home off the back stack).
+                            navigateBackHome()
+                            if (!isSignedIn) {
                                 navController.navigate(Screen.Account.route) {
-                                    popUpTo(Screen.Home.route) { inclusive = false }
                                     launchSingleTop = true
                                 }
                             }
@@ -562,7 +576,7 @@ fun FocusNavGraph(
         composable(Screen.Splash.route) {
             SplashScreen(
                 onSplashFinished = {
-                    navController.navigate(nextDestinationAfterSplash) {
+                    navController.navigate(splashDestination) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                         launchSingleTop = true
                     }
@@ -575,7 +589,12 @@ fun FocusNavGraph(
             OnboardingScreen(
                 onCompleteOnboarding = {
                     settingsViewModel.setOnboardingCompleted(true)
-                    navController.navigate(Screen.Home.route) {
+                    val destination = if (pendingSessionSummary != null) {
+                        Screen.SessionSummary.route
+                    } else {
+                        Screen.Home.route
+                    }
+                    navController.navigate(destination) {
                         popUpTo(Screen.Onboarding.route) { inclusive = true }
                         launchSingleTop = true
                     }

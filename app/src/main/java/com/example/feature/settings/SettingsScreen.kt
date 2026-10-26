@@ -83,7 +83,6 @@ import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
-import com.example.core.permission.rememberVpnConsentRequester
 import com.example.core.ui.BottomTab
 import com.example.core.ui.FocusBottomNavigation
 
@@ -107,9 +106,6 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
-    val requestVpnConsent = rememberVpnConsentRequester {
-        viewModel.checkAccessibilityStatus()
-    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -345,17 +341,6 @@ fun SettingsScreen(
                             com.example.core.permission.FocusPermissionManager.requestIgnoreBatteryOptimization(context)
                         },
                         testTag = "settings_battery_optimization_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "VPN Service (Website Shield)",
-                        subtitle = if (uiState.isVpnGranted) "24/7 adult & distraction website blocking active across all browsers" else "Required for 24/7 adult website filtering — Tap to grant permission",
-                        icon = if (uiState.isVpnGranted) Icons.Rounded.CheckCircle else Icons.Rounded.Language,
-                        iconTint = if (uiState.isVpnGranted) FocusColors.EmeraldSuccess else FocusColors.Primary,
-                        onClick = {
-                            requestVpnConsent()
-                        },
-                        testTag = "settings_vpn_service_row"
                     )
                 }
             }
