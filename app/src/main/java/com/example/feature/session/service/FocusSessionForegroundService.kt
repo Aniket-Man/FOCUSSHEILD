@@ -125,6 +125,11 @@ class FocusSessionForegroundService : Service() {
             val intent = Intent(context, FocusSessionForegroundService::class.java).apply {
                 action = ACTION_START
             }
+            try {
+                com.example.feature.timer.FloatingTimerService.start(context)
+            } catch (e: Exception) {
+                Log.d(LOG_TAG, "Could not start floating timer service: ${e.message}")
+            }
             return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
@@ -150,6 +155,11 @@ class FocusSessionForegroundService : Service() {
         }
 
         fun stop(context: Context) {
+            try {
+                com.example.feature.timer.FloatingTimerService.stop(context)
+            } catch (e: Exception) {
+                Log.d(LOG_TAG, "Could not stop floating timer service: ${e.message}")
+            }
             val intent = Intent(context, FocusSessionForegroundService::class.java).apply {
                 action = ACTION_STOP
             }

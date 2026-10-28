@@ -19,6 +19,7 @@ import java.util.Locale
 data class FocusWidgetSnapshot(
     val isActive: Boolean = false,
     val isPaused: Boolean = false,
+    val isStrictMode: Boolean = false,
     val subject: String = "",
     val remainingMillis: Long = 0L,
     val sessionProgress: Float = 0f,
@@ -26,7 +27,12 @@ data class FocusWidgetSnapshot(
     val streakDays: Int = 0,
     val dailyGoalMinutes: Int = 240,
     val unlockCount: Int = 0,
-    val avgUnlocks7d: Int = 0
+    val avgUnlocks7d: Int = 0,
+    val nextPlanSubject: String? = null,
+    val nextPlanTopic: String? = null,
+    val nextPlanTime: String? = null,
+    val totalPlansToday: Int = 0,
+    val completedPlansToday: Int = 0
 ) {
     val goalProgress: Float
         get() = if (dailyGoalMinutes <= 0) 0f
@@ -36,8 +42,16 @@ data class FocusWidgetSnapshot(
 
         private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
+        private data class StudyPlanTuple(
+            val total: Int,
+            val completed: Int,
+            val nextSubject: String?,
+            val nextTopic: String?,
+            val nextTime: String?
+        )
+
         /**
-         * Aggregates session, streak, goal, and unlock data for widget rendering.
+         * Aggregates session, streak, goal, study plan, and unlock data for widget rendering.
          * Every repository access is guarded so a widget refresh can never crash
          * the process when a subsystem is not yet initialized.
          */
@@ -92,17 +106,45 @@ data class FocusWidgetSnapshot(
                 0
             }
 
+            val planInfo = try {
+                val plans = app.studyPlanRepository.getTodayPlans()
+                val completed = plans.count { it.isCompleted }
+                val next = plans.firstOrNull { !it.isCompleted } ?: plans.firstOrNull()
+                StudyPlanTuple(
+                    total = plans.size,
+                    completed = completed,
+                    nextSubject = next?.subjectName,
+                    nextTopic = next?.topicName,
+                    nextTime = next?.startTime
+                )
+            } catch (_: Exception) {
+                StudyPlanTuple(0, 0, null, null, null)
+            }
+
+            val isStopwatch = session?.mode == com.example.data.model.SessionMode.STOPWATCH
+            val displayTimerMillis = if (isStopwatch) {
+                session?.elapsedDurationMillis ?: 0L
+            } else {
+                session?.remainingDurationMillis ?: 0L
+            }
+
             FocusWidgetSnapshot(
                 isActive = session != null && (session.isRunning || session.isPaused),
                 isPaused = session?.state == SessionState.PAUSED,
+                isStrictMode = session?.isStrictModeEnabled == true && !isStopwatch,
                 subject = session?.subject.orEmpty(),
-                remainingMillis = session?.remainingDurationMillis ?: 0L,
+                remainingMillis = displayTimerMillis,
                 sessionProgress = session?.progress ?: 0f,
                 todayStudyMillis = todayStudyMillis,
                 streakDays = streakDays,
                 dailyGoalMinutes = preferences?.dailyGoalMinutes ?: 240,
                 unlockCount = todayUnlocks,
-                avgUnlocks7d = avgUnlocks
+                avgUnlocks7d = avgUnlocks,
+                nextPlanSubject = planInfo.nextSubject,
+                nextPlanTopic = planInfo.nextTopic,
+                nextPlanTime = planInfo.nextTime,
+                totalPlansToday = planInfo.total,
+                completedPlansToday = planInfo.completed
             )
         }
 

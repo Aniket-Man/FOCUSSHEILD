@@ -106,6 +106,7 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+    var showFloatingOverlayPermissionDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -611,6 +612,187 @@ fun SettingsScreen(
                 }
             }
 
+            // Section 2B: Home Screen Widgets & Floating Countdown Window
+            item {
+                SettingsSectionHeader(title = "HOME SCREEN WIDGETS & FLOATING TIMER")
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Floating Countdown Window Toggle Card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(FocusShapes.card)
+                            .background(FocusColors.Surface)
+                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                            .padding(FocusSpacing.base)
+                            .testTag("settings_floating_timer_card")
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(FocusColors.Primary.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Timer,
+                                        contentDescription = null,
+                                        tint = FocusColors.Primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Floating Countdown Window",
+                                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FocusColors.TextPrimary,
+                                            fontSize = 15.sp
+                                        )
+                                    )
+                                    Text(
+                                        text = if (!uiState.isOverlayPermissionGranted) {
+                                            "Overlay permission needed to float over other apps"
+                                        } else if (uiState.preferences.isFloatingTimerOverlayEnabled) {
+                                            "Shows draggable countdown window over apps during sessions"
+                                        } else {
+                                            "Disabled — timer stays inside app and notification"
+                                        },
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+
+                                Switch(
+                                    checked = uiState.preferences.isFloatingTimerOverlayEnabled && uiState.isOverlayPermissionGranted,
+                                    onCheckedChange = { enabled ->
+                                        if (enabled && !uiState.isOverlayPermissionGranted) {
+                                            showFloatingOverlayPermissionDialog = true
+                                        } else {
+                                            viewModel.updateFloatingTimerOverlay(enabled)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = FocusColors.TextOnDark,
+                                        checkedTrackColor = FocusColors.ToggleGreen,
+                                        uncheckedThumbColor = FocusColors.TextMuted,
+                                        uncheckedTrackColor = FocusColors.SurfaceSubtle
+                                    ),
+                                    modifier = Modifier.testTag("toggle_floating_timer_overlay")
+                                )
+                            }
+
+                            if (!uiState.isOverlayPermissionGranted) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { showFloatingOverlayPermissionDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("settings_grant_floating_overlay_button")
+                                ) {
+                                    Text(
+                                        text = "Grant Display Over Other Apps Permission",
+                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = FocusColors.Primary
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Home Screen Widgets (Compact 2x2 & Detailed 4x2) Card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(FocusShapes.card)
+                            .background(FocusColors.Surface)
+                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
+                            .padding(FocusSpacing.base)
+                            .testTag("settings_home_widgets_card")
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Add Home Screen Widgets",
+                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = FocusColors.TextPrimary,
+                                    fontSize = 15.sp
+                                )
+                            )
+                            Text(
+                                text = "Pin the Compact (2x2) or Detailed (4x2) widget to launch focus sessions, track your streak, and preview today's study plan from your home screen.",
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        requestPinFocusWidget(
+                                            context = context,
+                                            receiverClass = com.example.feature.widgets.FocusShieldCompactWidgetReceiver::class.java,
+                                            widgetLabel = "Compact (2x2)"
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("pin_compact_widget_button")
+                                ) {
+                                    Text(
+                                        text = "Pin 2x2 Compact",
+                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = FocusColors.Primary
+                                        )
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        requestPinFocusWidget(
+                                            context = context,
+                                            receiverClass = com.example.feature.widgets.FocusShieldDetailedWidgetReceiver::class.java,
+                                            widgetLabel = "Detailed (4x2)"
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("pin_detailed_widget_button")
+                                ) {
+                                    Text(
+                                        text = "Pin 4x2 Detailed",
+                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = FocusColors.Primary
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Section 3: Account & Cloud Sync
             item {
                 SettingsSectionHeader(title = "ACCOUNT & CLOUD SYNC")
@@ -902,6 +1084,37 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showFloatingOverlayPermissionDialog) {
+        com.example.feature.timer.FloatingOverlayPermissionDialog(
+            onDismiss = { showFloatingOverlayPermissionDialog = false },
+            onPermissionGranted = {
+                showFloatingOverlayPermissionDialog = false
+                viewModel.checkAccessibilityStatus()
+                viewModel.updateFloatingTimerOverlay(true)
+            }
+        )
+    }
+}
+
+private fun requestPinFocusWidget(
+    context: android.content.Context,
+    receiverClass: Class<*>,
+    widgetLabel: String
+) {
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(context)
+        val provider = android.content.ComponentName(context, receiverClass)
+        if (appWidgetManager.isRequestPinAppWidgetSupported) {
+            val pinned = appWidgetManager.requestPinAppWidget(provider, null, null)
+            if (pinned) return
+        }
+    }
+    android.widget.Toast.makeText(
+        context,
+        "Long-press your home screen → Widgets → FocusShield ($widgetLabel)",
+        android.widget.Toast.LENGTH_LONG
+    ).show()
 }
 
 /** Cadences offered in Settings. The loop clamps to the same bounds, so these stay in range. */

@@ -70,6 +70,7 @@ data class HomeSessionUiState(
 
 @Immutable
 data class HomeUiState(
+    val isLoading: Boolean = false,
     val todayStudyTime: String = "0m",
     val todayProgressPercentage: Int = 0,
     val streakDays: Int = 0,
@@ -354,6 +355,7 @@ class HomeViewModel(
     val uiState: StateFlow<HomeUiState> = processedDataFlow
         .map { processed ->
             HomeUiState(
+                isLoading = false,
                 todayStudyTime = processed.todayStudyTime,
                 todayProgressPercentage = processed.todayProgressPercentage,
                 streakDays = processed.streakDays,
@@ -385,7 +387,7 @@ class HomeViewModel(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = HomeUiState()
+            initialValue = HomeUiState(isLoading = true)
         )
 
     val blockedApps: StateFlow<List<BlockedAppEntity>> = app.blockedAppRepository.allBlockedApps

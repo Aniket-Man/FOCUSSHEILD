@@ -57,7 +57,8 @@ data class FocusPreferences(
     // "how often this phone syncs" is a property of the install, not of the account, so changing it
     // must not mark the account preferences document dirty and push it to other devices.
     val isAutoSaveToCloudEnabled: Boolean = true,
-    val autoSaveIntervalSeconds: Int = DEFAULT_AUTO_SAVE_INTERVAL_SECONDS
+    val autoSaveIntervalSeconds: Int = DEFAULT_AUTO_SAVE_INTERVAL_SECONDS,
+    val isFloatingTimerOverlayEnabled: Boolean = true
 ) {
     companion object {
         /** Default cadence for the periodic cloud auto-save loop. */
@@ -77,6 +78,10 @@ class FocusPreferencesRepository(private val context: Context) {
 
     fun isCompletedOnboardingSync(): Boolean {
         return syncPrefs.getBoolean("onboarding_v1_3_dark_violet_completed", false)
+    }
+
+    fun isFloatingTimerOverlayEnabledSync(): Boolean {
+        return syncPrefs.getBoolean("floating_timer_overlay_enabled", true)
     }
 
     private object PreferencesKeys {
@@ -117,6 +122,7 @@ class FocusPreferencesRepository(private val context: Context) {
         val KEY_USER_CLOUD_AVATAR_PATH = stringPreferencesKey("user_cloud_avatar_path")
         val KEY_AUTO_SAVE_ENABLED = booleanPreferencesKey("auto_save_to_cloud_enabled")
         val KEY_AUTO_SAVE_INTERVAL_SECONDS = intPreferencesKey("auto_save_interval_seconds")
+        val KEY_FLOATING_TIMER_OVERLAY_ENABLED = booleanPreferencesKey("floating_timer_overlay_enabled")
     }
 
     val preferencesFlow: Flow<FocusPreferences> = context.dataStore.data
@@ -168,8 +174,16 @@ class FocusPreferencesRepository(private val context: Context) {
                 ?: FocusPreferences.DEFAULT_AUTO_SAVE_INTERVAL_SECONDS).coerceIn(
                 FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS,
                 FocusPreferences.MAX_AUTO_SAVE_INTERVAL_SECONDS
-            )
+            ),
+            isFloatingTimerOverlayEnabled = preferences[PreferencesKeys.KEY_FLOATING_TIMER_OVERLAY_ENABLED] ?: true
         )
+    }
+
+    suspend fun updateFloatingTimerOverlayEnabled(enabled: Boolean) {
+        syncPrefs.edit().putBoolean("floating_timer_overlay_enabled", enabled).apply()
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_FLOATING_TIMER_OVERLAY_ENABLED] = enabled
+        }
     }
 
     suspend fun updateThemeMode(themeMode: String) {

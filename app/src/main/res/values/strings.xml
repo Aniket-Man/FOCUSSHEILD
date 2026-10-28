@@ -8,4 +8,10 @@
     <string name="usage_widget_description">Tracks today\'s focus time progress toward your daily study goal.</string>
     <string name="unlock_widget_label">Phone Unlocks</string>
     <string name="unlock_widget_description">Counts today\'s phone unlocks compared to your weekly average.</string>
+    <string name="compact_widget_label">FocusShield Compact (2x2)</string>
+    <string name="compact_widget_description">Quick launcher for study sessions, focus time stats, and streak.</string>
+    <string name="detailed_widget_label">FocusShield Detailed (4x2)</string>
+    <string name="detailed_widget_description">Session timer launcher, study time, streak, and daily study plan preview.</string>
+    <string name="floating_timer_notification_title">FocusShield Floating Timer</string>
+    <string name="floating_timer_notification_content">Session active. Tap overlay window to return to app.</string>
 </resources>

@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SmartDisplay
@@ -117,6 +118,8 @@ fun ActiveSessionScreen(
     var showStrictLockDialog by remember { mutableStateOf(false) }
     var showBreakDialog by remember { mutableStateOf(false) }
     var showProtectionSetupDialog by remember { mutableStateOf(false) }
+    var showFloatingOverlayPermissionDialog by remember { mutableStateOf(false) }
+    val isFloatingOverlayShowing by com.example.feature.timer.FloatingTimerService.isOverlayShowing.collectAsStateWithLifecycle()
 
     // When session summary is prepared (upon ending or completing), navigate to summary screen
     LaunchedEffect(pendingSummary) {
@@ -125,11 +128,12 @@ fun ActiveSessionScreen(
         }
     }
 
-    val hasOpenDialog = showProtectionSetupDialog || showBreakDialog || showStrictPauseDialog || showStrictLockDialog || showEndSessionDialog
+    val hasOpenDialog = showProtectionSetupDialog || showBreakDialog || showStrictPauseDialog || showStrictLockDialog || showEndSessionDialog || showFloatingOverlayPermissionDialog
 
     // 1. If any dialog is open, step back dismisses the topmost active dialog
     androidx.activity.compose.BackHandler(enabled = hasOpenDialog) {
         when {
+            showFloatingOverlayPermissionDialog -> showFloatingOverlayPermissionDialog = false
             showStrictLockDialog -> showStrictLockDialog = false
             showEndSessionDialog -> showEndSessionDialog = false
             showStrictPauseDialog -> showStrictPauseDialog = false
@@ -169,6 +173,17 @@ fun ActiveSessionScreen(
             onConfirmStart = { showProtectionSetupDialog = false },
             onStartWithoutBlocking = { showProtectionSetupDialog = false },
             onDismiss = { showProtectionSetupDialog = false }
+        )
+    }
+
+    if (showFloatingOverlayPermissionDialog) {
+        com.example.feature.timer.FloatingOverlayPermissionDialog(
+            onDismiss = { showFloatingOverlayPermissionDialog = false },
+            onPermissionGranted = {
+                showFloatingOverlayPermissionDialog = false
+                refreshPermissions()
+                com.example.feature.timer.FloatingTimerService.start(context, forceShow = true)
+            }
         )
     }
 
@@ -405,7 +420,28 @@ fun ActiveSessionScreen(
                     }
                 }
 
-                Box(modifier = Modifier.size(40.dp)) // balance spacer
+                if (!uiState.isSessionCompleted) {
+                    IconButton(
+                        onClick = {
+                            if (!FocusPermissionManager.isOverlayPermissionGranted(context)) {
+                                showFloatingOverlayPermissionDialog = true
+                            } else if (isFloatingOverlayShowing) {
+                                com.example.feature.timer.FloatingTimerService.stop(context)
+                            } else {
+                                com.example.feature.timer.FloatingTimerService.start(context, forceShow = true)
+                            }
+                        },
+                        modifier = Modifier.testTag("toggle_floating_timer_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PictureInPictureAlt,
+                            contentDescription = if (isFloatingOverlayShowing) "Hide Floating Countdown Window" else "Show Floating Countdown Window",
+                            tint = if (isFloatingOverlayShowing) FocusColors.Primary else FocusColors.TextSecondary
+                        )
+                    }
+                } else {
+                    Box(modifier = Modifier.size(40.dp))
+                }
             }
         },
         containerColor = FocusColors.Background,

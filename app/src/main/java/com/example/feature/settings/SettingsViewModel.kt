@@ -26,6 +26,7 @@ data class SettingsUiState(
     val isAccessibilityEnabled: Boolean = false,
     val isBatteryOptimizationIgnored: Boolean = false,
     val isNotificationListenerGranted: Boolean = false,
+    val isOverlayPermissionGranted: Boolean = false,
     val allTimeStudyTimeMillis: Long = 0L,
     val formattedAllTimeStudyTime: String = "0m",
     /** Badge id to the instant it was earned, derived from synced session history. */
@@ -59,6 +60,7 @@ class SettingsViewModel(
     private val _isAccessibilityEnabled = MutableStateFlow(false)
     private val _isBatteryOptimizationIgnored = MutableStateFlow(false)
     private val _isNotificationListenerGranted = MutableStateFlow(false)
+    private val _isOverlayPermissionGranted = MutableStateFlow(false)
 
     private data class InnerSettingsState(
         val prefs: FocusPreferences,
@@ -117,14 +119,16 @@ class SettingsViewModel(
             )
         },
         analyticsRepository.todaySummaryFlow,
-        cloudState
-    ) { inner, summary, cloud ->
+        cloudState,
+        _isOverlayPermissionGranted
+    ) { inner, summary, cloud, overlayGranted ->
         SettingsUiState(
             preferences = inner.prefs,
             blockedAppsCount = inner.blockedAppsCount,
             isAccessibilityEnabled = inner.isAccessibilityEnabled,
             isBatteryOptimizationIgnored = inner.isBatteryOptimizationIgnored,
             isNotificationListenerGranted = inner.isNotificationListenerGranted,
+            isOverlayPermissionGranted = overlayGranted,
             allTimeStudyTimeMillis = summary.allTimeStudyTimeMillis,
             formattedAllTimeStudyTime = summary.formattedAllTimeStudyTime,
             badgeUnlockTimes = summary.badgeUnlockTimes,
@@ -194,6 +198,22 @@ class SettingsViewModel(
         _isAccessibilityEnabled.value = enabled
         _isBatteryOptimizationIgnored.value = com.example.core.permission.FocusPermissionManager.isBatteryOptimizationIgnored(getApplication())
         _isNotificationListenerGranted.value = com.example.core.permission.FocusPermissionManager.isNotificationListenerGranted(getApplication())
+        _isOverlayPermissionGranted.value = com.example.core.permission.FocusPermissionManager.isOverlayPermissionGranted(getApplication())
+    }
+
+    fun updateFloatingTimerOverlay(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateFloatingTimerOverlayEnabled(enabled)
+            val context = getApplication<Application>()
+            if (!enabled) {
+                com.example.feature.timer.FloatingTimerService.stop(context)
+            } else {
+                val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                if (active != null && (active.isRunning || active.isPaused)) {
+                    com.example.feature.timer.FloatingTimerService.start(context, forceShow = true)
+                }
+            }
+        }
     }
 
     fun updateTimerDefault(minutes: Int) {

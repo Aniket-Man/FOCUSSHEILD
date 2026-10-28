@@ -1,4 +1,4 @@
-﻿package com.example.feature.widgets
+package com.example.feature.widgets
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color

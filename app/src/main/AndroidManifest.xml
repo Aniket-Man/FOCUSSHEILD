@@ -209,6 +209,16 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".feature.timer.FloatingTimerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating timer countdown overlay over apps" />
+        </service>
+
         <receiver
             android:name=".feature.widgets.FocusShieldFocusWidgetReceiver"
             android:exported="false"
@@ -219,6 +229,30 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/focus_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".feature.widgets.FocusShieldCompactWidgetReceiver"
+            android:exported="false"
+            android:label="@string/compact_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_compact" />
+        </receiver>
+
+        <receiver
+            android:name=".feature.widgets.FocusShieldDetailedWidgetReceiver"
+            android:exported="false"
+            android:label="@string/detailed_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_detailed" />
         </receiver>
 
         <receiver

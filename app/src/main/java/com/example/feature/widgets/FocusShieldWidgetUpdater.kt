@@ -30,6 +30,8 @@ object FocusShieldWidgetUpdater {
         val appContext = context.applicationContext
         throttle.submit(force = force) {
             updateWidget { FocusShieldFocusWidget().updateAll(appContext) }
+            updateWidget { FocusShieldCompactWidget().updateAll(appContext) }
+            updateWidget { FocusShieldDetailedWidget().updateAll(appContext) }
             updateWidget { FocusShieldUsageWidget().updateAll(appContext) }
             updateWidget { FocusShieldUnlockWidget().updateAll(appContext) }
         }
