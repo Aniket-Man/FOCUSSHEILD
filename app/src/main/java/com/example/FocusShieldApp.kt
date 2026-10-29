@@ -229,6 +229,7 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Android's 15-minute periodic floor applies. Both are cancelled the moment the user signs
         // out or turns auto-save off, so a local-only install schedules no work at all.
         applicationScope.launch {
+            kotlinx.coroutines.delay(1200L)
             combine(
                 preferencesRepository.preferencesFlow,
                 authRepository.authState
@@ -259,6 +260,7 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         // Restore any previously-signed-in cloud session (no-op when not configured / signed out)
         // and ensure preloaded Session Summary live-writing quotes exist in Cloud Firestore.
         applicationScope.launch {
+            kotlinx.coroutines.delay(1200L)
             try {
                 authRepository.restoreOnStart()
             } catch (_: Exception) {

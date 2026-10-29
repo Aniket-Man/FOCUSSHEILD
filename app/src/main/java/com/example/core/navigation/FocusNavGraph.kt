@@ -281,12 +281,13 @@ fun FocusNavGraph(
         composable(Screen.Home.route) {
             HomeScreen(
                 viewModel = homeViewModel,
+                sessionViewModel = sessionViewModel,
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
                 onNavigateToActiveSession = { navController.navigate(Screen.ActiveSession.route) },
                 onNavigateToModeSelection = { navController.navigate(Screen.ModeSelection.route) },
-                onNavigateToPlannerTab = { navController.navigate(Screen.Planner.route) },
-                onNavigateToStatsTab = { navController.navigate(Screen.StatsDetail.route) },
-                onNavigateToBlocksTab = { navController.navigate(Screen.Blocks.route) },
+                onNavigateToPlannerTab = { handleBottomTabNavigation(BottomTab.PLANNER, navController) },
+                onNavigateToStatsTab = { handleBottomTabNavigation(BottomTab.STATS, navController) },
+                onNavigateToBlocksTab = { handleBottomTabNavigation(BottomTab.BLOCKS, navController) },
                 onNavigateToProfile = { navController.navigate(Screen.Profile.route) },
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
                 onNavigateToBlockedApps = { navController.navigate(Screen.BlockedApps.route) },

@@ -338,13 +338,7 @@ fun HomeScreen(
     onNavigateToStrictMode: () -> Unit = {},
     onNavigateToDigitalWellbeing: () -> Unit = onNavigateToStatsTab,
     onStartPlanSession: (StudyPlanItem) -> Unit = {},
-    /** Opens the update details screen (Profile → New Updates shares the same destination). */
     onNavigateToUpdate: () -> Unit = {},
-    /**
-     * Lit red dot on the header bell *and* on the header avatar. One flag, two badges, both fed by the
-     * single app-wide update state — so the bell, the avatar and Profile → New Updates can never
-     * disagree (prompt.txt §5/§6).
-     */
     showUpdateDot: Boolean = false,
     updateState: com.example.feature.update.domain.UpdateState = com.example.feature.update.domain.UpdateState.Idle,
     onUpdateBannerAction: () -> Unit = onNavigateToUpdate,

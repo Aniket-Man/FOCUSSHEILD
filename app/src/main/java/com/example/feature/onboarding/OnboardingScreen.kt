@@ -1518,6 +1518,7 @@ private fun OnboardingGoogleSignInPage(
                     val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
                     val authResult = FirebaseAuth.getInstance().signInWithCredential(authCredential).await()
                     currentUser = authResult.user
+                    com.example.FocusShieldApp.instance.authRepository.restoreOnStart()
                     val photoUrl = authResult.user?.photoUrl?.toString()
                     val displayName = authResult.user?.displayName
                     if (!photoUrl.isNullOrBlank()) {

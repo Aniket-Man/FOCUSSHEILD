@@ -59,10 +59,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import com.example.core.design.FocusColors
 import com.example.core.design.LocalFocusColors
 import com.example.data.local.entity.BlockedAppEntity
@@ -218,25 +218,27 @@ fun FocusScheduleDialog(
     val switchTrackChecked = FocusColors.ToggleGreen
     val switchTrackUnchecked = palette.surfaceVariant
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    BackHandler(onBack = onDismiss)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(20f)
+            .background(bgColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+            .testTag("focus_schedule_dialog"),
+        color = bgColor
     ) {
-        Surface(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(bgColor)
-                .testTag("focus_schedule_dialog"),
-            color = bgColor
+                .statusBarsPadding()
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .imePadding()
-            ) {
-                // Header: "New Schedule" / "Edit Schedule" + ✕ Close
+            // Header: "New Schedule" / "Edit Schedule" + ✕ Close
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -824,33 +826,48 @@ fun FocusScheduleDialog(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
 
-                // Sticky Bottom Save Button
-                Button(
-                    onClick = { saveSchedule() },
-                    shape = RoundedCornerShape(32.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = saveBtnBg,
-                        contentColor = saveBtnText
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                        .height(56.dp)
-                        .testTag("save_schedule_button")
+                // Sticky Bottom Save Footer — elevated and padded cleanly above system navigation bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = bgColor,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 10.dp
                 ) {
-                    Text(
-                        text = "Save",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = saveBtnText
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .imePadding()
+                    ) {
+                        HorizontalDivider(thickness = 1.dp, color = dividerColor)
+                        Button(
+                            onClick = { saveSchedule() },
+                            shape = RoundedCornerShape(32.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = saveBtnBg,
+                                contentColor = saveBtnText
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                                .padding(bottom = 12.dp)
+                                .height(54.dp)
+                                .testTag("save_schedule_button")
+                        ) {
+                            Text(
+                                text = "Save",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = saveBtnText
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
 
     // Pickers / Sub-dialogs
     if (activePicker == ActivePicker.START_TIME || activePicker == ActivePicker.END_TIME) {

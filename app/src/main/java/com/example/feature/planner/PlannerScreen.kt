@@ -659,6 +659,59 @@ fun PlannerScreen(
             onTabSelected = onTabSelected,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        // 8. Full-Screen Add / Edit Schedule Editor Overlay
+        if (showAddEditScheduleDialog) {
+            FocusScheduleDialog(
+                initialSchedule = editingSchedule,
+                initialBlockNotifications = editingSchedule?.blockNotifications ?: false,
+                availableBlockedApps = blockedApps,
+                onOpenBlockedApps = onOpenBlockedApps,
+                onDismiss = {
+                    showAddEditScheduleDialog = false
+                    editingSchedule = null
+                },
+                onSave = { title, days, start, end, autoStart, mode, subject, repeat, dateMillis, breakMins, desc, pkgs, blockNotifs ->
+                    if (editingSchedule != null) {
+                        viewModel.updateFocusSchedule(
+                            editingSchedule!!.copy(
+                                title = title,
+                                daysOfWeek = days,
+                                startTime = start,
+                                endTime = end,
+                                isAutoStartSession = autoStart,
+                                mode = mode,
+                                subjectName = subject,
+                                repeatEnabled = repeat,
+                                scheduledDateMillis = dateMillis,
+                                breakMinutes = breakMins,
+                                description = desc,
+                                blockedAppPackages = pkgs.joinToString(","),
+                                blockNotifications = blockNotifs
+                            )
+                        )
+                    } else {
+                        viewModel.addFocusSchedule(
+                            title = title,
+                            daysOfWeek = days,
+                            startTime = start,
+                            endTime = end,
+                            isAutoStartSession = autoStart,
+                            mode = mode,
+                            subjectName = subject,
+                            repeatEnabled = repeat,
+                            scheduledDateMillis = dateMillis,
+                            breakMinutes = breakMins,
+                            description = desc,
+                            blockedAppPackages = pkgs,
+                            blockNotifications = blockNotifs
+                        )
+                    }
+                    showAddEditScheduleDialog = false
+                    editingSchedule = null
+                }
+            )
+        }
     }
 
     // Help Dialog
@@ -702,59 +755,6 @@ fun PlannerScreen(
                 }
             },
             containerColor = cardBg
-        )
-    }
-
-    // Add / Edit Schedule Dialog
-    if (showAddEditScheduleDialog) {
-        FocusScheduleDialog(
-            initialSchedule = editingSchedule,
-            initialBlockNotifications = editingSchedule?.blockNotifications ?: false,
-            availableBlockedApps = blockedApps,
-            onOpenBlockedApps = onOpenBlockedApps,
-            onDismiss = {
-                showAddEditScheduleDialog = false
-                editingSchedule = null
-            },
-            onSave = { title, days, start, end, autoStart, mode, subject, repeat, dateMillis, breakMins, desc, pkgs, blockNotifs ->
-                if (editingSchedule != null) {
-                    viewModel.updateFocusSchedule(
-                        editingSchedule!!.copy(
-                            title = title,
-                            daysOfWeek = days,
-                            startTime = start,
-                            endTime = end,
-                            isAutoStartSession = autoStart,
-                            mode = mode,
-                            subjectName = subject,
-                            repeatEnabled = repeat,
-                            scheduledDateMillis = dateMillis,
-                            breakMinutes = breakMins,
-                            description = desc,
-                            blockedAppPackages = pkgs.joinToString(","),
-                            blockNotifications = blockNotifs
-                        )
-                    )
-                } else {
-                    viewModel.addFocusSchedule(
-                        title = title,
-                        daysOfWeek = days,
-                        startTime = start,
-                        endTime = end,
-                        isAutoStartSession = autoStart,
-                        mode = mode,
-                        subjectName = subject,
-                        repeatEnabled = repeat,
-                        scheduledDateMillis = dateMillis,
-                        breakMinutes = breakMins,
-                        description = desc,
-                        blockedAppPackages = pkgs,
-                        blockNotifications = blockNotifs
-                    )
-                }
-                showAddEditScheduleDialog = false
-                editingSchedule = null
-            }
         )
     }
 
