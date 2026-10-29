@@ -62,7 +62,7 @@ class WebsiteBlockerEngine private constructor(
         val isSessionActive = isStudySessionActive()
 
         // 1. ENGINE 1: Automatic Adult Website Blocker (Lexical fast path + family-DNS verdict)
-        if (currentPreferences.isAutoAdultWebsiteBlockingEnabled || isSessionActive) {
+        if (currentPreferences.isAutoAdultWebsiteBlockingEnabled) {
             evaluateAutoAdult(rawUrl, cleanDomain)?.let { decision ->
                 Log.w(TAG, "[Engine 1: Auto Adult] Blocked domain via ${decision.reason}: $cleanDomain (URL: $rawUrl)")
                 return decision

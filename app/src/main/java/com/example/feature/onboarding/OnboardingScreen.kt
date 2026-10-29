@@ -2184,22 +2184,14 @@ private fun ShieldHero(
                     )
                 )
         )
-        // Core disc + mark
-        Box(
+        // Core rounded-square FocusShield logo mark
+        Image(
+            painter = painterResource(R.drawable.ic_focus_shield_app_icon),
+            contentDescription = "FocusShield Logo",
             modifier = Modifier
-                .size(82.dp)
+                .size(76.dp)
                 .scale(haloScale * 0.92f)
-                .clip(CircleShape)
-                .background(darkViolet)
-                .border(2.dp, accent, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_focus_shield_app_icon),
-                contentDescription = "FocusShield Logo",
-                modifier = Modifier.size(54.dp)
-            )
-        }
+        )
     }
 }
 

@@ -29,4 +29,5 @@ sealed class Screen(val route: String) {
     object Splash : Screen("splash")
     object Onboarding : Screen("onboarding")
     object Rewards : Screen("rewards")
+    object DigitalWellbeing : Screen("digital_wellbeing")
 }

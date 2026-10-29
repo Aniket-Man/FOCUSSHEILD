@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class WebsiteBlockerUiState(
+    val isAdultBlockingEnabled: Boolean = false,
     val isManualBlockingEnabled: Boolean = true,
     val manualBlockedWebsites: List<BlockedWebsiteEntity> = emptyList(),
     val isAccessibilityEnabled: Boolean = false,
@@ -43,6 +44,7 @@ class WebsiteBlockerViewModel(
             ) { prefs, websites ->
                 val context = getApplication<Application>()
                 WebsiteBlockerUiState(
+                    isAdultBlockingEnabled = prefs.isAutoAdultWebsiteBlockingEnabled,
                     isManualBlockingEnabled = prefs.isManualWebsiteBlockingEnabled,
                     manualBlockedWebsites = websites,
                     isAccessibilityEnabled = checkAccessibilityServiceEnabled(context),
@@ -60,6 +62,12 @@ class WebsiteBlockerViewModel(
         val context = getApplication<Application>()
         _uiState.update {
             it.copy(isAccessibilityEnabled = checkAccessibilityServiceEnabled(context))
+        }
+    }
+
+    fun toggleAdultBlocking(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateAutoAdultWebsiteBlocking(enabled)
         }
     }
 

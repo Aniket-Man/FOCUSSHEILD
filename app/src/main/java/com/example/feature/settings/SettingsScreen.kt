@@ -99,6 +99,7 @@ fun SettingsScreen(
     onNavigateToStudyChannels: () -> Unit = {},
     onNavigateToWebsiteBlocker: () -> Unit = {},
     onNavigateToAccount: () -> Unit = {},
+    onNavigateToDigitalWellbeing: () -> Unit = {},
     onTabSelected: (BottomTab) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -174,6 +175,15 @@ fun SettingsScreen(
                 SettingsSectionHeader(title = "DISTRACTION PROTECTION")
                 Spacer(modifier = Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsNavigationRow(
+                        title = "Digital Wellbeing & Phone Storage",
+                        subtitle = "Live screen time ring, per-app activity & device storage",
+                        icon = Icons.Rounded.Schedule,
+                        iconTint = Color(0xFF3B82F6),
+                        onClick = onNavigateToDigitalWellbeing,
+                        testTag = "settings_digital_wellbeing_row"
+                    )
+
                     SettingsNavigationRow(
                         title = "App Limits & Daily Budgets",
                         subtitle = "Daily usage allowances & timed sessions outside study",

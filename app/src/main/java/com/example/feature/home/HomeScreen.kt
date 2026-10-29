@@ -336,6 +336,7 @@ fun HomeScreen(
     onNavigateToBlockedApps: () -> Unit = {},
     onNavigateToAppLimits: () -> Unit = {},
     onNavigateToStrictMode: () -> Unit = {},
+    onNavigateToDigitalWellbeing: () -> Unit = onNavigateToStatsTab,
     onStartPlanSession: (StudyPlanItem) -> Unit = {},
     /** Opens the update details screen (Profile → New Updates shares the same destination). */
     onNavigateToUpdate: () -> Unit = {},
@@ -373,9 +374,7 @@ fun HomeScreen(
             .background(FocusColors.Background)
             .testTag("home_screen")
     ) {
-        if (uiState.isLoading) {
-            SkeletonHomeScreen()
-        } else {
+        run {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -442,7 +441,7 @@ fun HomeScreen(
                         studyTime = uiState.todayStudyTime,
                         progressPercentage = uiState.todayProgressPercentage,
                         phoneUsageTime = uiState.totalScreenTime,
-                        onPhoneUsageClick = onNavigateToStatsTab
+                        onPhoneUsageClick = onNavigateToDigitalWellbeing
                     )
                 }
             }

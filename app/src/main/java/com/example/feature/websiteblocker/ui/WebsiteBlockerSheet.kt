@@ -396,6 +396,111 @@ fun WebsiteBlockerSheetContent(
                 }
             }
 
+            // Adult Site Blocking (18+ Shield) On/Off Toggle Card
+            item {
+                val isAdultOn = state.isAdultBlockingEnabled
+                val accentColor = if (isAdultOn) FocusColors.Primary else textSecondary
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 18.dp)
+                        .sheetDashedBorder(
+                            color = if (isAdultOn) FocusColors.Primary else cardBorder,
+                            cornerRadius = 16.dp
+                        )
+                        .background(cardBg, RoundedCornerShape(16.dp))
+                        .clickable { viewModel.toggleAdultBlocking(!isAdultOn) }
+                        .padding(16.dp)
+                        .testTag("adult_site_blocking_card")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isAdultOn) FocusColors.Primary.copy(alpha = 0.16f)
+                                    else searchBg
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shield,
+                                contentDescription = "Adult Site Blocking",
+                                tint = accentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Block Adult Sites (18+)",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        color = textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = if (isAdultOn) Color(0xFF10B981).copy(alpha = 0.15f)
+                                    else searchBg
+                                ) {
+                                    Text(
+                                        text = if (isAdultOn) "ON" else "OFF",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = if (isAdultOn) Color(0xFF10B981) else textSecondary,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 10.sp
+                                        )
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = if (isAdultOn) {
+                                    "Blocking 18+ adult sites, NSFW domains & Family-DNS filters across browsers"
+                                } else {
+                                    "Toggle ON to automatically block 18+ adult & NSFW websites"
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = if (isAdultOn) Color(0xFF10B981) else textSecondary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Switch(
+                            checked = isAdultOn,
+                            onCheckedChange = { enabled ->
+                                viewModel.toggleAdultBlocking(enabled)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = FocusColors.ToggleGreen,
+                                uncheckedThumbColor = textSecondary,
+                                uncheckedTrackColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
+                            ),
+                            modifier = Modifier.testTag("adult_site_blocking_toggle")
+                        )
+                    }
+                }
+            }
+
             // Custom Blocklist & Quick Add
                 // Input box styled like YouTube channels search bar
                 item {

@@ -80,19 +80,12 @@ fun FocusHeader(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Folded-map logo badge
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_focus_shield_app_icon),
-                    contentDescription = "FocusShield app logo",
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            // Official FocusShield logo badge
+            Image(
+                painter = painterResource(R.drawable.ic_focus_shield_app_icon),
+                contentDescription = "FocusShield app logo",
+                modifier = Modifier.size(42.dp)
+            )
 
             Spacer(modifier = Modifier.width(FocusSpacing.md))
 

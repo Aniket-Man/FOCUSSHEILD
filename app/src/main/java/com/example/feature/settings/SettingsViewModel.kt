@@ -264,6 +264,12 @@ class SettingsViewModel(
         }
     }
 
+    fun updateAutoAdultWebsiteBlocking(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateAutoAdultWebsiteBlocking(enabled)
+        }
+    }
+
     fun checkDeviceAdminStatus() {
         val engine = com.example.core.engine.AntiUninstallEngine.getInstance(getApplication())
         _isDeviceAdminActive.value = engine.isDeviceAdminActive()

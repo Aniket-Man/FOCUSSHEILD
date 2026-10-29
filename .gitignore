@@ -1,101 +1,52 @@
-# =============================================================================
-# FocusShield .gitignore
-#
-# Rule of thumb: only real source, docs, build scripts and small test fixtures
-# belong in this repository. Anything secret, machine-specific, generated,
-# large or purely local stays out.
-# =============================================================================
-
-# --- Secrets and signing material (never commit) -----------------------------
-# Real signing keys live outside the repo; passwords come from environment vars.
-.env
-!.env.example
-*.jks
-*.keystore
-keystore.properties
-keystore.txt
-my-upload-key.jks
-
-# Local machine config (Android SDK path etc.).
+# Android / Gradle
 local.properties
-
-# Firebase project config carries a project API key; each dev supplies their own.
-google-services.json
-
-# --- Build outputs -----------------------------------------------------------
-# Releases are published as GitHub Release assets and fetched by the in-app
-# updater (docs/UPDATE_SYSTEM.md). A checked-in APK/AAB is dead weight that goes
-# stale, so the binary formats below are always ignored.
-build/
-app/build/
 .gradle/
-.kotlin/
-.cxx/
-.externalNativeBuild/
-captures/
-*.apk
+buil
+
+# Build outputs. Never commit an APK/AAB: releases are published as GitHub Release
+# assets and fetched by the in-app updater (see docs/UPDATE_SYSTEM.md), so a checked-in
+# binary is dead weight that goes stale. app/FocusShield.apk was committed by accident
+# in the initial commit precisely because this pattern was missing.
 *.aab
 *.ap_
 *.dex
 *.class
 *.hprof
-hs_err_pid*
-*.stackdump
 
-# --- Logs and crash reports --------------------------------------------------
-*.log
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
-npm-debug.log*
-.firebase/
-
-# --- Local tooling and agent state -------------------------------------------
-# Editor/IDE state.
+# Android Studio / IntelliJ
 .idea/
 *.iml
-.vscode/
-.fleet/
+captures/
+.externalNativeBuild/
+.cxx/
 
-# Coding-agent sessions, MCP server config and local skill manifests.
-.claude/
-.agents/
-.mcp.json
-skills-lock.json
-opencode.json
+# Logs and crash dumps
+*.log
 
-# Local AI/scratch metadata and one-off patch scripts whose edits are applied.
-metadata.json
-prompt.txt
-insert_glass.py
-patch.py
-.aistudio/
+# Kotlin compiler session data (transient heartbeat files)
+.kotlin/
 
-# --- Large media and generated assets ----------------------------------------
-# Screen recordings and reference PDFs belong in Releases (or nowhere), not in
-# git history. public/ was an AI-Studio export that no source file references.
-*.mp4
-*.webm
-*.mov
-public/
-FocusSheild.svg
-
-# --- Vendored reference project ----------------------------------------------
-# A separate Android app (com.zenlock.focusguard) kept only as an algorithm
-# reference; FocusShield's own code merely cites the "Zenlock Classifier
-# pattern" in comments, so this folder is not part of the app.
+# Vendored reference project: a separate Android app (com.zenlock.focusguard) kept only
+# as an algorithm reference. FocusShield's own code just cites the "Zenlock Classifier
+# pattern" in comments, so this folder is not part of the app and stays local.
 zenlock_repo/
 
-# --- Node / Firebase tooling -------------------------------------------------
-node_modules/
+# One-off local patch scripts; their edits are already applied to the source.
+insert_glass.py
+patch.py
 
-# --- OS and editor junk ------------------------------------------------------
-Thumbs.db
-desktop.ini
-.DS_Store
-*.tmp
-*.bak
-*.orig
-*.rej
-*.swp
-*~
+# Local tooling / project metadata, not source.
+opencode.json
+metadata.json
+
+# The APK-updater specification, kept locally rather than published.
+# The shipped behaviour is documented in docs/UPDATE_SYSTEM.md.
+prompt.txt
+
+# Claude Code local session data
+.claude/
+
+# Supabase MCP server config + agent skills (local tooling, not source)
+.mcp.json
+.agents/
+skills-lock.json

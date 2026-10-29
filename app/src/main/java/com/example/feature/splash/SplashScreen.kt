@@ -55,66 +55,47 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SplashScreen(
+    isDataReady: Boolean = false,
     onSplashFinished: () -> Unit
 ) {
     val currentOnSplashFinished by androidx.compose.runtime.rememberUpdatedState(onSplashFinished)
-    // Entrance animations
-    val scale = remember { Animatable(0.72f) }
-    val alpha = remember { Animatable(0f) }
-    val textAlpha = remember { Animatable(0f) }
-    val subtitleAlpha = remember { Animatable(0f) }
-    val badgesAlpha = remember { Animatable(0f) }
+    val latestIsDataReady by androidx.compose.runtime.rememberUpdatedState(isDataReady)
+
+    // Render immediately visible on the very first frame (zero black-screen gap)
+    val scale = remember { Animatable(0.96f) }
+    val alpha = remember { Animatable(1f) }
+    val textAlpha = remember { Animatable(1f) }
+    val subtitleAlpha = remember { Animatable(1f) }
+    val badgesAlpha = remember { Animatable(1f) }
 
     // Subtle ambient breathing glow animation
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.08f,
+        initialValue = 0.96f,
+        targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = FastOutSlowInEasing),
+            animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseScale"
     )
 
     LaunchedEffect(Unit) {
-        // Run entrance animations sequentially with natural spring/easing feel
         launch {
             scale.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing)
-            )
-        }
-        launch {
-            alpha.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 500, easing = LinearEasing)
-            )
-        }
-        launch {
-            delay(280)
-            textAlpha.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-            )
-        }
-        launch {
-            delay(450)
-            subtitleAlpha.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-            )
-        }
-        launch {
-            delay(600)
-            badgesAlpha.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
             )
         }
 
-        // Brief cinematic pause for user recognition before smooth transition to destination
-        delay(1600)
+        // Brief minimum flash display while Home screen & fast startup data load in background,
+        // then dismiss as soon as fast data is ready (capped so the flash screen never lingers).
+        delay(320)
+        kotlinx.coroutines.withTimeoutOrNull(260) {
+            while (!latestIsDataReady) {
+                delay(16)
+            }
+        }
         currentOnSplashFinished()
     }
 

@@ -113,6 +113,7 @@ fun AnalyticsScreen(
     viewModel: AnalyticsViewModel,
     onNavigateToStartSession: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
+    onNavigateToDigitalWellbeing: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -182,6 +183,76 @@ fun AnalyticsScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
                     HeroMetricsGrid(summary = uiState.summary)
+                }
+            }
+
+            // 3b. Digital Wellbeing & Phone Usage Banner Card
+            item {
+                Box(modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(FocusShapes.card)
+                            .clickable { onNavigateToDigitalWellbeing() }
+                            .testTag("analytics_digital_wellbeing_card"),
+                        shape = FocusShapes.card,
+                        color = FocusColors.Surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.Primary.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Schedule,
+                                        contentDescription = "Digital Wellbeing",
+                                        tint = Color(0xFF3B82F6),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Digital Wellbeing & Phone Usage",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = FocusColors.TextPrimary,
+                                            fontSize = 15.sp
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Live screen time ring, per-app timers & phone storage",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = FocusColors.TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Filled.ArrowForward,
+                                contentDescription = "Open Digital Wellbeing",
+                                tint = FocusColors.Primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
             }
 

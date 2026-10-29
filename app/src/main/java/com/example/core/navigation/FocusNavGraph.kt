@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +84,7 @@ fun FocusNavGraph(
     updateViewModel: UpdateViewModel? = null
 ) {
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val homeUiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     // Collected rather than read once from the StateFlow: restoring the snapshot in
     // SessionViewModel.init and the splash gate must agree even across a recomposition.
     val pendingSessionSummary by sessionViewModel.pendingSessionSummary.collectAsStateWithLifecycle()
@@ -224,12 +226,6 @@ fun FocusNavGraph(
         onOpenUpdatesHandled()
     }
 
-    val permissionStatus = androidx.compose.runtime.remember { FocusPermissionManager.getPermissionStatus(context) }
-    val corePermissionsGranted = permissionStatus.isAccessibilityEnabled &&
-            permissionStatus.isUsageAccessGranted &&
-            permissionStatus.isOverlayGranted &&
-            permissionStatus.isBatteryOptimizationIgnored
-
     // Bootstrap snapshot covering the frames before preferencesFlow emits. Keyed to the
     // authoritative flag so it re-reads instead of pinning a stale one-shot value captured
     // at first composition (e.g. after process recreation, issue #18).
@@ -254,13 +250,21 @@ fun FocusNavGraph(
         navController = navController,
         startDestination = Screen.Splash.route,
         enterTransition = {
-            fadeIn(animationSpec = tween(200)) + slideIntoContainer(
-                AnimatedContentTransitionScope.SlideDirection.Start,
-                tween(200)
-            )
+            if (initialState.destination.route == Screen.Splash.route) {
+                fadeIn(animationSpec = tween(120))
+            } else {
+                fadeIn(animationSpec = tween(200)) + slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    tween(200)
+                )
+            }
         },
         exitTransition = {
-            fadeOut(animationSpec = tween(160))
+            if (initialState.destination.route == Screen.Splash.route) {
+                fadeOut(animationSpec = tween(120))
+            } else {
+                fadeOut(animationSpec = tween(160))
+            }
         },
         popEnterTransition = {
             fadeIn(animationSpec = tween(200))
@@ -288,6 +292,7 @@ fun FocusNavGraph(
                 onNavigateToBlockedApps = { navController.navigate(Screen.BlockedApps.route) },
                 onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) },
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
+                onNavigateToDigitalWellbeing = { navController.navigate(Screen.DigitalWellbeing.route) },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
                 showUpdateDot = showUpdateDot,
                 updateState = updateState,
@@ -342,7 +347,8 @@ fun FocusNavGraph(
                 onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
                 onTabSelected = { tab ->
                     handleBottomTabNavigation(tab, navController)
-                }
+                },
+                onNavigateToDigitalWellbeing = { navController.navigate(Screen.DigitalWellbeing.route) }
             )
         }
 
@@ -398,7 +404,8 @@ fun FocusNavGraph(
                 onNavigateToStrictMode = { navController.navigate(Screen.StrictMode.route) },
                 onNavigateToStudyChannels = { navController.navigate(Screen.StudyChannels.route) },
                 onNavigateToWebsiteBlocker = { navController.navigate(Screen.WebsiteBlocker.route) },
-                onNavigateToAccount = { navController.navigate(Screen.Account.route) }
+                onNavigateToAccount = { navController.navigate(Screen.Account.route) },
+                onNavigateToDigitalWellbeing = { navController.navigate(Screen.DigitalWellbeing.route) }
             )
         }
 
@@ -572,16 +579,46 @@ fun FocusNavGraph(
             )
         }
 
-        // SPLASH SCREEN
-        composable(Screen.Splash.route) {
-            SplashScreen(
-                onSplashFinished = {
-                    navController.navigate(splashDestination) {
-                        popUpTo(Screen.Splash.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
+        // SUB-SCREEN: DIGITAL WELLBEING & PHONE STORAGE / SCREEN TIME
+        composable(Screen.DigitalWellbeing.route) {
+            com.example.feature.wellbeing.DigitalWellbeingScreen(
+                todayStudyTimeFormatted = homeUiState.todayStudyTime,
+                focusRatioPercentage = homeUiState.focusToScreenRatioPercentage,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToAppLimits = { navController.navigate(Screen.AppLimits.route) }
             )
+        }
+
+        // SPLASH SCREEN (pre-composes HomeScreen in the background while showing the flash screen)
+        composable(Screen.Splash.route) {
+            androidx.compose.foundation.layout.Box(
+                modifier = androidx.compose.ui.Modifier.fillMaxSize()
+            ) {
+                if (splashDestination == Screen.Home.route) {
+                    HomeScreen(
+                        viewModel = homeViewModel,
+                        sessionViewModel = sessionViewModel,
+                        onNavigateToStartSession = {},
+                        onNavigateToActiveSession = {},
+                        onNavigateToModeSelection = {},
+                        onNavigateToPlannerTab = {},
+                        onNavigateToStatsTab = {},
+                        onNavigateToBlocksTab = {},
+                        onNavigateToProfile = {},
+                        showUpdateDot = showUpdateDot,
+                        updateState = updateState
+                    )
+                }
+                SplashScreen(
+                    isDataReady = !homeUiState.isLoading,
+                    onSplashFinished = {
+                        navController.navigate(splashDestination) {
+                            popUpTo(Screen.Splash.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
         }
 
         // ONBOARDING & INTRODUCTION FLOW

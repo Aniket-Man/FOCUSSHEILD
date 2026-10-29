@@ -612,12 +612,12 @@ fun BlocksScreen(
                             .background(FocusColors.Surface)
                             .border(1.dp, FocusColors.CardBorderSubtle, RoundedCornerShape(16.dp))
                     ) {
-                        // Block Websites
+                        // Block Websites & Adult Sites
                         BlockRowActionItem(
                             title = "Block Websites & Adult Sites",
                             icon = Icons.Rounded.Language,
                             iconTint = FocusColors.Primary,
-                            actionText = "Manage Shield",
+                            actionText = if (settingsState.preferences.isAutoAdultWebsiteBlockingEnabled) "18+ Shield ON" else "Manage Shield",
                             onClick = onNavigateToWebsiteBlocker
                         )
 

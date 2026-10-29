@@ -269,6 +269,16 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             }
         }
 
+        // Pre-warm Room database and core Home repositories immediately in background
+        applicationScope.launch {
+            try {
+                database.openHelper.writableDatabase
+                analyticsRepository
+                studyPlanRepository
+            } catch (_: Exception) {
+            }
+        }
+
         // Initialize blocker manager with dependencies
         FocusBlockerManager.initialize(
             appContext = this,
@@ -284,14 +294,6 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             preferencesRepository = preferencesRepository,
             blockedAttemptRepository = blockedAttemptRepository
         )
-        // Re-arm a temporary App Limit session that outlived the process. Without this the timer
-        // (and the "time's up" blocker it raises) died with the process, so a session the user had
-        // chosen simply never ended.
-        try {
-            com.example.feature.applimits.engine.AppLimitManager.instance.restoreSessionFromDisk()
-        } catch (e: Exception) {
-            android.util.Log.e("FocusShieldApp", "Error restoring app limit session on startup: ${e.message}")
-        }
         com.example.feature.applimits.engine.AppLimitStrictModeEngine.initialize(
             context = this,
             repository = appLimitRepository
@@ -317,16 +319,37 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             blockedAttemptRepository = blockedAttemptRepository
         )
 
-        // Initialize Anti-Uninstall Engine (Device Admin protection)
-        com.example.core.engine.AntiUninstallEngine.getInstance(this)
-
         // Initialize Block Protection (always-on tamper guard during active sessions)
         com.example.feature.blocker.protection.BlockProtectionManager.initialize()
 
-        // Initialize session, protection, and update notification channels
-        com.example.feature.session.notification.SessionNotificationHelper.initialize(this)
-        com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this)
-        com.example.feature.update.notification.UpdateNotificationHelper.initialize(this)
+        // Offload notification channel IPC, disk session restoration, and WorkManager scheduling
+        // off the main thread so MainActivity renders the Flash Screen without delay.
+        applicationScope.launch {
+            try {
+                com.example.core.engine.AntiUninstallEngine.getInstance(this@FocusShieldApp)
+                com.example.feature.session.notification.SessionNotificationHelper.initialize(this@FocusShieldApp)
+                com.example.core.notification.FocusShieldBlockNotificationHelper.initialize(this@FocusShieldApp)
+                com.example.feature.update.notification.UpdateNotificationHelper.initialize(this@FocusShieldApp)
+            } catch (_: Exception) {
+            }
+            try {
+                com.example.feature.applimits.engine.AppLimitManager.instance.restoreSessionFromDisk()
+            } catch (e: Exception) {
+                android.util.Log.e("FocusShieldApp", "Error restoring app limit session on startup: ${e.message}")
+            }
+            try {
+                val restored = com.example.feature.session.engine.FocusSessionManager.instance.restoreActiveSessionFromDisk(this@FocusShieldApp)
+                if (restored != null && (restored.isRunning || restored.isPaused)) {
+                    com.example.feature.session.service.FocusSessionForegroundService.start(this@FocusShieldApp)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FocusShieldApp", "Error restoring active session on startup: ${e.message}")
+            }
+            try {
+                com.example.feature.update.work.UpdateCheckScheduler.schedule(this@FocusShieldApp)
+            } catch (_: Throwable) {
+            }
+        }
 
         // Restore cached update state (including post-update What's New detection) and schedule
         // continuous 15-minute background checks + immediate launch check.
@@ -345,10 +368,6 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                 android.util.Log.w("FocusShieldApp", "Update check startup error: ${e.message}")
             }
         }
-        try {
-            com.example.feature.update.work.UpdateCheckScheduler.schedule(this)
-        } catch (_: Throwable) {
-        }
 
         // Re-check automatically when connectivity returns
         applicationScope.launch {
@@ -357,16 +376,6 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                     updateManager.checkInBackground(forceForeground = false)
                 }
             }
-        }
-
-        // Restore any active session from disk that was running prior to process restart
-        try {
-            val restored = com.example.feature.session.engine.FocusSessionManager.instance.restoreActiveSessionFromDisk(this)
-            if (restored != null && (restored.isRunning || restored.isPaused)) {
-                com.example.feature.session.service.FocusSessionForegroundService.start(this)
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("FocusShieldApp", "Error restoring active session on startup: ${e.message}")
         }
 
         // Prepopulate default initial subjects, study plans, and approved study channels if empty

@@ -40,10 +40,19 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
+
+private data class TodayInputsBundle(
+    val todaySessions: List<SessionRecordEntity>,
+    val todayBreaks: List<BreakRecordEntity>,
+    val todayAttempts: List<BlockedAttemptEntity>,
+    val allSessions: List<SessionRecordEntity>,
+    val prefs: FocusPreferences
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AnalyticsRepository(
@@ -69,6 +78,43 @@ class AnalyticsRepository(
     private var cachedHasUsagePermission: Boolean? = null
     @Volatile
     private var lastPermissionCheckTime: Long = 0L
+    @Volatile
+    private var isRefreshingScreenTime: Boolean = false
+
+    private val backgroundScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private val screenTimeRefreshVersion = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
+    init {
+        if (context != null) {
+            refreshScreenTimeAsync()
+        }
+    }
+
+    fun refreshScreenTimeAsync() {
+        val ctx = context ?: return
+        if (isRefreshingScreenTime) return
+        isRefreshingScreenTime = true
+        backgroundScope.launch {
+            try {
+                val now = System.currentTimeMillis()
+                val perm = DeviceUsageStatsHelper.hasUsageStatsPermission(ctx)
+                cachedHasUsagePermission = perm
+                lastPermissionCheckTime = now
+                val queried = if (perm) {
+                    DeviceUsageStatsHelper.getTodayTotalScreenTimeMillis(ctx)
+                } else 0L
+                val changed = queried != cachedScreenTimeMillis
+                cachedScreenTimeMillis = queried
+                lastScreenTimeQueryTime = now
+                if (changed) {
+                    screenTimeRefreshVersion.value = now
+                }
+            } catch (_: Exception) {
+            } finally {
+                isRefreshingScreenTime = false
+            }
+        }
+    }
 
     val preferencesFlow: Flow<FocusPreferences> = preferencesRepository.preferencesFlow
 
@@ -81,13 +127,21 @@ class AnalyticsRepository(
      * showing yesterday's numbers until the process restarted.
      */
     val todaySummaryFlow: Flow<TodayStudySummary> = DayBounds.todayFlow().flatMapLatest { (todayStart, todayEnd) ->
-        combine(
+        val baseInputsFlow = combine(
             sessionDao.getSessionsBetweenFlow(todayStart, todayEnd),
             breakRecordDao.getBreaksBetweenFlow(todayStart, todayEnd),
             blockedAttemptDao.getAttemptsBetweenFlow(todayStart, todayEnd),
             sessionDao.getAllSessionsFlow(),
             preferencesRepository.preferencesFlow
         ) { todaySessions, todayBreaks, todayAttempts, allSessions, prefs ->
+            TodayInputsBundle(todaySessions, todayBreaks, todayAttempts, allSessions, prefs)
+        }
+        combine(baseInputsFlow, screenTimeRefreshVersion) { bundle, _ ->
+            val todaySessions = bundle.todaySessions
+            val todayBreaks = bundle.todayBreaks
+            val todayAttempts = bundle.todayAttempts
+            val allSessions = bundle.allSessions
+            val prefs = bundle.prefs
             val totalStudyMillis = todaySessions.sumOf { session ->
                 DayBounds.clampedDurationInWindow(
                     startTime = session.startTime,
@@ -145,13 +199,9 @@ class AnalyticsRepository(
 
             val screenTimeMillis = if (hasUsagePermission && context != null) {
                 if (now - lastScreenTimeQueryTime > 15_000L) {
-                    lastScreenTimeQueryTime = now
-                    val queried = DeviceUsageStatsHelper.getTodayTotalScreenTimeMillis(context)
-                    cachedScreenTimeMillis = queried
-                    queried
-                } else {
-                    cachedScreenTimeMillis
+                    refreshScreenTimeAsync()
                 }
+                cachedScreenTimeMillis
             } else 0L
 
             val effectiveScreenOrStudy = maxOf(screenTimeMillis, totalStudyMillis)

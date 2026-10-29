@@ -348,7 +348,7 @@ class HomeViewModel(
         )
     }.distinctUntilChanged().stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.Eagerly,
         initialValue = HomeSessionUiState()
     )
 
@@ -386,21 +386,21 @@ class HomeViewModel(
         .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = HomeUiState(isLoading = true)
         )
 
     val blockedApps: StateFlow<List<BlockedAppEntity>> = app.blockedAppRepository.allBlockedApps
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyList()
         )
 
     val focusSchedules: StateFlow<List<FocusScheduleEntity>> = app.focusScheduleRepository.allSchedules
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyList()
         )
 

@@ -1,38 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Exact supplied FocusShield logo used by the Android system splash screen (no extra rings or strokes). -->
+<!-- Transparent system splash icon so Android 12+ does not flash a circularly-cropped duplicate logo before SplashScreen. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="192dp"
     android:height="192dp"
     android:viewportWidth="192"
     android:viewportHeight="192">
     <path
-        android:fillColor="#6E18E6"
-        android:pathData="M53.1,32 L138.9,32 A21.1,21.1 0,0 1,160 53.1 L160,138.9 A21.1,21.1 0,0 1,138.9 160 L53.1,160 A21.1,21.1 0,0 1,32 138.9 L32,53.1 A21.1,21.1 0,0 1,53.1 32 Z" />
-    <group
-        android:translateX="32"
-        android:translateY="32"
-        android:scaleX="1.28"
-        android:scaleY="1.28">
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M39.6,8.2 L39.6,62.0 C42.8,69.5 46.5,78.2 48.6,86.6 L48.6,35.5 C46.8,25.5 43.5,16.0 39.6,8.2 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M60.4,8.2 C56.5,16.0 53.2,25.5 51.4,35.5 L51.4,86.6 C53.5,78.2 57.2,69.5 60.4,62.0 L60.4,8.2 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M27.9,13.4 L27.9,68.4 C35.2,70.6 41.8,76.8 45.9,85.0 C43.8,77.4 40.8,70.0 37.3,63.5 L37.3,27.2 C34.8,21.8 31.5,17.2 27.9,13.4 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M72.1,13.4 C68.5,17.2 65.2,21.8 62.7,27.2 L62.7,63.5 C59.2,70.0 56.2,77.4 54.1,85.0 C58.2,76.8 64.8,70.6 72.1,68.4 L72.1,13.4 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M15.5,26.4 C18.5,22.8 22.8,22.4 25.5,25.0 L25.5,70.0 C32.8,71.8 39.0,76.8 43.1,83.5 C35.5,75.0 24.5,74.2 15.5,79.7 L15.5,26.4 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M74.5,25.0 C77.2,22.4 81.5,22.8 84.5,26.4 L84.5,79.7 C75.5,74.2 64.5,75.0 56.9,83.5 C61.0,76.8 67.2,71.8 74.5,70.0 L74.5,25.0 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M10.8,32.6 L7.9,92.1 L50.0,89.6 L92.1,92.1 L89.2,32.6 L87.0,32.6 L89.6,89.2 L50.0,87.2 L10.4,89.2 L13.0,32.6 Z" />
-    </group>
+        android:fillColor="#00000000"
+        android:pathData="M0,0h192v192h-192z" />
 </vector>

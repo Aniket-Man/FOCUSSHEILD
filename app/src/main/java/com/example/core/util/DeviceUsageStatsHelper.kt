@@ -539,4 +539,447 @@ object DeviceUsageStatsHelper {
         }
         openUsageAccessSettings(context)
     }
+
+    /**
+     * Opens system Internal Storage settings page.
+     */
+    fun openStorageSettings(context: Context) {
+        val intents = listOf(
+            Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS),
+            Intent(Settings.ACTION_MEMORY_CARD_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+        for (intent in intents) {
+            try {
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Builds a complete Digital Wellbeing snapshot for today:
+     * - Per-app foreground time, launch count, category label
+     * - Hourly screen-time distribution (24 hours)
+     * - Device unlocks today
+     * - Real device internal storage usage via StatFs
+     */
+    fun getTodayDigitalWellbeingSnapshot(
+        context: Context,
+        persistedUnlocks: Int = 0
+    ): DigitalWellbeingSnapshot {
+        val hasPerm = hasUsageStatsPermission(context)
+        val (startOfDay, now) = getTodayBounds()
+        val pm = context.packageManager
+
+        // Query real internal storage stats via StatFs
+        var storageTotal = 0L
+        var storageFree = 0L
+        try {
+            val statFs = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+            storageTotal = statFs.totalBytes
+            storageFree = statFs.availableBytes
+        } catch (_: Exception) {}
+        val storageUsed = (storageTotal - storageFree).coerceAtLeast(0L)
+
+        if (!hasPerm) {
+            return DigitalWellbeingSnapshot(
+                hasUsagePermission = false,
+                totalScreenTimeMillis = 0L,
+                formattedTotalScreenTime = "0m",
+                unlocksCount = persistedUnlocks,
+                totalAppLaunches = 0,
+                apps = emptyList(),
+                hourlyUsageMinutes = List(24) { 0 },
+                weeklyDailyUsage = buildEmptyWeeklyUsageHistory(),
+                storageUsedBytes = storageUsed,
+                storageTotalBytes = storageTotal,
+                storageFreeBytes = storageFree
+            )
+        }
+
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+        val packageIntervals = mutableMapOf<String, MutableList<Pair<Long, Long>>>()
+        val packageLaunches = mutableMapOf<String, Int>()
+        var keyguardHiddenCount = 0
+        var lastForegroundPkg: String? = null
+
+        if (usm != null) {
+            try {
+                val events = usm.queryEvents(startOfDay, now)
+                val event = UsageEvents.Event()
+                val foregroundStarts = mutableMapOf<String, Long>()
+
+                while (events.hasNextEvent()) {
+                    events.getNextEvent(event)
+                    val type = event.eventType
+
+                    if (type == UsageEvents.Event.KEYGUARD_HIDDEN) {
+                        keyguardHiddenCount++
+                    }
+
+                    val pkg = event.packageName
+                    if (pkg.isNullOrBlank() || isIgnoredSystemPackage(pkg, context.packageName)) continue
+
+                    val key = "$pkg/${event.className ?: pkg}"
+                    when (type) {
+                        UsageEvents.Event.ACTIVITY_RESUMED -> {
+                            if (!foregroundStarts.containsKey(key)) {
+                                foregroundStarts[key] = event.timeStamp
+                            }
+                            if (lastForegroundPkg != pkg) {
+                                packageLaunches[pkg] = (packageLaunches[pkg] ?: 0) + 1
+                                lastForegroundPkg = pkg
+                            }
+                        }
+                        UsageEvents.Event.ACTIVITY_PAUSED,
+                        UsageEvents.Event.ACTIVITY_STOPPED -> {
+                            val start = foregroundStarts.remove(key)
+                            if (start != null) {
+                                val clampedStart = start.coerceAtLeast(startOfDay)
+                                val clampedEnd = event.timeStamp.coerceAtMost(now)
+                                if (clampedEnd > clampedStart) {
+                                    packageIntervals.getOrPut(pkg) { mutableListOf() }.add(clampedStart to clampedEnd)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                foregroundStarts.forEach { (key, start) ->
+                    val pkg = key.substringBefore('/')
+                    val clampedStart = start.coerceAtLeast(startOfDay)
+                    if (now > clampedStart) {
+                        packageIntervals.getOrPut(pkg) { mutableListOf() }.add(clampedStart to now)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "getTodayDigitalWellbeingSnapshot events error: ${e.message}")
+            }
+        }
+
+        val packageUsageMillis = mutableMapOf<String, Long>()
+        val hourlyMillis = LongArray(24)
+        val oneHourMillis = 3600_000L
+
+        for ((pkg, intervals) in packageIntervals) {
+            if (intervals.isEmpty()) continue
+            intervals.sortBy { it.first }
+            var mergedTotal = 0L
+            var currentStart = intervals[0].first
+            var currentEnd = intervals[0].second
+
+            fun accumulateInterval(s: Long, e: Long) {
+                mergedTotal += (e - s)
+                // Distribute across hourly buckets
+                var cursor = s
+                while (cursor < e) {
+                    val hourIndex = (((cursor - startOfDay) / oneHourMillis).toInt()).coerceIn(0, 23)
+                    val bucketEnd = (startOfDay + (hourIndex + 1) * oneHourMillis).coerceAtMost(e)
+                    val slice = (bucketEnd - cursor).coerceAtLeast(0L)
+                    hourlyMillis[hourIndex] += slice
+                    cursor = if (bucketEnd > cursor) bucketEnd else cursor + 1L
+                }
+            }
+
+            for (i in 1 until intervals.size) {
+                val (s, e) = intervals[i]
+                if (s <= currentEnd) {
+                    currentEnd = maxOf(currentEnd, e)
+                } else {
+                    accumulateInterval(currentStart, currentEnd)
+                    currentStart = s
+                    currentEnd = e
+                }
+            }
+            accumulateInterval(currentStart, currentEnd)
+
+            if (mergedTotal > 0L) {
+                packageUsageMillis[pkg] = mergedTotal
+            }
+        }
+
+        // Fallback: include aggregate stats for packages missed by raw events
+        if (usm != null) {
+            try {
+                val aggregated = usm.queryAndAggregateUsageStats(startOfDay, now)
+                aggregated?.forEach { (pkg, stat) ->
+                    if (!isIgnoredSystemPackage(pkg, context.packageName) &&
+                        !packageUsageMillis.containsKey(pkg) &&
+                        stat.totalTimeInForeground > 0L
+                    ) {
+                        packageUsageMillis[pkg] = stat.totalTimeInForeground
+                        if (!packageLaunches.containsKey(pkg)) {
+                            packageLaunches[pkg] = 1
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Also include installed user launcher apps if the list has fewer than 8 apps so the user can see and set timers on their apps
+        try {
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
+            for (info in resolveInfos) {
+                val pkg = info.activityInfo.packageName
+                if (!isIgnoredSystemPackage(pkg, context.packageName) && !packageUsageMillis.containsKey(pkg)) {
+                    packageUsageMillis[pkg] = 0L
+                }
+            }
+        } catch (_: Exception) {}
+
+        val totalMillis = packageUsageMillis.values.sum().coerceAtMost((now - startOfDay).coerceAtLeast(0L))
+
+        val appItems = packageUsageMillis.entries
+            .mapNotNull { (pkg, millis) ->
+                val appInfo = try {
+                    pm.getApplicationInfo(pkg, 0)
+                } catch (_: Exception) {
+                    null
+                }
+                // Skip uninstalled packages with 0 usage
+                if (appInfo == null && millis <= 0L) return@mapNotNull null
+
+                val appLabel = try {
+                    if (appInfo != null) pm.getApplicationLabel(appInfo).toString() else pkg.substringAfterLast('.')
+                } catch (_: Exception) {
+                    pkg.substringAfterLast('.')
+                }
+
+                val category = resolveAppCategoryLabel(pkg, appInfo)
+                val launches = packageLaunches[pkg] ?: if (millis > 0L) 1 else 0
+
+                WellbeingAppUsageItem(
+                    packageName = pkg,
+                    appName = appLabel,
+                    usageMillis = millis,
+                    formattedUsage = formatDurationHoursMins(millis),
+                    launchCount = launches,
+                    categoryLabel = category
+                )
+            }
+            .sortedWith(compareByDescending<WellbeingAppUsageItem> { it.usageMillis }.thenBy { it.appName.lowercase() })
+
+        val hourlyMinutes = hourlyMillis.map { (it / 60_000L).toInt().coerceIn(0, 60) }
+        val totalLaunches = packageLaunches.values.sum()
+        val effectiveUnlocks = maxOf(persistedUnlocks, keyguardHiddenCount)
+        val topAppToday = appItems.firstOrNull { it.usageMillis > 0L }?.appName
+        val weeklyHistory = getWeeklyDailyUsageHistory(
+            context = context,
+            usm = usm,
+            pm = pm,
+            todayTotalMillis = totalMillis,
+            todayTopAppName = topAppToday
+        )
+
+        return DigitalWellbeingSnapshot(
+            hasUsagePermission = true,
+            totalScreenTimeMillis = totalMillis,
+            formattedTotalScreenTime = formatDurationHoursMins(totalMillis),
+            unlocksCount = effectiveUnlocks,
+            totalAppLaunches = totalLaunches,
+            apps = appItems,
+            hourlyUsageMinutes = hourlyMinutes,
+            weeklyDailyUsage = weeklyHistory,
+            storageUsedBytes = storageUsed,
+            storageTotalBytes = storageTotal,
+            storageFreeBytes = storageFree
+        )
+    }
+
+    /**
+     * Queries the past 7 days (6 days ago through today) of daily app usage history
+     * so users can track their weekly screen time progress in a Vico bar chart.
+     */
+    private fun getWeeklyDailyUsageHistory(
+        context: Context,
+        usm: UsageStatsManager?,
+        pm: android.content.pm.PackageManager,
+        todayTotalMillis: Long,
+        todayTopAppName: String?
+    ): List<DailyUsageHistoryItem> {
+        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
+        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+        val maxDayMillis = 24L * 3600_000L
+        val items = mutableListOf<DailyUsageHistoryItem>()
+
+        for (daysAgo in 6 downTo 0) {
+            val dayStartCal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -daysAgo)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val dayStart = dayStartCal.timeInMillis
+            val dayEnd = if (daysAgo == 0) {
+                System.currentTimeMillis()
+            } else {
+                dayStart + maxDayMillis - 1L
+            }
+
+            val dayShort = dayShortFormat.format(dayStartCal.time)
+            val dateLabel = dateFormat.format(dayStartCal.time)
+
+            if (daysAgo == 0) {
+                val clampedToday = todayTotalMillis.coerceIn(0L, maxDayMillis)
+                items.add(
+                    DailyUsageHistoryItem(
+                        dayOfWeekShort = dayShort,
+                        dateFormatted = dateLabel,
+                        usageMillis = clampedToday,
+                        usageHours = (clampedToday.toFloat() / 3_600_000f).coerceAtLeast(0f),
+                        formattedUsage = formatDurationHoursMins(clampedToday),
+                        topAppName = todayTopAppName,
+                        isToday = true
+                    )
+                )
+            } else {
+                var dayMillis = 0L
+                var topPkg: String? = null
+                var topPkgMillis = 0L
+
+                if (usm != null) {
+                    try {
+                        // First try precise foreground events for that day window
+                        val eventsMap = calculateAllAppsForegroundUsageFromEvents(context, dayStart, dayEnd)
+                        if (eventsMap.isNotEmpty()) {
+                            dayMillis = eventsMap.values.sum()
+                            val maxEntry = eventsMap.maxByOrNull { it.value }
+                            topPkg = maxEntry?.key
+                            topPkgMillis = maxEntry?.value ?: 0L
+                        } else {
+                            // Fallback to INTERVAL_DAILY bucket stats
+                            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, dayStart, dayEnd)
+                            val perPkg = mutableMapOf<String, Long>()
+                            stats?.forEach { stat ->
+                                val pkg = stat.packageName ?: return@forEach
+                                if (isIgnoredSystemPackage(pkg, context.packageName)) return@forEach
+                                val fg = stat.totalTimeInForeground
+                                if (fg > 0L && stat.lastTimeUsed in dayStart..dayEnd) {
+                                    perPkg[pkg] = maxOf(perPkg[pkg] ?: 0L, fg)
+                                }
+                            }
+                            dayMillis = perPkg.values.sum()
+                            val maxEntry = perPkg.maxByOrNull { it.value }
+                            topPkg = maxEntry?.key
+                            topPkgMillis = maxEntry?.value ?: 0L
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Weekly usage query failed for daysAgo=$daysAgo: ${e.message}")
+                    }
+                }
+
+                val clampedDay = dayMillis.coerceIn(0L, maxDayMillis)
+                val resolvedTopApp = if (topPkg != null && topPkgMillis > 0L) {
+                    try {
+                        val info = pm.getApplicationInfo(topPkg, 0)
+                        pm.getApplicationLabel(info).toString()
+                    } catch (_: Exception) {
+                        topPkg.substringAfterLast('.')
+                    }
+                } else {
+                    null
+                }
+
+                items.add(
+                    DailyUsageHistoryItem(
+                        dayOfWeekShort = dayShort,
+                        dateFormatted = dateLabel,
+                        usageMillis = clampedDay,
+                        usageHours = (clampedDay.toFloat() / 3_600_000f).coerceAtLeast(0f),
+                        formattedUsage = formatDurationHoursMins(clampedDay),
+                        topAppName = resolvedTopApp,
+                        isToday = false
+                    )
+                )
+            }
+        }
+
+        return items
+    }
+
+    private fun buildEmptyWeeklyUsageHistory(): List<DailyUsageHistoryItem> {
+        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
+        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+        return (6 downTo 0).map { daysAgo ->
+            val cal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -daysAgo)
+            }
+            DailyUsageHistoryItem(
+                dayOfWeekShort = dayShortFormat.format(cal.time),
+                dateFormatted = dateFormat.format(cal.time),
+                usageMillis = 0L,
+                usageHours = 0f,
+                formattedUsage = "0m",
+                topAppName = null,
+                isToday = daysAgo == 0
+            )
+        }
+    }
+
+    private fun resolveAppCategoryLabel(pkg: String, appInfo: android.content.pm.ApplicationInfo?): String {
+        val lower = pkg.lowercase()
+        if (lower.contains("youtube") || lower.contains("netflix") || lower.contains("video") || lower.contains("hotstar") || lower.contains("prime")) {
+            return "Video & Media"
+        }
+        if (lower.contains("instagram") || lower.contains("whatsapp") || lower.contains("facebook") || lower.contains("snapchat") || lower.contains("twitter") || lower.contains("telegram") || lower.contains("reddit")) {
+            return "Social"
+        }
+        if (lower.contains("chrome") || lower.contains("browser") || lower.contains("opera") || lower.contains("brave") || lower.contains("firefox")) {
+            return "Web Browser"
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && appInfo != null) {
+            return when (appInfo.category) {
+                android.content.pm.ApplicationInfo.CATEGORY_GAME -> "Games"
+                android.content.pm.ApplicationInfo.CATEGORY_SOCIAL -> "Social"
+                android.content.pm.ApplicationInfo.CATEGORY_VIDEO -> "Video & Media"
+                android.content.pm.ApplicationInfo.CATEGORY_AUDIO -> "Audio & Music"
+                android.content.pm.ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Productivity"
+                android.content.pm.ApplicationInfo.CATEGORY_NEWS -> "News & Reading"
+                android.content.pm.ApplicationInfo.CATEGORY_MAPS -> "Maps & Travel"
+                else -> "Apps & Tools"
+            }
+        }
+        return "Apps & Tools"
+    }
 }
+
+data class DailyUsageHistoryItem(
+    val dayOfWeekShort: String,
+    val dateFormatted: String,
+    val usageMillis: Long,
+    val usageHours: Float,
+    val formattedUsage: String,
+    val topAppName: String? = null,
+    val isToday: Boolean = false
+)
+
+data class WellbeingAppUsageItem(
+    val packageName: String,
+    val appName: String,
+    val usageMillis: Long,
+    val formattedUsage: String,
+    val launchCount: Int,
+    val categoryLabel: String
+)
+
+data class DigitalWellbeingSnapshot(
+    val hasUsagePermission: Boolean,
+    val totalScreenTimeMillis: Long,
+    val formattedTotalScreenTime: String,
+    val unlocksCount: Int,
+    val totalAppLaunches: Int,
+    val apps: List<WellbeingAppUsageItem>,
+    val hourlyUsageMinutes: List<Int>,
+    val weeklyDailyUsage: List<DailyUsageHistoryItem> = emptyList(),
+    val storageUsedBytes: Long,
+    val storageTotalBytes: Long,
+    val storageFreeBytes: Long
+)
+
