@@ -23,7 +23,8 @@ data class YouTubeBlockDecision(
     val detectedChannel: String? = null,
     val matchedKeyword: String? = null,
     val isShorts: Boolean = false,
-    val isAdPlaying: Boolean = false
+    val isAdPlaying: Boolean = false,
+    val needsExitFullScreenForVerification: Boolean = false
 ) {
     companion object {
         val ALLOW_NAVIGATION = YouTubeBlockDecision(
@@ -69,6 +70,13 @@ data class YouTubeBlockDecision(
             reason = "Content could not be verified against approved list",
             detectedTitle = title,
             detectedChannel = channel
+        )
+
+        fun exitFullScreenForVerification(title: String?): YouTubeBlockDecision = YouTubeBlockDecision(
+            verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+            reason = "Exiting full screen once to read portrait channel header for verification",
+            detectedTitle = title,
+            needsExitFullScreenForVerification = true
         )
     }
 

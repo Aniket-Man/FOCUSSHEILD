@@ -306,11 +306,22 @@ fun AddEditAppLimitDialog(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(filteredApps, key = { it.packageName }) { app ->
+                            val context = androidx.compose.ui.platform.LocalContext.current
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(FocusShapes.medium)
-                                    .clickable { selectedApp = app }
+                                    .clickable {
+                                        if (app.isStrictLocked) {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Strict Mode Active: ${app.appName} limit is locked and cannot be modified or deleted.",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        } else {
+                                            selectedApp = app
+                                        }
+                                    }
                                     .padding(vertical = 8.dp, horizontal = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -351,7 +362,21 @@ fun AddEditAppLimitDialog(
                                     )
                                 }
 
-                                if (app.isAlreadyLimited) {
+                                if (app.isStrictLocked) {
+                                    Surface(
+                                        shape = RoundedCornerShape(100.dp),
+                                        color = FocusColors.BlockedRed.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = "🔒 Strict Locked",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = FocusColors.BlockedRed,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                } else if (app.isAlreadyLimited) {
                                     Surface(
                                         shape = RoundedCornerShape(100.dp),
                                         color = FocusColors.AmberOrange.copy(alpha = 0.12f)

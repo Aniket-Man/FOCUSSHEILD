@@ -8,21 +8,27 @@ import com.example.core.util.DeviceUsageStatsHelper
 import com.example.core.util.TimeFormatter
 import com.example.data.local.dao.BlockedAttemptDao
 import com.example.data.local.dao.BreakRecordDao
+import com.example.data.local.dao.FocusScheduleDao
 import com.example.data.local.dao.SessionDao
 import com.example.data.local.dao.StudyActivityDao
+import com.example.data.local.dao.StudyPlanDao
 import com.example.data.local.entity.BlockedAttemptEntity
 import com.example.data.local.entity.BlockedEventType
 import com.example.data.local.entity.BreakRecordEntity
+import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.SessionRecordEntity
 import com.example.data.local.entity.StudyActivityEntity
 import com.example.data.local.entity.StudyActivitySource
 import com.example.data.local.entity.StudyActivityType
+import com.example.data.local.entity.StudyPlanEntity
 import com.example.data.preferences.FocusPreferences
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.feature.analytics.domain.AnalyticsPeriod
 import com.example.feature.analytics.domain.BlockedAppStat
+import com.example.feature.analytics.domain.BrowserStudyStats
 import com.example.feature.analytics.domain.DateRange
 import com.example.feature.analytics.domain.PeriodAnalyticsSummary
+import com.example.feature.analytics.domain.PlannerAnalyticsStats
 import com.example.feature.analytics.domain.SourceBreakdown
 import com.example.feature.analytics.domain.StreakCalculator
 import com.example.feature.analytics.domain.StudyDay
@@ -61,7 +67,9 @@ class AnalyticsRepository(
     private val blockedAttemptDao: BlockedAttemptDao,
     private val studyActivityDao: StudyActivityDao,
     private val preferencesRepository: FocusPreferencesRepository,
-    private val context: Context? = null
+    private val context: Context? = null,
+    private val studyPlanDao: StudyPlanDao? = null,
+    private val focusScheduleDao: FocusScheduleDao? = null
 ) {
 
     // Immutable formatters: java.time's DateTimeFormatter is thread-safe, unlike the shared
@@ -264,7 +272,14 @@ class AnalyticsRepository(
             Triple(activities, allSessions, prefs)
         }
 
-        return combine(firstGroupFlow, secondGroupFlow) { (sessions, breaks, attempts), (activities, allSessions, prefs) ->
+        val thirdGroupFlow = combine(
+            studyPlanDao?.getAllPlansFlow() ?: flowOf(emptyList()),
+            focusScheduleDao?.getAllSchedulesFlow() ?: flowOf(emptyList())
+        ) { plans, schedules ->
+            Pair(plans, schedules)
+        }
+
+        return combine(firstGroupFlow, secondGroupFlow, thirdGroupFlow) { (sessions, breaks, attempts), (activities, allSessions, prefs), (plans, schedules) ->
             buildPeriodSummary(
                 period = period,
                 dateRange = dateRange,
@@ -273,7 +288,9 @@ class AnalyticsRepository(
                 attempts = attempts,
                 activities = activities,
                 allSessions = allSessions,
-                prefs = prefs
+                prefs = prefs,
+                plans = plans,
+                schedules = schedules
             )
         }.flowOn(Dispatchers.Default)
     }
@@ -286,7 +303,9 @@ class AnalyticsRepository(
         attempts: List<BlockedAttemptEntity>,
         activities: List<StudyActivityEntity>,
         allSessions: List<SessionRecordEntity>,
-        prefs: FocusPreferences
+        prefs: FocusPreferences,
+        plans: List<StudyPlanEntity> = emptyList(),
+        schedules: List<FocusScheduleEntity> = emptyList()
     ): PeriodAnalyticsSummary {
         // Clamp cross-boundary sessions and breaks to the active period window so multi-day
         // or cross-midnight records contribute only the portion inside [startMillis, endMillis].
@@ -313,11 +332,14 @@ class AnalyticsRepository(
         }.filter { it.durationMillis > 0L }
 
         val sessionIdsInPeriod = clampedSessions.map { it.id }.toSet()
-        val standaloneYouTubeMillis = clampedActivities
-            .filter { it.source == StudyActivitySource.YOUTUBE && it.sessionId !in sessionIdsInPeriod }
+        val standaloneActivityMillis = clampedActivities
+            .filter {
+                (it.source == StudyActivitySource.YOUTUBE || it.source == StudyActivitySource.BROWSER) &&
+                    it.sessionId !in sessionIdsInPeriod
+            }
             .sumOf { it.durationMillis }
 
-        val totalStudyMillis = clampedSessions.sumOf { it.actualDurationMillis } + standaloneYouTubeMillis
+        val totalStudyMillis = clampedSessions.sumOf { it.actualDurationMillis } + standaloneActivityMillis
         val completedCount = clampedSessions.count { it.completed }
 
         val totalBreakMillis = breaks.sumOf { brk ->
@@ -350,7 +372,7 @@ class AnalyticsRepository(
         // Topic Breakdown
         val topicBreakdowns = computeTopicBreakdowns(clampedSessions)
 
-        // Source Breakdown (partitioning YouTube Study time inside sessions so there is zero double-counting)
+        // Source Breakdown (partitioning YouTube & Browser Study time inside sessions so there is zero double-counting)
         val sourceBreakdowns = computeSourceBreakdowns(clampedSessions, clampedActivities, totalStudyMillis)
 
         // Blocked Apps Breakdown
@@ -358,6 +380,12 @@ class AnalyticsRepository(
 
         // YouTube Study Intelligence
         val youtubeStats = computeYouTubeStats(clampedActivities, attempts)
+
+        // Browser Study Intelligence
+        val browserStats = computeBrowserStats(clampedActivities, attempts)
+
+        // Planner Schedule Consistency
+        val plannerStats = computePlannerStats(dateRange, clampedSessions, plans, schedules)
 
         // Streak Info
         val streakInfo = StreakCalculator.calculate(
@@ -391,6 +419,8 @@ class AnalyticsRepository(
             sourceBreakdowns = sourceBreakdowns,
             blockedAppStats = blockedAppStats,
             youTubeStats = youtubeStats,
+            browserStats = browserStats,
+            plannerStats = plannerStats,
             streakInfo = streakInfo
         )
     }
@@ -509,10 +539,12 @@ class AnalyticsRepository(
     ): List<SourceBreakdown> {
         val sourceTotals = mutableMapOf<StudyActivitySource, Pair<Long, Int>>()
 
-        // Partition YouTube study activities that occurred inside a Focus Session so they are
+        // Partition YouTube & Browser study activities that occurred inside a Focus Session so they are
         // never double-counted on top of the session's primary mode (TIMER / STOPWATCH / POMODORO).
         val youtubeActivities = activities.filter { it.source == StudyActivitySource.YOUTUBE }
         val youtubeBySessionId = youtubeActivities.groupBy { it.sessionId }
+        val browserActivities = activities.filter { it.source == StudyActivitySource.BROWSER }
+        val browserBySessionId = browserActivities.groupBy { it.sessionId }
 
         for (session in sessions) {
             val source = when (session.mode) {
@@ -524,17 +556,21 @@ class AnalyticsRepository(
                 ?.sumOf { it.durationMillis }
                 ?.coerceIn(0L, session.actualDurationMillis)
                 ?: 0L
-            val nonYouTubeSessionMillis = (session.actualDurationMillis - linkedYouTubeMillis).coerceAtLeast(0L)
-            if (nonYouTubeSessionMillis > 0L || linkedYouTubeMillis == 0L) {
+            val remainingAfterYt = (session.actualDurationMillis - linkedYouTubeMillis).coerceAtLeast(0L)
+            val linkedBrowserMillis = browserBySessionId[session.id]
+                ?.sumOf { it.durationMillis }
+                ?.coerceIn(0L, remainingAfterYt)
+                ?: 0L
+            val nonEmbeddedSessionMillis = (remainingAfterYt - linkedBrowserMillis).coerceAtLeast(0L)
+            if (nonEmbeddedSessionMillis > 0L || (linkedYouTubeMillis == 0L && linkedBrowserMillis == 0L)) {
                 val cur = sourceTotals.getOrDefault(source, Pair(0L, 0))
-                sourceTotals[source] = Pair(cur.first + nonYouTubeSessionMillis, cur.second + 1)
+                sourceTotals[source] = Pair(cur.first + nonEmbeddedSessionMillis, cur.second + 1)
             }
         }
 
+        val sessionDurationById = sessions.associate { it.id to it.actualDurationMillis }
         if (youtubeActivities.isNotEmpty()) {
-            // Cap each session's YouTube duration to that session's actual duration when linked
             var totalYtDuration = 0L
-            val sessionDurationById = sessions.associate { it.id to it.actualDurationMillis }
             for ((sessId, actList) in youtubeBySessionId) {
                 val rawSum = actList.sumOf { it.durationMillis }
                 val cap = sessionDurationById[sessId]
@@ -542,6 +578,18 @@ class AnalyticsRepository(
             }
             if (totalYtDuration > 0L) {
                 sourceTotals[StudyActivitySource.YOUTUBE] = Pair(totalYtDuration, youtubeActivities.size)
+            }
+        }
+
+        if (browserActivities.isNotEmpty()) {
+            var totalBrowserDuration = 0L
+            for ((sessId, actList) in browserBySessionId) {
+                val rawSum = actList.sumOf { it.durationMillis }
+                val cap = sessionDurationById[sessId]
+                totalBrowserDuration += if (cap != null) rawSum.coerceAtMost(cap) else rawSum
+            }
+            if (totalBrowserDuration > 0L) {
+                sourceTotals[StudyActivitySource.BROWSER] = Pair(totalBrowserDuration, browserActivities.size)
             }
         }
 
@@ -593,13 +641,8 @@ class AnalyticsRepository(
         }
         val topChannels = channelsMap.toList().sortedByDescending { it.second }
 
-        // Types come from the recorded event, not from the display name. The old heuristic
-        // (`appName.contains("Short")`) broke as soon as short-form blocking covered Instagram and
-        // Facebook Reels — those were labelled "Instagram Reels"/"Facebook Reels" and silently
-        // counted as unapproved YouTube content instead of Shorts.
         val ytBlocked = attempts.filter { it.packageName in YOUTUBE_PACKAGES }
         val shortsBlocked = ytBlocked.count { it.eventType == BlockedEventType.SHORTS_BLOCKED }
-        // Everything YouTube refused to play because it was not an approved study video.
         val unapprovedBlocked = ytBlocked.count {
             it.eventType == BlockedEventType.YOUTUBE_UNAPPROVED_CHANNEL ||
                 it.eventType == BlockedEventType.YOUTUBE_UNKNOWN_CONTENT ||
@@ -613,6 +656,132 @@ class AnalyticsRepository(
             topChannels = topChannels,
             blockedShortsCount = shortsBlocked.coerceAtLeast(0),
             blockedUnapprovedCount = unapprovedBlocked.coerceAtLeast(0)
+        )
+    }
+
+    private fun computeBrowserStats(
+        activities: List<StudyActivityEntity>,
+        attempts: List<BlockedAttemptEntity>
+    ): BrowserStudyStats {
+        val browserActivities = activities.filter {
+            it.source == StudyActivitySource.BROWSER || it.activityType == StudyActivityType.BROWSER_STUDY
+        }
+        val totalBrowseTime = browserActivities.sumOf { it.durationMillis }
+
+        val domainsMap = mutableMapOf<String, Long>()
+        for (act in browserActivities) {
+            val domain = act.channelName?.takeIf { it.isNotBlank() } ?: "Study Web"
+            domainsMap[domain] = domainsMap.getOrDefault(domain, 0L) + act.durationMillis
+        }
+        val topDomains = domainsMap.toList().sortedByDescending { it.second }
+
+        val blockedWebsitesCount = attempts.count { it.eventType == BlockedEventType.WEBSITE_BLOCKED }
+
+        return BrowserStudyStats(
+            studyBrowseTimeMillis = totalBrowseTime,
+            formattedBrowseTime = formatDurationToHoursMins(totalBrowseTime),
+            studyBrowseSessionsCount = browserActivities.size,
+            blockedWebsitesCount = blockedWebsitesCount,
+            topDomains = topDomains
+        )
+    }
+
+    private fun computePlannerStats(
+        dateRange: DateRange,
+        sessions: List<SessionRecordEntity>,
+        plans: List<StudyPlanEntity>,
+        schedules: List<FocusScheduleEntity>
+    ): PlannerAnalyticsStats {
+        val now = System.currentTimeMillis()
+        val enabledSchedules = schedules.filter { it.isEnabled }
+        val autoStartCount = enabledSchedules.count { it.isAutoStartSession }
+
+        val plansInPeriod = plans.filter { plan ->
+            plan.targetDate in dateRange.startMillis..dateRange.endMillis
+        }
+        val completedPlans = plansInPeriod.count { it.isCompleted || it.status == "COMPLETED" }
+        val missedPlans = plansInPeriod.count { !it.isCompleted && it.status != "COMPLETED" && it.targetDate < now }
+
+        // Also evaluate recurring & one-time focus schedules across the days in [dateRange.startMillis, min(now, dateRange.endMillis)]
+        var scheduledSlotsInPeriod = plansInPeriod.size
+        var completedSlotsInPeriod = completedPlans
+        var missedSlotsInPeriod = missedPlans
+
+        if (enabledSchedules.isNotEmpty()) {
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = dateRange.startMillis
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val effectiveEnd = minOf(now, dateRange.endMillis)
+            val dateFmt = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+            while (cal.timeInMillis <= effectiveEnd) {
+                val dayStart = cal.timeInMillis
+                val dayEnd = dayStart + 24 * 3600 * 1000L - 1L
+                val dayCode = when (cal.get(Calendar.DAY_OF_WEEK)) {
+                    Calendar.MONDAY -> "MON"
+                    Calendar.TUESDAY -> "TUE"
+                    Calendar.WEDNESDAY -> "WED"
+                    Calendar.THURSDAY -> "THU"
+                    Calendar.FRIDAY -> "FRI"
+                    Calendar.SATURDAY -> "SAT"
+                    Calendar.SUNDAY -> "SUN"
+                    else -> "MON"
+                }
+                val dayDateStr = dateFmt.format(java.util.Date(dayStart))
+
+                val matchingSchedules = enabledSchedules.filter { sched ->
+                    if (!sched.repeatEnabled && sched.scheduledDateMillis > 0L) {
+                        dateFmt.format(java.util.Date(sched.scheduledDateMillis)) == dayDateStr
+                    } else {
+                        sched.daysOfWeek.split(",").map { it.trim().uppercase() }.contains(dayCode)
+                    }
+                }
+
+                for (sched in matchingSchedules) {
+                    val startParts = sched.startTime.split(":")
+                    val sh = startParts.getOrNull(0)?.toIntOrNull() ?: 9
+                    val sm = startParts.getOrNull(1)?.toIntOrNull() ?: 0
+                    val slotStartMillis = dayStart + (sh * 60L + sm) * 60_000L
+                    if (slotStartMillis > now) continue // future slot today hasn't happened yet
+
+                    scheduledSlotsInPeriod++
+                    // Check if any session was started or active on this day within ±90 minutes of slotStartMillis or matching subject
+                    val matchedSession = sessions.any { sess ->
+                        val sameDay = sess.startTime in dayStart..dayEnd
+                        val nearSlot = kotlin.math.abs(sess.startTime - slotStartMillis) <= 90 * 60_000L
+                        val subjectMatches = sched.subjectName.isNotBlank() &&
+                            sess.subject.equals(sched.subjectName, ignoreCase = true)
+                        sameDay && (nearSlot || subjectMatches)
+                    }
+                    if (matchedSession) {
+                        completedSlotsInPeriod++
+                    } else {
+                        missedSlotsInPeriod++
+                    }
+                }
+
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        val consistencyPct = when {
+            scheduledSlotsInPeriod > 0 ->
+                ((completedSlotsInPeriod.toFloat() / scheduledSlotsInPeriod.toFloat()) * 100f).toInt().coerceIn(0, 100)
+            enabledSchedules.isNotEmpty() && sessions.isNotEmpty() -> 100
+            else -> 0
+        }
+
+        return PlannerAnalyticsStats(
+            scheduledCount = scheduledSlotsInPeriod,
+            completedCount = completedSlotsInPeriod,
+            missedCount = missedSlotsInPeriod,
+            activeSchedulesCount = enabledSchedules.size,
+            autoStartSchedulesCount = autoStartCount,
+            consistencyPercentage = consistencyPct
         )
     }
 
@@ -638,6 +807,39 @@ class AnalyticsRepository(
             channelName = channelName,
             channelId = channelId,
             videoTitle = videoTitle,
+            startedAt = startedAt,
+            endedAt = endedAt,
+            durationMillis = durationMillis,
+            createdAt = System.currentTimeMillis()
+        )
+        studyActivityDao.insertActivity(entity)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_ACTIVITIES,
+            entity.id,
+            CloudJson.studyActivityToJson(entity).toString()
+        )
+    }
+
+    suspend fun recordBrowserStudyActivity(
+        sessionId: String,
+        subject: String,
+        topic: String,
+        domain: String?,
+        durationMillis: Long,
+        startedAt: Long = System.currentTimeMillis() - durationMillis,
+        endedAt: Long = System.currentTimeMillis()
+    ) {
+        if (durationMillis <= 0) return
+        val entity = StudyActivityEntity(
+            id = UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            activityType = StudyActivityType.BROWSER_STUDY,
+            source = StudyActivitySource.BROWSER,
+            subject = subject,
+            topic = topic,
+            channelName = domain,
+            channelId = domain,
+            videoTitle = domain,
             startedAt = startedAt,
             endedAt = endedAt,
             durationMillis = durationMillis,

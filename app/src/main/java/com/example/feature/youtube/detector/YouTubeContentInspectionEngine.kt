@@ -146,6 +146,13 @@ object YouTubePlaybackSandbox {
         enteredSandboxAt = 0L
     }
 
+    fun reset() {
+        exitSandbox()
+        lastExitedVideoTitle = null
+        lastNavigationTimestamp = 0L
+        navigationCooldownUntil = 0L
+    }
+
     fun onVideoNavigationOccurred(now: Long = System.currentTimeMillis()) {
         // Record previous title before exiting passive sandbox so we don't prematurely re-latch
         // on the old video at 0ms before YouTube loads the newly clicked video's metadata.
@@ -247,11 +254,16 @@ object YouTubeContentInspectionEngine {
             )
         }
 
-        // 0. Wake up from the Safe Playback Sandbox if the user clicked another video or opened a new screen
-        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-            event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        ) {
-            YouTubePlaybackSandbox.onVideoClickedOrChanged()
+        // 0. Wake up from the Safe Playback Sandbox only if the user clicked a non-player-control element
+        // or navigated away from the watch page (never when toggling full screen or tapping player controls).
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (!com.example.feature.youtube.engine.YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event, rootNode)) {
+                YouTubePlaybackSandbox.onVideoClickedOrChanged(now)
+            }
+        } else if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (!com.example.feature.youtube.engine.YouTubeNodeExtractor.detectWatchPage(rootNode)) {
+                YouTubePlaybackSandbox.onVideoClickedOrChanged(now)
+            }
         }
 
         // 1. If currently in the Safe Playback Sandbox for an approved channel, return APPROVED immediately!

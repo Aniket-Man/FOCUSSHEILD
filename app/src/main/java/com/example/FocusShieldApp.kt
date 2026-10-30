@@ -69,7 +69,9 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
             blockedAttemptDao = database.blockedAttemptDao(),
             studyActivityDao = database.studyActivityDao(),
             preferencesRepository = preferencesRepository,
-            context = this
+            context = this,
+            studyPlanDao = database.studyPlanDao(),
+            focusScheduleDao = database.focusScheduleDao()
         )
     }
     val blockedWebsiteRepository by lazy {
@@ -343,6 +345,10 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                 val restored = com.example.feature.session.engine.FocusSessionManager.instance.restoreActiveSessionFromDisk(this@FocusShieldApp)
                 if (restored != null && (restored.isRunning || restored.isPaused)) {
                     com.example.feature.session.service.FocusSessionForegroundService.start(this@FocusShieldApp)
+                    com.example.feature.timer.FloatingTimerService.start(
+                        this@FocusShieldApp,
+                        forceShow = restored.isStrictModeEnabled
+                    )
                 }
             } catch (e: Exception) {
                 android.util.Log.e("FocusShieldApp", "Error restoring active session on startup: ${e.message}")
@@ -398,10 +404,25 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
                 com.example.feature.session.notification.StudyPlanAlarmScheduler.scheduleMidnightDailyReset(
                     this@FocusShieldApp
                 )
+                focusScheduleRepository.syncAllAlarms(this@FocusShieldApp)
                 // Pre-cache educational channel logos to internal storage disk for instant offline loading
                 ChannelLogoStorageManager.precacheAllChannels(this@FocusShieldApp, database.studyChannelDao())
             } catch (e: Exception) {
                 android.util.Log.e("FocusShieldApp", "Error during background startup initialization: ${e.message}")
+            }
+        }
+
+        // In-process schedule watchdog: checks every 15 seconds if an enabled schedule is due right now
+        applicationScope.launch {
+            while (true) {
+                try {
+                    com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(
+                        this@FocusShieldApp,
+                        this@FocusShieldApp
+                    )
+                } catch (_: Exception) {
+                }
+                kotlinx.coroutines.delay(15_000L)
             }
         }
 

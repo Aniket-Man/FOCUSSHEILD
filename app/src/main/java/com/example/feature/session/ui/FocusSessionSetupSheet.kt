@@ -333,9 +333,19 @@ fun FocusSessionSetupSheet(
                 }
 
                 SetupSubView.FOCUS_TIME -> {
+                    val currentMinutes = if (setupState.selectedMode == com.example.data.model.SessionMode.POMODORO) {
+                        setupState.pomodoroFocusMinutes
+                    } else {
+                        setupState.durationMinutes
+                    }
                     FocusTimePickerSheet(
-                        selectedMinutes = setupState.durationMinutes,
-                        onMinutesSelect = { viewModel.setDuration(it) },
+                        selectedMinutes = currentMinutes,
+                        onMinutesSelect = { mins ->
+                            if (setupState.selectedMode == com.example.data.model.SessionMode.POMODORO) {
+                                viewModel.setPomodoroFocusMinutes(mins)
+                            }
+                            viewModel.setDuration(mins)
+                        },
                         onClose = { activeSubView = SetupSubView.MAIN }
                     )
                 }

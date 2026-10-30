@@ -79,6 +79,36 @@ class AppLimitStrictModeEngine private constructor(
     }
 
     /**
+     * True when at least one enabled app limit has Strict Mode locked (`isStrictOverride == true`).
+     */
+    suspend fun hasAnyStrictLimit(): Boolean {
+        return try {
+            appLimitRepository.getActiveLimits().any { it.isStrictOverride }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * True when a Focus Session is currently running or paused with Strict Mode enabled.
+     */
+    fun isStrictFocusSessionActive(): Boolean {
+        return try {
+            val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+            active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * True when either a Strict Mode Focus Session is running OR any Strict Mode App Limit is active.
+     */
+    suspend fun isStrictProtectionLocked(): Boolean {
+        return isStrictFocusSessionActive() || hasAnyStrictLimit()
+    }
+
+    /**
      * Evaluates whether to show a pre-limit reminder notification (e.g., 1 minute remaining).
      *
      * The verdict itself lives in [AppLimitReminderPolicy]: the reminder belongs to *actual use*,

@@ -70,6 +70,31 @@ class StopwatchEngine(
         return newLap
     }
 
+    fun restore(
+        elapsedAtSaveMillis: Long,
+        savedAtTimestamp: Long,
+        wasPaused: Boolean,
+        now: Long = currentTimeProvider()
+    ) {
+        val safeElapsedAtSave = elapsedAtSaveMillis.coerceAtLeast(0L)
+        _laps.clear()
+        if (wasPaused) {
+            startTimestamp = (now - safeElapsedAtSave).coerceAtLeast(1L)
+            pauseTimestamp = now
+            accumulatedPausedMillis = 0L
+            isRunning = true
+            isPaused = true
+        } else {
+            val deltaSinceSave = if (savedAtTimestamp > 0L) (now - savedAtTimestamp).coerceAtLeast(0L) else 0L
+            val currentElapsed = (safeElapsedAtSave + deltaSinceSave).coerceAtLeast(0L)
+            startTimestamp = (now - currentElapsed).coerceAtLeast(1L)
+            pauseTimestamp = 0L
+            accumulatedPausedMillis = 0L
+            isRunning = true
+            isPaused = false
+        }
+    }
+
     fun reset() {
         startTimestamp = 0L
         pauseTimestamp = 0L

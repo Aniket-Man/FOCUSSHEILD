@@ -119,6 +119,7 @@ private fun HomeSessionSection(
                     if (session.topic.isNotBlank()) "${session.topic} • Active" else "Active Session"
                 } else null,
             isPaused = session.isPaused,
+            isStrictMode = session.isStrictModeEnabled,
             onTogglePause = { viewModel.toggleSessionPause() },
             onCardClick = {
                 if (session.isSessionActive) {
@@ -420,7 +421,14 @@ fun HomeScreen(
                 HomeSessionSection(
                     viewModel = viewModel,
                     onNavigateToActiveSession = onNavigateToActiveSession,
-                    onStartSession = { showFocusSetupSheet = true }
+                    onStartSession = {
+                        val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                        if (active != null && (active.isRunning || active.isPaused)) {
+                            onNavigateToActiveSession()
+                        } else {
+                            showFocusSetupSheet = true
+                        }
+                    }
                 )
             }
 
@@ -469,7 +477,14 @@ fun HomeScreen(
                                 com.example.data.model.QuickActionItem("1", "Start", "Focus timer", QuickActionType.START_POMODORO)
                             },
                             modifier = Modifier.weight(1f),
-                            onClick = { showFocusSetupSheet = true }
+                            onClick = {
+                                val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                                if (active != null && (active.isRunning || active.isPaused)) {
+                                    onNavigateToActiveSession()
+                                } else {
+                                    showFocusSetupSheet = true
+                                }
+                            }
                         )
                         QuickActionCard(
                             item = uiState.quickActions.getOrElse(1) {
@@ -644,7 +659,12 @@ fun HomeScreen(
                         StudyPlanRow(
                             item = planItem,
                             onStartClick = {
-                                onStartPlanSession(planItem)
+                                val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                                if (active != null && (active.isRunning || active.isPaused)) {
+                                    onNavigateToActiveSession()
+                                } else {
+                                    onStartPlanSession(planItem)
+                                }
                             },
                             onEditClick = {
                                 onNavigateToPlannerTab()

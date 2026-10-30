@@ -87,6 +87,11 @@ class FocusScheduleReceiver : BroadcastReceiver() {
             return
         }
 
+        if (!markSlotFiredIfNotAlready(context, schedule.id, schedule.startTime)) {
+            Log.d(TAG, "Schedule '${schedule.title}' (${schedule.id}) already fired for today's ${schedule.startTime} slot; skipping duplicate trigger")
+            return
+        }
+
         // Re-arming is done in a `finally` around everything that can throw below. Previously the
         // re-arm was the last statement on the success path, so a notification that could not be
         // posted or a ForegroundServiceStartNotAllowedException left the schedule with no next
@@ -156,21 +161,39 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                     }
 
                     is ScheduledSessionFactory.Result.Ready -> {
+                        val prefs = app.preferencesRepository.snapshot()
+                        val effectiveBlockedPackages = draft.draft.blockedAppPackages.ifEmpty {
+                            setOf(
+                                "com.google.android.youtube",
+                                "com.android.chrome",
+                                "com.opera.browser",
+                                "com.brave.browser",
+                                "com.instagram.android"
+                            )
+                        }
+                        val isStrict = prefs.isStrictModeDefault &&
+                            draft.draft.mode != com.example.data.model.SessionMode.STOPWATCH
                         val started = sessionManager.startSession(
                             mode = draft.draft.mode,
                             subject = draft.draft.subject,
                             topic = draft.draft.topic,
                             goal = draft.draft.goal,
                             plannedDurationMillis = draft.draft.plannedDurationMillis,
-                            isAppBlocking = true,
-                            isStrictMode = false,
-                            isStudyChannels = true,
-                            blockedAppPackages = draft.draft.blockedAppPackages,
-                            blockNotifications = draft.draft.blockNotifications,
+                            isAppBlocking = prefs.isAppBlockingDefault,
+                            isStrictMode = isStrict,
+                            isStudyChannels = prefs.isStudyChannelsDefault,
+                            blockedAppPackages = effectiveBlockedPackages,
+                            blockNotifications = draft.draft.blockNotifications || prefs.isBlockNotificationsEnabled,
                             defaultBreakMinutes = draft.draft.breakMinutes
                         )
                         if (started.isSuccess) {
                             FocusSessionForegroundService.start(context)
+                            if (prefs.isFloatingTimerOverlayEnabled || isStrict) {
+                                com.example.feature.timer.FloatingTimerService.start(
+                                    context,
+                                    forceShow = isStrict
+                                )
+                            }
                             Log.d(
                                 TAG,
                                 "Auto-started ${draft.draft.mode} session for schedule " +
@@ -186,12 +209,6 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                     }
                 }
             } else {
-                // Overlapping windows are now rejected when a schedule is saved
-                // (ScheduleValidation.findOverlap), so reaching this branch means a *manually*
-                // started session is running over a scheduled one. That is a real protection gap
-                // for the scheduled window, so it is reported at warning level rather than as a
-                // debug line nobody sees. The "session starting" notification above has already
-                // told the user their scheduled window is due.
                 Log.w(
                     TAG,
                     "A ${active.state} session is already active; scheduled window " +
@@ -211,5 +228,75 @@ class FocusScheduleReceiver : BroadcastReceiver() {
         const val EXTRA_SCHEDULE_ID = "extra_focus_schedule_id"
 
         private const val TAG = "FocusScheduleReceiver"
+        private const val DEDUP_PREFS = "focus_schedule_autostart_dedup"
+
+        @Synchronized
+        private fun markSlotFiredIfNotAlready(
+            context: Context,
+            scheduleId: String,
+            startTime: String
+        ): Boolean {
+            val todayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(java.util.Date())
+            val slotValue = "${todayKey}_${startTime.trim()}"
+            val prefs = context.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
+            val key = "last_fired_$scheduleId"
+            if (prefs.getString(key, null) == slotValue) {
+                return false
+            }
+            prefs.edit().putString(key, slotValue).apply()
+            return true
+        }
+
+        /**
+         * In-process schedule watchdog invoked periodically while the app process is alive.
+         * Ensures that even if Android's AlarmManager batches or delays a broadcast on devices
+         * without exact alarm permission, any enabled schedule due at the current minute starts
+         * promptly and idempotently.
+         */
+        suspend fun evaluateDueSchedulesInProcess(app: FocusShieldApp, context: Context) {
+            try {
+                val enabledSchedules = app.database.focusScheduleDao().getEnabledSchedules()
+                if (enabledSchedules.isEmpty()) return
+
+                val nowCal = java.util.Calendar.getInstance()
+                val nowMinutes = nowCal.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+                    nowCal.get(java.util.Calendar.MINUTE)
+                val todayAbbr = java.text.SimpleDateFormat("EEE", java.util.Locale.ENGLISH)
+                    .format(nowCal.time)
+                    .uppercase(java.util.Locale.ENGLISH)
+                val dateFmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val todayDateStr = dateFmt.format(nowCal.time)
+
+                val receiver = FocusScheduleReceiver()
+                for (schedule in enabledSchedules) {
+                    val startMins = ScheduleTime.parseToMinutesOrNull(schedule.startTime) ?: continue
+                    // Match if current minute is at startTime (or 1 minute after if tick crossed boundary)
+                    val minuteDelta = nowMinutes - startMins
+                    if (minuteDelta !in 0..1) continue
+
+                    val isDueToday = if (schedule.repeatEnabled) {
+                        val daysUpper = schedule.daysOfWeek.uppercase(java.util.Locale.ENGLISH)
+                        daysUpper.isBlank() ||
+                            daysUpper.contains("DAILY") ||
+                            daysUpper.contains(todayAbbr) ||
+                            (daysUpper.contains("MON - FRI") && todayAbbr in listOf("MON", "TUE", "WED", "THU", "FRI")) ||
+                            (daysUpper.contains("WEEKENDS") && todayAbbr in listOf("SAT", "SUN"))
+                    } else {
+                        if (schedule.scheduledDateMillis > 0L) {
+                            dateFmt.format(java.util.Date(schedule.scheduledDateMillis)) == todayDateStr
+                        } else {
+                            schedule.daysOfWeek.uppercase(java.util.Locale.ENGLISH).contains(todayAbbr)
+                        }
+                    }
+
+                    if (isDueToday) {
+                        receiver.handle(app, context.applicationContext, schedule.id)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error in evaluateDueSchedulesInProcess: ${e.message}")
+            }
+        }
     }
 }

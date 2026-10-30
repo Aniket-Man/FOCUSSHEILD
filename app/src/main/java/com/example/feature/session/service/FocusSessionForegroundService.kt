@@ -204,17 +204,41 @@ class FocusSessionForegroundService : Service() {
                     return START_NOT_STICKY
                 }
                 startForegroundWithProperType(buildForegroundNotification(current))
+                try {
+                    com.example.feature.timer.FloatingTimerService.start(this)
+                } catch (e: Exception) {
+                    Log.d(tag, "Could not start floating timer service on ACTION_START: ${e.message}")
+                }
             }
             ACTION_PAUSE -> {
-                sessionManager.pauseSession()
+                val current = sessionManager.activeSession.value
+                if (current != null && (!current.isStrictModeEnabled || current.mode == SessionMode.STOPWATCH)) {
+                    sessionManager.pauseSession()
+                    sessionManager.saveActiveSessionToDisk(this)
+                }
                 updateNotification(sessionManager.activeSession.value)
             }
             ACTION_RESUME -> {
                 sessionManager.resumeSession()
+                sessionManager.saveActiveSessionToDisk(this)
                 updateNotification(sessionManager.activeSession.value)
+                try {
+                    com.example.feature.timer.FloatingTimerService.start(this)
+                } catch (_: Exception) {}
             }
             ACTION_END -> {
+                val current = sessionManager.activeSession.value
+                if (current != null && current.isStrictModeEnabled && current.mode != SessionMode.STOPWATCH &&
+                    !com.example.feature.session.engine.StrictModeEngine.instance.canEndSession()
+                ) {
+                    updateNotification(current)
+                    return START_STICKY
+                }
                 sessionManager.endSession()
+                sessionManager.clearActiveSessionFromDisk(this)
+                try {
+                    com.example.feature.timer.FloatingTimerService.stop(this)
+                } catch (_: Exception) {}
                 stopForegroundGracefully()
                 return START_NOT_STICKY
             }
@@ -496,8 +520,8 @@ class FocusSessionForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
-        // Action: Pause / Resume
-        if (session.isRunning) {
+        // Action: Pause / Resume (Pause hidden in Strict Mode for Timer/Pomodoro)
+        if (session.isRunning && (!session.isStrictModeEnabled || session.mode == SessionMode.STOPWATCH)) {
             val pauseIntent = PendingIntent.getService(
                 this,
                 1,

@@ -123,11 +123,14 @@ class FocusAccessibilityService : AccessibilityService() {
         // the service is torn down first.
         mainThreadHandler.postDelayed({ evaluateGateFromCurrentWindow() }, 1000L)
 
-        // Observe user preferences for shorts/reels blocking
+        // Observe user preferences for shorts/reels blocking and restore any active session
         serviceScope.launch {
             try {
-                if (com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value == null) {
-                    com.example.feature.session.engine.FocusSessionManager.instance.restoreActiveSessionFromDisk(this@FocusAccessibilityService)
+                val existing = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    ?: com.example.feature.session.engine.FocusSessionManager.instance.restoreActiveSessionFromDisk(this@FocusAccessibilityService)
+                if (existing != null && (existing.isRunning || existing.isPaused)) {
+                    com.example.feature.session.service.FocusSessionForegroundService.start(this@FocusAccessibilityService)
+                    com.example.feature.timer.FloatingTimerService.start(this@FocusAccessibilityService)
                 }
                 (application as? FocusShieldApp)?.preferencesRepository?.preferencesFlow?.collectLatest { prefs ->
                     currentPreferences = prefs
@@ -164,6 +167,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private var lastTamperCheckTimestamp: Long = 0L
     private var lastSplitScreenCheckTimestamp: Long = 0L
     private var lastFloatingWindowCheckTimestamp: Long = 0L
+    private var lastTimerKeepAliveCheckTimestamp: Long = 0L
     private var homeFeedPopupDismissed = false
     private var youtubeBackNavigationPending = false
     private var lastBlockedYouTubeVideoKey: String? = null
@@ -189,6 +193,28 @@ class FocusAccessibilityService : AccessibilityService() {
         val rawPackageName = event.packageName?.toString() ?: return
         if (rawPackageName.isBlank()) return
 
+        val now = System.currentTimeMillis()
+        if (now - lastTimerKeepAliveCheckTimestamp >= 4_000L) {
+            lastTimerKeepAliveCheckTimestamp = now
+            try {
+                val sessionMgr = com.example.feature.session.engine.FocusSessionManager.instance
+                val activeSession = sessionMgr.activeSession.value
+                    ?: sessionMgr.restoreActiveSessionFromDisk(this)
+                if (activeSession != null && (activeSession.isRunning || activeSession.isPaused)) {
+                    if (!com.example.feature.timer.FloatingTimerService.isOverlayShowing.value &&
+                        (currentPreferences.isFloatingTimerOverlayEnabled || activeSession.isStrictModeEnabled)
+                    ) {
+                        com.example.feature.timer.FloatingTimerService.start(
+                            this,
+                            forceShow = activeSession.isStrictModeEnabled
+                        )
+                    }
+                    com.example.feature.session.service.FocusSessionForegroundService.start(this)
+                }
+            } catch (_: Exception) {
+            }
+        }
+
         val isOwnApp = com.example.feature.applimits.engine.AppLimitPackageFilter
             .isOwnApp(rawPackageName)
 
@@ -198,6 +224,11 @@ class FocusAccessibilityService : AccessibilityService() {
             ) {
                 YouTubeContentBlockEngine.reset()
                 dwellTracker()?.flush("left YouTube")
+            }
+            if (lastForegroundPackage != null &&
+                com.example.core.detector.BrowserUrlDetector.isBrowserPackage(lastForegroundPackage!!)
+            ) {
+                dwellTracker()?.flushBrowser("left Browser")
             }
             lastForegroundPackage = rawPackageName
             com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
@@ -227,7 +258,6 @@ class FocusAccessibilityService : AccessibilityService() {
         try {
             val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
             val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
-            val now = System.currentTimeMillis()
 
             // Update foreground tracking on window state changes — and, until something has been
             // tracked at all, on whatever the first event is (issue #49, W2). After a service
@@ -281,6 +311,12 @@ class FocusAccessibilityService : AccessibilityService() {
                 ) {
                     YouTubeContentBlockEngine.reset()
                     dwellTracker()?.flush("left YouTube")
+                }
+                if (lastForegroundPackage != null &&
+                    com.example.core.detector.BrowserUrlDetector.isBrowserPackage(lastForegroundPackage!!) &&
+                    !com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
+                ) {
+                    dwellTracker()?.flushBrowser("left Browser")
                 }
                 if (com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName) ||
                     isWindowStateChange
@@ -454,6 +490,7 @@ class FocusAccessibilityService : AccessibilityService() {
                         val siteDecision = siteEngine?.evaluateDomain(urlInfo.rawUrl, urlInfo.domain)
                         if (siteDecision is com.example.feature.websiteblocker.engine.WebsiteBlockDecision.Blocked) {
                             lastBrowserBlockTimestamp = now
+                            dwellTracker()?.flushBrowser("website blocked")
                             Log.w(tag, "[$rawPackageName] Browser site blocked: ${siteDecision.domain} (${siteDecision.reason})")
 
                             // 1. Perform safe step-down inside the browser
@@ -493,6 +530,11 @@ class FocusAccessibilityService : AccessibilityService() {
                             }
                             evaluateAppLimitGate(rawPackageName, eventType, now)
                             return
+                        } else if (isSessionActive && isBrowserStudyMode) {
+                            dwellTracker()?.onAllowedBrowserContent(
+                                domain = urlInfo.domain,
+                                timestamp = now
+                            )
                         }
                     }
                 }
@@ -540,13 +582,24 @@ class FocusAccessibilityService : AccessibilityService() {
                     val isYouTubeWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                             eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                     val isClickEvent = eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
+                    val isPlayerControlClick = isClickEvent &&
+                            YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event)
 
-                    if (isClickEvent || isYouTubeWindowChange) {
+                    if (isClickEvent && !isPlayerControlClick) {
                         com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(now)
                         YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)
-                        if (isClickEvent) {
-                            scheduleYouTubePostClickVerifications(rawPackageName)
+                        scheduleYouTubePostClickVerifications(rawPackageName)
+                    } else if (isYouTubeWindowChange) {
+                        // Do not blindly clear approved state on window changes (such as rotating to
+                        // landscape full-screen or opening the player quality sheet). If not currently
+                        // latched on an approved watch page, notify navigation normally; otherwise let
+                        // checkSandboxStillValid / evaluate inspect the window below.
+                        if (!com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive &&
+                            !YouTubeContentBlockEngine.isCurrentlyOnApprovedWatchPage
+                        ) {
+                            com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(now)
                         }
+                        YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)
                     }
 
                     // --- SAFE CORNER SANDBOX (PASSIVE MONITORING STATE) ---
@@ -555,10 +608,12 @@ class FocusAccessibilityService : AccessibilityService() {
                     // video navigation or window transition occurs, preventing UI lag and continuous redundant scans.
                     if (com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive) {
                         // Even if YouTube's Litho feed consumes a tap without emitting TYPE_VIEW_CLICKED or
-                        // autoplays into a new video, run a lightweight watch-header title/channel check every 500ms.
+                        // autoplays into a new video, run a lightweight watch-header title/channel check every 500ms
+                        // (and immediately on window changes).
                         var sandboxStillValid = true
-                        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
-                            (now - lastYouTubeSandboxCheckTimestamp) >= 500L
+                        if (isYouTubeWindowChange ||
+                            (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                                    (now - lastYouTubeSandboxCheckTimestamp) >= 500L)
                         ) {
                             lastYouTubeSandboxCheckTimestamp = now
                             val checkRoot = try { rootInActiveWindow } catch (_: Exception) { null }
@@ -605,6 +660,12 @@ class FocusAccessibilityService : AccessibilityService() {
                             blockUnknownContent = protectionState.blockUnknownContent,
                             currentTime = now
                         )
+
+                        if (decision.needsExitFullScreenForVerification) {
+                            exitYouTubeFullScreenForVerification(rootNode, rawPackageName)
+                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
+                            return
+                        }
 
                         if (decision.verdict == YouTubeBlockVerdict.HOME_FEED) {
                             // Home feed detected during an active session with Study Mode ON:
@@ -1050,6 +1111,11 @@ class FocusAccessibilityService : AccessibilityService() {
                             currentTime = sweepNow
                         )
 
+                        if (decision.needsExitFullScreenForVerification) {
+                            exitYouTubeFullScreenForVerification(rootNode, fgPkg)
+                            return@postDelayed
+                        }
+
                         if (decision.verdict == YouTubeBlockVerdict.ALLOW && !decision.isAdPlaying) {
                             lastBlockedYouTubeVideoKey = null
                             dwellTracker()?.onAllowedContent(
@@ -1118,6 +1184,27 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Exits YouTube full-screen mode once (returning to the portrait watch screen without closing the video)
+     * so FocusShield can read the portrait channel header (@handle / Subscribe button) and verify a newly
+     * started video whose metadata was hidden by full-screen mode.
+     */
+    private fun exitYouTubeFullScreenForVerification(
+        rootNode: android.view.accessibility.AccessibilityNodeInfo?,
+        rawPackageName: String
+    ) {
+        val now = System.currentTimeMillis()
+        Log.i(tag, "Auto-exiting YouTube full screen once to read portrait channel header for verification.")
+        YouTubeContentBlockEngine.onExitedFullScreenForVerification(now)
+        val clickedExitButton = YouTubeNodeExtractor.clickExitFullScreenButton(rootNode)
+        if (!clickedExitButton) {
+            try {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            } catch (_: Exception) {}
+        }
+        scheduleYouTubePostClickVerifications(rawPackageName)
+    }
+
+    /**
      * Handles YouTube Shorts blocking: every Short is blocked instantly with NO pause —
      * a single immediate step back returns the user to the previous feed.
      */
@@ -1139,7 +1226,8 @@ class FocusAccessibilityService : AccessibilityService() {
     /**
      * Handles YouTube Unapproved Channel (and unapproved channel ad) blocking:
      * 1. Stops playback ONCE (media pause key + explicit pause control click).
-     * 2. Steps back ONCE from the watch/continue screen to the previous list/search/home screen.
+     * 2. Steps back from the watch/continue screen to the previous list/search/home screen
+     *    (stepping out of full screen first if the unapproved video was opened in full screen).
      */
     private fun handleYouTubeUnapprovedChannelBlocked(
         rootNode: android.view.accessibility.AccessibilityNodeInfo?,
@@ -1156,6 +1244,7 @@ class FocusAccessibilityService : AccessibilityService() {
         ) {
             return false
         }
+        val wasInFullScreen = YouTubeNodeExtractor.isFullScreenVideoPlayback(rootNode)
         lastYouTubeBlockTimestamp = now
         lastBlockedYouTubeVideoKey = videoKey
         youtubeBackNavigationPending = true
@@ -1166,18 +1255,37 @@ class FocusAccessibilityService : AccessibilityService() {
         silenceAndPausePlayback()
         clickPauseButtonInNodeTree(rootNode)
 
-        // Step 2 (One time): Step back once from the watch/continue screen
+        // Step 2: Step back from the watch screen (if in full screen, first BACK exits full screen,
+        // and a follow-up BACK exits the portrait watch page)
         mainThreadHandler.postDelayed({
             try {
                 performGlobalAction(GLOBAL_ACTION_BACK)
             } catch (_: Exception) {}
-            mainThreadHandler.postDelayed({
-                youtubeBackNavigationPending = false
-                try {
-                    val afterBackRoot = try { rootInActiveWindow } catch (_: Exception) { null }
-                    YouTubeNodeExtractor.dismissMiniplayerIfPresent(afterBackRoot)
-                } catch (_: Exception) {}
-            }, 350L)
+            if (wasInFullScreen) {
+                mainThreadHandler.postDelayed({
+                    try {
+                        val midRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                        if (YouTubeNodeExtractor.detectWatchPage(midRoot)) {
+                            performGlobalAction(GLOBAL_ACTION_BACK)
+                        }
+                    } catch (_: Exception) {}
+                    mainThreadHandler.postDelayed({
+                        youtubeBackNavigationPending = false
+                        try {
+                            val afterBackRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                            YouTubeNodeExtractor.dismissMiniplayerIfPresent(afterBackRoot)
+                        } catch (_: Exception) {}
+                    }, 350L)
+                }, 280L)
+            } else {
+                mainThreadHandler.postDelayed({
+                    youtubeBackNavigationPending = false
+                    try {
+                        val afterBackRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                        YouTubeNodeExtractor.dismissMiniplayerIfPresent(afterBackRoot)
+                    } catch (_: Exception) {}
+                }, 350L)
+            }
         }, 160L)
         return true
     }

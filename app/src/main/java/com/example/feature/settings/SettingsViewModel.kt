@@ -203,6 +203,10 @@ class SettingsViewModel(
 
     fun updateFloatingTimerOverlay(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Floating timer cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateFloatingTimerOverlayEnabled(enabled)
             val context = getApplication<Application>()
             if (!enabled) {
@@ -240,32 +244,68 @@ class SettingsViewModel(
         }
     }
 
+    private val _strictLockMessage = MutableStateFlow<String?>(null)
+    val strictLockMessage: StateFlow<String?> = _strictLockMessage.asStateFlow()
+
+    fun clearStrictLockMessage() {
+        _strictLockMessage.value = null
+    }
+
+    private suspend fun isStrictProtectionLocked(): Boolean {
+        return try {
+            com.example.feature.applimits.engine.AppLimitStrictModeEngine.instance.isStrictProtectionLocked()
+        } catch (_: Exception) {
+            val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+            active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
+        }
+    }
+
     fun updateYouTubeShortsBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: YouTube Shorts blocker cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateYouTubeShortsBlocking(enabled)
         }
     }
 
     fun updateInstagramReelsBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Instagram Reels blocker cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateInstagramReelsBlocking(enabled)
         }
     }
 
     fun updateFacebookReelsBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Facebook Reels blocker cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateFacebookReelsBlocking(enabled)
         }
     }
 
     fun updateShortsReelsAlwaysBlocked(alwaysBlocked: Boolean) {
         viewModelScope.launch {
+            if (!alwaysBlocked && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Shorts & Reels blocking cannot be weakened while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateShortsReelsAlwaysBlocked(alwaysBlocked)
         }
     }
 
     fun updateAutoAdultWebsiteBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: 18+ Adult Website Shield cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateAutoAdultWebsiteBlocking(enabled)
         }
     }
@@ -277,6 +317,10 @@ class SettingsViewModel(
 
     fun updateBlockUninstall(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Uninstall protection cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateBlockUninstall(enabled)
             if (enabled) {
                 val engine = com.example.core.engine.AntiUninstallEngine.getInstance(getApplication())
@@ -324,18 +368,30 @@ class SettingsViewModel(
 
     fun updateBlockSplitScreen(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Split screen blocking cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateBlockSplitScreen(enabled)
         }
     }
 
     fun updateBlockFloatingWindow(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Floating window blocking cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateBlockFloatingWindow(enabled)
         }
     }
 
     fun updateBlockNotifications(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Notification blocker cannot be disabled while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.updateBlockNotifications(enabled)
         }
     }
@@ -348,6 +404,10 @@ class SettingsViewModel(
 
     fun toggleBlockedNotificationPackage(packageName: String, blocked: Boolean) {
         viewModelScope.launch {
+            if (!blocked && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Cannot unblock app notifications while Strict Mode is active."
+                return@launch
+            }
             preferencesRepository.toggleBlockedNotificationPackage(packageName, blocked)
         }
     }

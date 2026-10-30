@@ -102,6 +102,23 @@ data class YouTubeStudyStats(
     val blockedUnapprovedCount: Int = 0
 )
 
+data class BrowserStudyStats(
+    val studyBrowseTimeMillis: Long = 0L,
+    val formattedBrowseTime: String = "0m",
+    val studyBrowseSessionsCount: Int = 0,
+    val blockedWebsitesCount: Int = 0,
+    val topDomains: List<Pair<String, Long>> = emptyList()
+)
+
+data class PlannerAnalyticsStats(
+    val scheduledCount: Int = 0,
+    val completedCount: Int = 0,
+    val missedCount: Int = 0,
+    val activeSchedulesCount: Int = 0,
+    val autoStartSchedulesCount: Int = 0,
+    val consistencyPercentage: Int = 0
+)
+
 data class PeriodAnalyticsSummary(
     val period: AnalyticsPeriod = AnalyticsPeriod.LAST_7_DAYS,
     val dateRangeLabel: String = "",
@@ -128,5 +145,8 @@ data class PeriodAnalyticsSummary(
     val sourceBreakdowns: List<SourceBreakdown> = emptyList(),
     val blockedAppStats: List<BlockedAppStat> = emptyList(),
     val youTubeStats: YouTubeStudyStats = YouTubeStudyStats(),
+    val browserStats: BrowserStudyStats = BrowserStudyStats(),
+    val plannerStats: PlannerAnalyticsStats = PlannerAnalyticsStats(),
     val streakInfo: StreakResult = StreakResult(0, 0, 0, false, 20)
 )
+

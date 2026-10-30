@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 enum class StudyActivityType {
     FOCUS_SESSION,
     YOUTUBE_STUDY,
+    BROWSER_STUDY,
     MANUAL_STUDY,
     POMODORO_FOCUS
 }
@@ -16,6 +17,7 @@ enum class StudyActivitySource(val label: String) {
     STOPWATCH("Stopwatch"),
     POMODORO("Pomodoro Focus"),
     YOUTUBE("YouTube Study"),
+    BROWSER("Study Browser"),
     MANUAL("Manual Log")
 }
 

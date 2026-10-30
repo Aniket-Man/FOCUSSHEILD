@@ -145,6 +145,7 @@ fun BlocksScreen(
     val overlayLaunchWarning by appLimitsViewModel.overlayLaunchWarning.collectAsStateWithLifecycle()
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val strictLockMessage by appLimitsViewModel.strictLockMessage.collectAsStateWithLifecycle()
+    val settingsStrictLockMessage by settingsViewModel.strictLockMessage.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -166,6 +167,13 @@ fun BlocksScreen(
         strictLockMessage?.let { msg ->
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
             appLimitsViewModel.clearStrictLockMessage()
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(settingsStrictLockMessage) {
+        settingsStrictLockMessage?.let { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            settingsViewModel.clearStrictLockMessage()
         }
     }
 
@@ -786,6 +794,16 @@ fun BlocksScreen(
                 installedApps = installedApps,
                 onClose = { showAppSelectionSheet = false },
                 onSelectApp = { app ->
+                    val existingStrict = app.isStrictLocked ||
+                        limitsState.items.any { it.packageName == app.packageName && it.isStrictOverride }
+                    if (existingStrict) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Strict Mode Active: ${app.appName} limit is locked and cannot be edited or deleted.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        return@SelectAppBottomSheetContent
+                    }
                     selectedAppForConfig = app
                     openedFromAppSelection = true
                     showAppSelectionSheet = false
@@ -1107,27 +1125,46 @@ private fun SelectAppBottomSheetContent(
                                     )
                                 )
                                 Text(
-                                    text = if (app.isAlreadyLimited) "Daily limit active" else "Installed application",
+                                    text = when {
+                                        app.isStrictLocked -> "Strict Mode limit locked"
+                                        app.isAlreadyLimited -> "Daily limit active"
+                                        else -> "Installed application"
+                                    },
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = if (app.isAlreadyLimited) FocusColors.EmeraldSuccess else FocusColors.TextSecondary,
+                                        color = when {
+                                            app.isStrictLocked -> FocusColors.BlockedRed
+                                            app.isAlreadyLimited -> FocusColors.EmeraldSuccess
+                                            else -> FocusColors.TextSecondary
+                                        },
                                         fontSize = 12.sp
                                     )
                                 )
                             }
 
-                            // + Add Button
+                            // + Add / Edit / Strict Locked Button
                             Surface(
                                 shape = FocusShapes.pill,
-                                color = if (app.isAlreadyLimited) FocusColors.PrimaryContainer else FocusColors.SurfaceVariant,
-                                border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
+                                color = when {
+                                    app.isStrictLocked -> FocusColors.BlockedRed.copy(alpha = 0.14f)
+                                    app.isAlreadyLimited -> FocusColors.PrimaryContainer
+                                    else -> FocusColors.SurfaceVariant
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (app.isStrictLocked) FocusColors.BlockedRed.copy(alpha = 0.35f) else FocusColors.CardBorderSubtle
+                                ),
                                 modifier = Modifier
                                     .clickable { onSelectApp(app) }
                                     .testTag("btn_add_${app.appName.lowercase().replace(" ", "_")}")
                             ) {
                                 Text(
-                                    text = if (app.isAlreadyLimited) "Edit" else "+ Add",
+                                    text = when {
+                                        app.isStrictLocked -> "🔒 Locked"
+                                        app.isAlreadyLimited -> "Edit"
+                                        else -> "+ Add"
+                                    },
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = FocusColors.TextPrimary,
+                                        color = if (app.isStrictLocked) FocusColors.BlockedRed else FocusColors.TextPrimary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp
                                     ),
@@ -1760,16 +1797,30 @@ private fun AppLimitCard(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Delete,
-                    contentDescription = "Delete limit",
-                    tint = FocusColors.TextMuted,
-                    modifier = Modifier.size(18.dp)
-                )
+            if (item.isStrictOverride) {
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Security,
+                        contentDescription = "Strict Mode Locked",
+                        tint = FocusColors.BlockedRed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Delete limit",
+                        tint = FocusColors.TextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

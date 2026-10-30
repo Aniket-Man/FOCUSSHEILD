@@ -345,6 +345,20 @@ fun ActiveSessionScreen(
         }
     }
 
+    val handleSafeNavigateBack: () -> Unit = {
+        if (uiState.isSessionCompleted) {
+            viewModel.resetToIdle(force = true)
+        } else if (uiState.isSessionRunning || uiState.isSessionPaused || uiState.isBreakActive) {
+            com.example.feature.session.engine.FocusSessionManager.instance.saveActiveSessionToDisk(context)
+            com.example.feature.session.service.FocusSessionForegroundService.start(context)
+        }
+        onNavigateBack()
+    }
+
+    androidx.activity.compose.BackHandler(enabled = true) {
+        handleSafeNavigateBack()
+    }
+
     Scaffold(
         topBar = {
             Row(
@@ -356,12 +370,7 @@ fun ActiveSessionScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 IconButton(
-                    onClick = {
-                        if (uiState.isSessionCompleted || (!uiState.isSessionRunning && !uiState.isBreakActive)) {
-                            viewModel.resetToIdle()
-                        }
-                        onNavigateBack()
-                    },
+                    onClick = handleSafeNavigateBack,
                     modifier = Modifier.testTag("back_button")
                 ) {
                     Icon(
@@ -426,7 +435,11 @@ fun ActiveSessionScreen(
                             if (!FocusPermissionManager.isOverlayPermissionGranted(context)) {
                                 showFloatingOverlayPermissionDialog = true
                             } else if (isFloatingOverlayShowing) {
-                                com.example.feature.timer.FloatingTimerService.stop(context)
+                                if (uiState.isStrictModeEnabled && uiState.mode != SessionMode.STOPWATCH) {
+                                    showStrictLockDialog = true
+                                } else {
+                                    com.example.feature.timer.FloatingTimerService.stop(context)
+                                }
                             } else {
                                 com.example.feature.timer.FloatingTimerService.start(context, forceShow = true)
                             }
@@ -485,7 +498,13 @@ fun ActiveSessionScreen(
                     BreakActiveView(
                         uiState = uiState,
                         onEndBreakEarly = { viewModel.endBreakEarly() },
-                        onEndSession = { showEndSessionDialog = true },
+                        onEndSession = {
+                            if (uiState.isStrictModeEnabled && uiState.mode != SessionMode.STOPWATCH) {
+                                showStrictLockDialog = true
+                            } else {
+                                showEndSessionDialog = true
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
@@ -1355,25 +1374,58 @@ private fun BreakActiveView(
                 }
             }
 
-            OutlinedButton(
-                onClick = onEndSession,
-                shape = FocusShapes.large,
-                border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.5f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = FocusColors.CoralWarning
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("end_session_from_break_button")
-            ) {
-                Text(
-                    text = "End Session",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp
+            if (uiState.isStrictModeEnabled && uiState.mode != SessionMode.STOPWATCH) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(FocusShapes.large)
+                        .background(Color(0xFF231618))
+                        .border(1.dp, FocusColors.CoralWarning.copy(alpha = 0.4f), FocusShapes.large)
+                        .clickable { onEndSession() }
+                        .padding(vertical = 14.dp, horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = null,
+                            tint = FocusColors.CoralWarning,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Strict Mode Locked • Cannot End Early",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = FocusColors.CoralWarning,
+                                fontSize = 14.sp
+                            )
+                        )
+                    }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onEndSession,
+                    shape = FocusShapes.large,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = FocusColors.CoralWarning
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("end_session_from_break_button")
+                ) {
+                    Text(
+                        text = "End Session",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
+                        )
                     )
-                )
+                }
             }
         }
     }

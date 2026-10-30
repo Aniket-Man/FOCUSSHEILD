@@ -344,34 +344,58 @@ object AppLimitFloatingOverlayManager {
             )
         }
 
-        val turnOffPill = turnOffPill(context) {
-            showTurnOffConfirmation(
-                context = context,
-                packageName = packageName,
-                appName = appName,
-                streakDays = streakDays,
-                contentWrapper = contentWrapper,
-                onCancel = {
-                    // Rebuild the original content
-                    contentWrapper.removeAllViews()
-                    buildMainOverlayContent(
+        var currentIsStrict = isStrict
+        val topRightContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        fun rebuildTopRightAction() {
+            topRightContainer.removeAllViews()
+            val actionView = if (currentIsStrict) {
+                strictLockedBadge(context, appName)
+            } else {
+                turnOffPill(context) {
+                    onTurnOffClicked(
                         context = context,
                         packageName = packageName,
                         appName = appName,
-                        mode = mode,
-                        usedMinutes = usedMinutes,
-                        remainingDailyMinutes = remainingDailyMinutes,
-                        dailyLimitMinutes = dailyLimitMinutes,
-                        emergencyUsesCount = emergencyUsesCount,
-                        emergencyUsesAllowed = emergencyUsesAllowed,
-                        isStrict = isStrict,
                         streakDays = streakDays,
-                        contentWrapper = contentWrapper
+                        isStrict = currentIsStrict,
+                        contentWrapper = contentWrapper,
+                        onCancel = {
+                            contentWrapper.removeAllViews()
+                            buildMainOverlayContent(
+                                context = context,
+                                packageName = packageName,
+                                appName = appName,
+                                mode = mode,
+                                usedMinutes = usedMinutes,
+                                remainingDailyMinutes = remainingDailyMinutes,
+                                dailyLimitMinutes = dailyLimitMinutes,
+                                emergencyUsesCount = emergencyUsesCount,
+                                emergencyUsesAllowed = emergencyUsesAllowed,
+                                isStrict = currentIsStrict,
+                                streakDays = streakDays,
+                                contentWrapper = contentWrapper,
+                                onStrictEnabled = {
+                                    currentIsStrict = true
+                                    rebuildTopRightAction()
+                                }
+                            )
+                        }
                     )
                 }
-            )
+            }
+            topRightContainer.addView(actionView)
         }
-        topRow.addView(turnOffPill)
+
+        rebuildTopRightAction()
+        topRow.addView(topRightContainer)
         sheet.addView(topRow)
 
         buildMainOverlayContent(
@@ -384,9 +408,13 @@ object AppLimitFloatingOverlayManager {
             dailyLimitMinutes = dailyLimitMinutes,
             emergencyUsesCount = emergencyUsesCount,
             emergencyUsesAllowed = emergencyUsesAllowed,
-            isStrict = isStrict,
+            isStrict = currentIsStrict,
             streakDays = streakDays,
-            contentWrapper = contentWrapper
+            contentWrapper = contentWrapper,
+            onStrictEnabled = {
+                currentIsStrict = true
+                rebuildTopRightAction()
+            }
         )
         sheet.addView(contentWrapper)
 
@@ -407,7 +435,8 @@ object AppLimitFloatingOverlayManager {
         emergencyUsesAllowed: Int,
         isStrict: Boolean,
         streakDays: Int,
-        contentWrapper: LinearLayout
+        contentWrapper: LinearLayout,
+        onStrictEnabled: () -> Unit = {}
     ) {
         val density = context.resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
@@ -415,7 +444,53 @@ object AppLimitFloatingOverlayManager {
 
         // --- Strict-mode upsell banner (only when strict mode is off for this app) ---
         if (!isStrict) {
-            contentWrapper.addView(strictModeBanner(context))
+            contentWrapper.addView(
+                strictModeBanner(context) {
+                    showEnableStrictModeConfirmation(
+                        context = context,
+                        packageName = packageName,
+                        appName = appName,
+                        contentWrapper = contentWrapper,
+                        onConfirmed = {
+                            onStrictEnabled()
+                            contentWrapper.removeAllViews()
+                            buildMainOverlayContent(
+                                context = context,
+                                packageName = packageName,
+                                appName = appName,
+                                mode = mode,
+                                usedMinutes = usedMinutes,
+                                remainingDailyMinutes = remainingDailyMinutes,
+                                dailyLimitMinutes = dailyLimitMinutes,
+                                emergencyUsesCount = emergencyUsesCount,
+                                emergencyUsesAllowed = emergencyUsesAllowed,
+                                isStrict = true,
+                                streakDays = streakDays,
+                                contentWrapper = contentWrapper,
+                                onStrictEnabled = onStrictEnabled
+                            )
+                        },
+                        onCancel = {
+                            contentWrapper.removeAllViews()
+                            buildMainOverlayContent(
+                                context = context,
+                                packageName = packageName,
+                                appName = appName,
+                                mode = mode,
+                                usedMinutes = usedMinutes,
+                                remainingDailyMinutes = remainingDailyMinutes,
+                                dailyLimitMinutes = dailyLimitMinutes,
+                                emergencyUsesCount = emergencyUsesCount,
+                                emergencyUsesAllowed = emergencyUsesAllowed,
+                                isStrict = isStrict,
+                                streakDays = streakDays,
+                                contentWrapper = contentWrapper,
+                                onStrictEnabled = onStrictEnabled
+                            )
+                        }
+                    )
+                }
+            )
         }
 
         // --- Usage stats card ---
@@ -496,9 +571,10 @@ object AppLimitFloatingOverlayManager {
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply { topMargin = dp(12) }
                     setOnClickListener {
-                        hideOverlay()
                         AppLimitManager.instance.startEmergencySession(packageName, appName) { started ->
-                            if (!started) {
+                            if (started) {
+                                hideOverlay()
+                            } else {
                                 Toast.makeText(context, "No emergency passes left", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -531,6 +607,91 @@ object AppLimitFloatingOverlayManager {
             }
         }
         contentWrapper.addView(closeBtn)
+    }
+
+    /** In-overlay confirmation to enable Strict Mode for this app. */
+    private fun showEnableStrictModeConfirmation(
+        context: Context,
+        packageName: String,
+        appName: String,
+        contentWrapper: LinearLayout,
+        onConfirmed: () -> Unit,
+        onCancel: () -> Unit
+    ) {
+        contentWrapper.removeAllViews()
+        val density = context.resources.displayMetrics.density
+        fun dp(value: Int): Int = (value * density).toInt()
+
+        val title = TextView(context).apply {
+            text = "Enable Strict Mode for $appName"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        contentWrapper.addView(title)
+
+        val message = TextView(context).apply {
+            text = "• The 'Turn off' and 'Delete' options will be completely disabled.\n• Once the daily limit is exhausted, the app is strictly locked until tomorrow.\n• No emergency extensions are permitted."
+            textSize = 14f
+            setTextColor(Color.parseColor("#94A3B8"))
+            gravity = Gravity.START
+            setPadding(dp(12), 0, dp(12), dp(24))
+        }
+        contentWrapper.addView(message)
+
+        val enableBtn = TextView(context).apply {
+            text = "Turn On Strict Mode"
+            textSize = 15f
+            setTextColor(Color.BLACK)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#FACC15"))
+                cornerRadius = dp(28).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(56)
+            ).apply { bottomMargin = dp(12) }
+            setOnClickListener {
+                overlayScope.launch {
+                    val success = try {
+                        com.example.FocusShieldApp.instance.appLimitRepository.updateStrictMode(packageName, true)
+                        true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to enable strict mode for $packageName", e)
+                        false
+                    }
+                    if (success) {
+                        Toast.makeText(
+                            context,
+                            "Strict Mode enabled for $appName",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        onConfirmed()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Couldn't enable Strict Mode for $appName. Please try again.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        }
+        contentWrapper.addView(enableBtn)
+
+        val cancelBtn = TextView(context).apply {
+            text = "Cancel"
+            textSize = 15f
+            setTextColor(Color.parseColor("#94A3B8"))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+            setOnClickListener { onCancel() }
+        }
+        contentWrapper.addView(cancelBtn)
     }
 
     /** Multi-step confirmation for turning off the limit (issue #68). */
@@ -584,12 +745,26 @@ object AppLimitFloatingOverlayManager {
             ).apply { bottomMargin = dp(12) }
             setOnClickListener {
                 overlayScope.launch {
+                    val allowed = try {
+                        AppLimitStrictModeEngine.instance.canTurnOffLimit(packageName)
+                    } catch (_: Exception) {
+                        true
+                    }
+                    if (!allowed) {
+                        Toast.makeText(
+                            context,
+                            "Strict Mode Active: $appName limit cannot be turned off.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        onCancel()
+                        return@launch
+                    }
                     val success = AppLimitManager.instance.leaveBlockForToday(packageName, alsoDisableLimit = true)
                     if (success) {
                         hideOverlay()
                         Log.i(TAG, "Limit for $appName turned off for today (disabled)")
                     } else {
-                        Toast.makeText(context, "Couldn't turn off limit", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Strict Mode Active: Couldn't turn off limit", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -612,9 +787,25 @@ object AppLimitFloatingOverlayManager {
                 dp(56)
             ).apply { bottomMargin = dp(12) }
             setOnClickListener {
-                AppLimitManager.instance.removeLimitPermanently(packageName)
-                hideOverlay()
-                Log.i(TAG, "Limit for $appName removed permanently")
+                overlayScope.launch {
+                    val allowed = try {
+                        AppLimitStrictModeEngine.instance.canTurnOffLimit(packageName)
+                    } catch (_: Exception) {
+                        true
+                    }
+                    if (!allowed) {
+                        Toast.makeText(
+                            context,
+                            "Strict Mode Active: You cannot delete $appName app limit while Strict Mode is active.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        onCancel()
+                        return@launch
+                    }
+                    AppLimitManager.instance.removeLimitPermanently(packageName)
+                    hideOverlay()
+                    Log.i(TAG, "Limit for $appName removed permanently")
+                }
             }
         }
         contentWrapper.addView(optionCompletely)
@@ -628,6 +819,36 @@ object AppLimitFloatingOverlayManager {
             setOnClickListener { onCancel() }
         }
         contentWrapper.addView(cancelBtn)
+    }
+
+    /** Non-bypassable badge shown in top-right when Strict Mode is active for this app. */
+    private fun strictLockedBadge(context: Context, appName: String): View {
+        val pill = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(context, 12), dp(context, 7), dp(context, 14), dp(context, 7))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E2024"))
+                cornerRadius = dp(context, 20).toFloat()
+                setStroke(dp(context, 1), Color.parseColor("#2C2F36"))
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                Toast.makeText(
+                    context,
+                    "Strict Mode Active: $appName limit is locked and cannot be turned off or deleted.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        pill.addView(TextView(context).apply {
+            text = "🔒 Strict Locked"
+            textSize = 12f
+            setTextColor(Color.parseColor("#F87171"))
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        })
+        return pill
     }
 
     /** "Turn off" pill: power glyph + label; strict mode refuses with a toast (issue #68). */
@@ -668,19 +889,28 @@ object AppLimitFloatingOverlayManager {
         packageName: String,
         appName: String,
         streakDays: Int,
+        isStrict: Boolean,
         contentWrapper: LinearLayout,
         onCancel: () -> Unit
     ) {
+        if (isStrict) {
+            Toast.makeText(
+                context,
+                "Strict Mode is on: $appName's limit can't be turned off or deleted",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         overlayScope.launch {
             val allowed = try {
                 AppLimitStrictModeEngine.instance.canTurnOffLimit(packageName)
             } catch (_: Exception) {
-                false
+                !isStrict
             }
             if (!allowed) {
                 Toast.makeText(
                     context,
-                    "Strict Mode is on: $appName's limit can't be turned off",
+                    "Strict Mode is on: $appName's limit can't be turned off or deleted",
                     Toast.LENGTH_LONG
                 ).show()
                 return@launch
@@ -690,8 +920,8 @@ object AppLimitFloatingOverlayManager {
         }
     }
 
-    /** Amber upsell banner; tapping anywhere on it opens FocusShield. */
-    private fun strictModeBanner(context: Context): View {
+    /** Amber upsell banner; tapping anywhere on it opens the in-overlay Strict Mode confirmation. */
+    private fun strictModeBanner(context: Context, onClick: () -> Unit): View {
         val banner = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -707,7 +937,7 @@ object AppLimitFloatingOverlayManager {
             ).apply { topMargin = dp(context, 4) }
             isClickable = true
             isFocusable = true
-            setOnClickListener { openFocusShield(context) }
+            setOnClickListener { onClick() }
         }
         banner.addView(TextView(context).apply {
             text = "🔒"

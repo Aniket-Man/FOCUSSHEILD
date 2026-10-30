@@ -128,8 +128,30 @@ class NotificationBlockerViewModel(
         }
     }
 
+    private val _strictLockMessage = MutableStateFlow<String?>(null)
+    val strictLockMessage: StateFlow<String?> = _strictLockMessage
+
+    fun clearStrictLockMessage() {
+        _strictLockMessage.value = null
+    }
+
+    private suspend fun isStrictProtectionLocked(): Boolean {
+        return try {
+            com.example.feature.applimits.engine.AppLimitStrictModeEngine.instance.isStrictProtectionLocked()
+        } catch (_: Exception) {
+            val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+            active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
+        }
+    }
+
     fun toggleMaster(enabled: Boolean) {
-        engine.setMasterEnabled(enabled)
+        viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Notification blocker cannot be disabled while Strict Mode is active."
+                return@launch
+            }
+            engine.setMasterEnabled(enabled)
+        }
     }
 
     fun setBlockMode(mode: NotificationBlockMode) {
@@ -137,15 +159,33 @@ class NotificationBlockerViewModel(
     }
 
     fun toggleApp(packageName: String, blocked: Boolean) {
-        engine.toggleApp(packageName, blocked)
+        viewModelScope.launch {
+            if (!blocked && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Cannot unblock app notifications while Strict Mode is active."
+                return@launch
+            }
+            engine.toggleApp(packageName, blocked)
+        }
     }
 
     fun toggleAlwaysSilent(packageName: String, alwaysSilent: Boolean) {
-        engine.toggleAlwaysSilent(packageName, alwaysSilent)
+        viewModelScope.launch {
+            if (!alwaysSilent && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Cannot disable 24/7 notification silencing while Strict Mode is active."
+                return@launch
+            }
+            engine.toggleAlwaysSilent(packageName, alwaysSilent)
+        }
     }
 
     fun setAllAppsBlocked(packages: Set<String>) {
-        engine.setBlockedPackages(packages)
+        viewModelScope.launch {
+            if (packages.isEmpty() && isStrictProtectionLocked()) {
+                _strictLockMessage.value = "Strict Mode Active: Cannot clear blocked notification apps while Strict Mode is active."
+                return@launch
+            }
+            engine.setBlockedPackages(packages)
+        }
     }
 
     fun clearVault() {

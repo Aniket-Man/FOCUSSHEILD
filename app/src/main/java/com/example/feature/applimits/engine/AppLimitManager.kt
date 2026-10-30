@@ -749,6 +749,9 @@ class AppLimitManager private constructor(
                 if (limit == null || !limit.isEnabled) {
                     Log.w(tag, "Not granting an emergency pass for $packageName: its limit is gone")
                     false
+                } else if (limit.isStrictOverride) {
+                    Log.w(tag, "Strict Mode Active: Emergency pass denied for $packageName")
+                    false
                 } else {
                     val allowedCount = limit.emergencyUsesAllowed
                     if (currentCount >= allowedCount) {
@@ -793,6 +796,11 @@ class AppLimitManager private constructor(
      */
     suspend fun leaveBlockForToday(packageName: String, alsoDisableLimit: Boolean = false): Boolean {
         return try {
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            if (limit?.isStrictOverride == true) {
+                Log.w(tag, "Strict Mode Active: Cannot bypass or disable limit for $packageName")
+                return false
+            }
             val todayDate = appLimitRepository.getTodayDateString()
             appLimitRepository.setBypassedForToday(packageName, todayDate, true)
             if (alsoDisableLimit) {
@@ -818,11 +826,20 @@ class AppLimitManager private constructor(
      * Permanently deletes the app limit configuration. The repository's delete path already
      * retires the live session/overlay state through [onLimitDeleted]; this wrapper keeps the
      * historical entry point for callers that only have a package name.
+     *
+     * Refuses deletion if Strict Mode is active for the limit.
      */
     fun removeLimitPermanently(packageName: String) {
         scope.launch {
-            appLimitRepository.deleteLimit(packageName)
-            Log.i(tag, "App limit for $packageName permanently removed")
+            val limit = appLimitRepository.getLimitByPackage(packageName)
+            if (limit?.isStrictOverride == true) {
+                Log.w(tag, "Strict Mode Active: Refusing to permanently remove app limit for $packageName")
+                return@launch
+            }
+            val deleted = appLimitRepository.deleteLimit(packageName)
+            if (deleted) {
+                Log.i(tag, "App limit for $packageName permanently removed")
+            }
         }
     }
 

@@ -62,6 +62,7 @@ private val DEFAULT_WEEKLY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
 data class HomeSessionUiState(
     val isSessionActive: Boolean = false,
     val isPaused: Boolean = false,
+    val isStrictModeEnabled: Boolean = false,
     val timeRemainingString: String = "00:00:00",
     val subject: String = "",
     val topic: String = "",
@@ -341,6 +342,7 @@ class HomeViewModel(
         HomeSessionUiState(
             isSessionActive = isActive,
             isPaused = sessionState == SessionState.PAUSED,
+            isStrictModeEnabled = activeSession?.isStrictModeEnabled == true && activeSession.mode != SessionMode.STOPWATCH,
             timeRemainingString = displayTime,
             subject = activeSession?.subject ?: "",
             topic = activeSession?.topic ?: "",
@@ -411,7 +413,12 @@ class HomeViewModel(
     }
 
     fun toggleSessionPause() {
+        val active = sessionManager.activeSession.value
+        if (active != null && active.isStrictModeEnabled && active.mode != SessionMode.STOPWATCH && !active.isPaused) {
+            return
+        }
         sessionManager.togglePause()
+        sessionManager.saveActiveSessionToDisk(app)
     }
 
     fun togglePlanCompletion(planId: String, isCompleted: Boolean) {
@@ -490,8 +497,12 @@ class HomeViewModel(
 
     fun deleteStudyPlan(planId: String) {
         viewModelScope.launch {
+            val deletedSchedule = app.focusScheduleRepository.deleteSchedule(planId)
+            if (!deletedSchedule) {
+                _scheduleSaveError.value = "Active Schedule Locked: Cannot delete a schedule while its focus window is currently running."
+                return@launch
+            }
             studyPlanRepository.deletePlan(planId)
-            app.focusScheduleRepository.deleteSchedule(planId)
         }
     }
 
@@ -572,7 +583,10 @@ class HomeViewModel(
 
     fun toggleFocusSchedule(id: String, isEnabled: Boolean) {
         viewModelScope.launch {
-            app.focusScheduleRepository.toggleScheduleEnabled(id, isEnabled)
+            val updated = app.focusScheduleRepository.toggleScheduleEnabled(id, isEnabled)
+            if (!updated) {
+                _scheduleSaveError.value = "Active Schedule Locked: Cannot turn off a schedule while its focus window is currently running."
+            }
         }
     }
 
@@ -584,7 +598,10 @@ class HomeViewModel(
 
     fun deleteFocusSchedule(id: String) {
         viewModelScope.launch {
-            app.focusScheduleRepository.deleteSchedule(id)
+            val deleted = app.focusScheduleRepository.deleteSchedule(id)
+            if (!deleted) {
+                _scheduleSaveError.value = "Active Schedule Locked: Cannot delete a schedule while its focus window is currently running."
+            }
         }
     }
 

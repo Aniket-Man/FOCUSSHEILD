@@ -1,121 +1,78 @@
-# FocusShield System-Wide AI Ecosystem & Schedule UI Fix — Master Plan
+# Implementation Plan: Fix False "Unapproved Channel" Block in YouTube Full-Screen Mode
 
-## 1. Executive Summary & Core Vision
-FocusShield will evolve into a **proactive, system-wide AI productivity and digital wellbeing ecosystem** accompanied by an immediate layout fix for the **New Schedule Save button**.
+## 1. Root Cause Analysis
 
-Rather than functioning only as a standalone chatbot, **AI is woven directly into every feature of FocusShield** (Focus Timer, Planner & Schedules, Digital Wellbeing & Stats, and App/Website/18+/Notification Blockers) while also providing a **dedicated AI Navigation Tab** on the home screen's bottom navigation bar.
+When a student watches an approved YouTube study channel and switches to **Full Screen** (via the Full Screen button or rotating the device), FocusShield currently blocks the video as an **"Unapproved Channel"** due to three interacting flaws:
 
-### Core Pillars of the Master Plan
-1. **Google Account & Cloud Sync Prerequisite**: All AI capabilities require an authenticated Google Account with Cloud Sync active. The AI synthesizes long-term cloud-synced records (study sessions, streaks, schedules, blocker states, and past AI conversations) with real-time on-device usage telemetry (per-app daily/weekly screen time, launch frequency, and peak distraction hours).
-2. **Strict Mode is 100% Human-Only (Hard Safety Boundary)**: **The AI is strictly prohibited from applying, enabling, or disabling Strict Mode in every feature** (Focus Timer, App Limits, Schedules, and Blockers). Because Strict Mode locks down settings and prevents modifications or early exits, only the human user can manually turn on or confirm Strict Mode.
-3. **Embedded AI in Every Feature**: Every screen displays context-aware AI insights and **Inline One-Tap Apply Cards** tailored to the user's real usage patterns.
-4. **Home Navigation AI Button & Cloud-Synced AI Chat + App Control**: The bottom navigation bar (alongside Focus, Planner, Stats, and Block) includes a dedicated **AI button** styled in the exact same translucent glass navigation bar aesthetic, using your custom radial neural-starburst PNG icon. Tapping it opens the **AI Chat & Control Hub**, where all conversations are **saved to the cloud and loaded from the cloud**, and where you can ask for guidance or instruct the AI to directly control and update any feature in the app (except Strict Mode).
-5. **24/7 Proactive Background AI Notifications**: A continuous background engine monitors app usage spikes, distraction windows, and daily schedules to deliver personalized, AI-generated notifications around the clock.
+1. **Player Control Clicks & Orientation Changes Wipe Out the Approved Channel Latch (`FocusAccessibilityService.kt` & `YouTubeContentBlockEngine.kt`)**
+   - In `FocusAccessibilityService.kt` (lines 544–550), **every** `TYPE_VIEW_CLICKED` and `TYPE_WINDOW_STATE_CHANGED` / `TYPE_WINDOWS_CHANGED` event inside YouTube unconditionally triggers `YouTubePlaybackSandbox.onVideoNavigationOccurred(now)` and `YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)`.
+   - Tapping **"Enter full screen"**, rotating the screen, or tapping any in-player control (Play/Pause, Seek bar, 10s skip, Video Quality/Settings, Captions, Playback Speed, Chapters, or showing/hiding the player overlay) emits `TYPE_VIEW_CLICKED` and/or `TYPE_WINDOW_STATE_CHANGED`.
+   - `onUserNavigationOrClick()` immediately clears `lastApprovedVideoKey = null`, `lastApprovedChannel = null`, and `lastApprovedHandle = null`, exits `YouTubePlaybackSandbox`, and enters a 3-second cooldown where `isLatchedApproved` is forced to `false`.
 
----
+2. **Full-Screen Mode Hides the Portrait Channel Header (`YouTubeNodeExtractor.kt` & `YouTubeContentBlockEngine.kt`)**
+   - Once YouTube is in full-screen landscape mode, the portrait metadata area below the player (`channel_handle`, `subscribe_button`, `channel_name`, `owner_text`) is hidden from the accessibility hierarchy.
+   - Because the approved channel latch was wiped on entering full screen, `YouTubeContentBlockEngine.evaluate()` attempts to re-detect the channel in full screen and fails in two ways:
+     - **Path A — Full-Screen "More Videos" / Endscreen Recommendation Leak:** `YouTubeNodeExtractor` falls back to scanning `rootNode` when the portrait watch container is absent, picking up a channel name or `@handle` from YouTube's full-screen **"More videos" / Up Next** strip, endscreen overlay, or engagement panel (`fullscreen_engagement_panel`, `autonav_preview`, `related_endscreen_results`), immediately returning `BLOCK_UNAPPROVED_CHANNEL`.
+     - **Path B — 5-Second Metadata Grace Timeout:** When full-screen player controls fade out, both `rawChannel` and `rawHandle` are `null`. After 5 seconds (`CHANNEL_METADATA_GRACE_MILLIS`), `YouTubeContentBlockEngine` returns `BLOCK_UNKNOWN_CONTENT`, which `FocusAccessibilityService` (line 672) routes to `handleYouTubeUnapprovedChannelBlocked` with the fallback label `"Unapproved Channel"`.
 
-## 2. Immediate UI Fix: "New Schedule" Save Button Visibility
-
-### Root Cause
-On the **New Schedule / Edit Schedule** screen, the full-screen dialog uses a custom window layout where system navigation bar insets are not properly padded at the bottom of the container. As a result, the bottom **Save** button gets clipped or hidden underneath the system navigation bar or bottom bar area.
-
-### Solution
-- **Sticky Safe-Area Footer Bar**: Anchor the bottom **Save** button inside an elevated, persistent footer bar that applies explicit system navigation bar and keyboard (`ime`) safe-area insets plus generous vertical padding so it always floats cleanly above the bottom of the screen.
-- **Scrollable Form Body**: Ensure the schedule form content scrolls independently above the pinned footer so the **Save** button is never pushed off-screen or obscured on any screen size.
-- **Header Save Action Retained**: Keep the top-right header **Save** action synced with the bottom button for convenient one-handed access.
+3. **Blocking or Re-Verifying While in Full Screen (`FocusAccessibilityService.kt`)**
+   - If a brand-new video starts while already in full screen (e.g., via Autoplay or an external deep link) and its channel metadata is hidden by full-screen mode, the engine cannot read the portrait watch header unless YouTube exits full screen back to portrait watch view first.
 
 ---
 
-## 3. Prerequisite Gate: Google Account & Cloud Sync Requirement
+## 2. Proposed Solution
 
-### Why Sign-In Is Mandatory for AI
-To suggest practical app limits, build realistic schedules, and maintain continuity across sessions, the AI must combine:
-- **Cloud-Synced Account Data**: Historical study sessions, subject preferences, recurring schedules, configured app limits, streak history, and **saved AI chat history** tied to the user's Google Account.
-- **On-Device Telemetry**: Real-time per-app screen time (last 24 hours and 7-day trend), app launch counts, hourly usage heatmaps, and active blocker states.
+### A. Distinguish Player Control / Full-Screen Actions from Real Video Navigation (`YouTubeNodeExtractor.kt` & `YouTubeContentBlockEngine.kt`)
+- Add `YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event: AccessibilityEvent?, rootNode: AccessibilityNodeInfo?): Boolean` to accurately detect clicks and window transitions that belong to the video player itself rather than navigating to a new video:
+  - **Full-screen & orientation controls:** `"Enter full screen"`, `"Exit full screen"`, `"Full screen"`, `fullscreen_button`, `youtube_controls_fullscreen_button`.
+  - **Playback & settings controls:** Play, Pause, Fast forward, Rewind, Seek bar (`time_bar`), Settings/Gear (`player_overflow_button`), Quality, Captions/Subtitles (`subtitle_button`), Playback speed, Lock screen, Audio track, Player overlay tap (`player_control_screen`, `controls_layout`).
+  - **Window orientation / full-screen layout transitions:** When `TYPE_WINDOW_STATE_CHANGED` or `TYPE_WINDOWS_CHANGED` occurs within YouTube and the player remains in `VIDEO_WATCH` (or transitions between portrait watch and full-screen watch for the same video title).
+- Update `YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)` and `FocusAccessibilityService` so that:
+  - Clicking player controls or toggling full-screen / rotating the device **never** clears `lastApprovedChannel`, `lastApprovedHandle`, `lastApprovedVideoKey`, or exits `YouTubePlaybackSandbox`.
+  - Only clicking an actual video card (detected via `extractClickedVideoCardIdentity`), navigating to Shorts/Home/Search, or detecting a changed video title resets the approved channel latch.
 
-### Gate Behavior
-- **Signed-Out State**:
-  - Inline AI cards across Focus, Planner, Stats, and Blockers, as well as the **AI Navigation Tab**, display a sleek **"Unlock AI with Google Cloud Sync"** card.
-  - Explains that connecting a Google Account enables personalized app limits, automated schedule recommendations, cloud-synced AI chats, and 24/7 background coaching.
-  - Includes a one-tap **Sign in with Google** button that triggers the Google Sign-In & Cloud Sync flow and immediately activates all AI features upon completion.
-- **Signed-In State**:
-  - Unlocks inline AI recommendations across all tabs, loads the user's cloud-saved AI chat history, enables natural-language app control, and activates 24/7 background AI notifications.
+### B. Full-Screen Detection & Approved Latch Preservation (`YouTubeNodeExtractor.kt`, `YouTubeContentBlockEngine.kt`, `YouTubeContentInspectionEngine.kt`)
+- Add `YouTubeNodeExtractor.isFullScreenVideoPlayback(rootNode: AccessibilityNodeInfo?, displayMetrics: DisplayMetrics?): Boolean` to detect when YouTube's player is in full-screen mode:
+  - Checks for landscape display orientation while in `VIDEO_WATCH`, full-screen control nodes (`"Exit full screen"`, `fullscreen_engagement_panel`), or when the player container occupies the full screen width/height and the portrait watch metadata panel (`watch_panel` below player / `subscribe_button`) is absent.
+- When `isFullScreenVideoPlayback` is `true` and the current session already has a verified approved channel (`lastApprovedChannel` / `YouTubePlaybackSandbox.isSandboxActive`):
+  - **Keep the approved status locked** as long as the visible video title in the full-screen player overlay (if visible) has not changed to a different video.
+  - When the full-screen player controls are hidden (so both title and channel nodes are invisible), maintain `ALLOW` under the latched approved channel instead of timing out after 5 seconds into `BLOCK_UNKNOWN_CONTENT`.
+  - Exclude full-screen recommendation/engagement overlays (`fullscreen_engagement_panel`, `quick_actions_container`, `autonav`, `endscreen`, `scrim_overlay`, `more_videos`) in `YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS` and `YouTubeNodeExtractor.isInsideExcludedContainer()` so related video cards in full screen are never mistaken for the active video's channel.
 
----
+### C. Title-Change & Full-Screen "More Videos" Card Click Detection
+- If the student is in full screen and:
+  1. **Clicks a video card** in the full-screen "More videos" / Up Next shelf or endscreen: `extractClickedVideoCardIdentity(event)` immediately extracts the clicked card's channel and title.
+     - If the clicked card belongs to an **approved** study channel, update the latch to the new title/channel and allow playback seamlessly in full screen.
+     - If the clicked card belongs to an **unapproved** channel, immediately block it.
+  2. **The video title changes** (e.g., via Autoplay or clicking a card whose channel wasn't in the click event) while in full screen and no approved channel header is visible:
+     - Trigger a one-time **Auto-Exit Full Screen for Verification** action (`YouTubeNodeExtractor.exitFullScreenToPortrait(rootNode, service)`), which clicks the `"Exit full screen"` button (or dispatches a single `GLOBAL_ACTION_BACK` that exits full screen into the portrait watch page) and resets the 5-second metadata grace timer so FocusShield can read the portrait channel header (`@handle` / Subscribe button) and either approve or block accurately.
 
-## 4. Hard Safety Boundary: Strict Mode Is Human-Only Across Every Feature
-
-To protect user agency and prevent unintended lockouts, **Strict Mode is strictly restricted to human interaction across the entire application**:
-- **Focus Timer**: The AI can start or configure a Focus Timer session (selecting duration and subject), but `Strict Mode` is always forced to `OFF` for any AI-initiated or AI-suggested session. Only the user can manually toggle Strict Mode on the Focus screen.
-- **Planner & Schedules**: When the AI suggests or creates a focus schedule (via inline Apply cards or chat commands), the schedule's Strict Mode setting is locked to `OFF`. Only a human editing the schedule manually can enable Strict Mode.
-- **App Limits & Blockers**: The AI can set daily app time limits, toggle website blocking, toggle the 18+ adult site blocker, and toggle notification blocking, but it **cannot** activate Strict Mode lockouts on limits or blockers.
-- **Chat Guardrail**: If the user asks the AI in chat to *"Turn on Strict Mode"*, the AI will politely explain that **Strict Mode is a human-only safety control** and must be toggled manually by the user.
-
----
-
-## 5. Embedded AI Across Every App Feature (Inline One-Tap Apply)
-
-### A. App Limits & Blockers (`Block` Tab)
-- **Practical App Limit Suggestions**:
-  - Analyzes each installed app's 7-day average daily screen time and today's usage.
-  - Generates **Inline One-Tap Apply Cards** with realistic, graduated reduction targets (for example: *"You average 2h 15m/day on Instagram, mostly between 9 PM and 11 PM. Set a practical 1h 30m daily limit to save 45m today"*).
-  - Tapping **Apply Limit** immediately configures the daily limit for that app (without Strict Mode).
-- **Smart Shield Recommendations**:
-  - Recommends enabling the **18+ Adult Site Blocker**, **Notification Blocker**, or specific distracting **Website Blocks** when late-night browsing or high notification interruptions are detected, with a one-tap **Apply** button.
-
-### B. Smart Planner & Focus Schedules (`Planner` Tab)
-- **AI Schedule Generator & Optimizer**:
-  - Cross-references existing schedules with peak distraction windows and historical focus completion rates.
-  - Displays tailored **AI Schedule Suggestion Cards** directly inside the Planner (e.g., *"Afternoon Deep Work: 2:30 PM – 4:00 PM (Mon–Fri) • Blocks top 3 distracting apps"*).
-  - Tapping **Apply Schedule** creates and activates the recurring schedule (with Strict Mode off) and syncs it to the cloud.
-
-### C. Focus Timer & Home (`Focus` Tab)
-- **Adaptive Session Coach**:
-  - Displays a compact AI recommendation banner suggesting the ideal focus duration and subject based on time of day, upcoming planner blocks, and recent completion streak.
-  - Includes a one-tap **Apply Session Setup** button that configures the timer duration and subject (never enabling Strict Mode).
-
-### D. Digital Wellbeing & Usage Dashboard (`Stats` Tab)
-- **AI Wellbeing Diagnosis & Weekly Progress Report**:
-  - Positioned above the weekly usage bar chart and storage/wellbeing breakdown.
-  - Summarizes week-over-week screen-time trends, highlights top time-sink apps, compares focus hours against distraction hours, and provides one-tap **Apply** actions to cap newly detected time-sink apps.
+### D. Clean Full-Screen Exit When Blocking an Unapproved Video (`FocusAccessibilityService.kt`)
+- In `handleYouTubeUnapprovedChannelBlocked`, if the student is currently in full-screen mode when a genuinely unapproved video is blocked, ensure stepping back exits full screen and closes the unapproved watch player cleanly rather than merely dropping from full screen into portrait while leaving the unapproved video open.
 
 ---
 
-## 6. Home / Bottom Navigation AI Icon & Cloud-Synced AI Chat + App Control
+## 3. Files to Modify
 
-### A. Bottom Navigation Bar Integration & Custom PNG Icon
-- **Navigation Bar Placement**:
-  - The bottom navigation bar (`FocusBottomNavigation`) will feature the **AI tab** right alongside **Focus**, **Planner**, **Stats**, and **Block**, using the exact same translucent glass pill aesthetic, spring scale animations, and subtle border glow.
-- **Custom PNG Icon Design**:
-  - Uses your provided radial neural-starburst gradient PNG icon (`Screenshot_2026_1029_102332_ea1ca7bc.png`), processed with a clean transparent background so the mint-cyan-blue-purple neural nodes render crisply inside the navigation bar and home UI.
-
-### B. Cloud-Saved & Cloud-Loaded AI Chat History
-- **Full Cloud Persistence**:
-  - Every conversation and message with the AI is saved to your Google Account in the cloud (Firestore) and cached locally on the device for instant loading.
-  - When signing in on a new device or reinstalling the app, your previous AI chats, advice, and action history are automatically loaded from the cloud.
-  - Users can start a new chat thread or clear chat history at any time, keeping cloud and local storage in sync.
-
-### C. Full App Control via AI Chat (Except Strict Mode)
-- Talking to the AI in chat is both an intelligent coaching conversation **and** a live command center that can control the app on your behalf.
-- When you ask the AI to make a change—or ask for suggestions—the AI responds with tailored guidance and executes (or offers one-tap confirmation chips for) structured app actions:
-  - **Set / Update / Remove App Time Limits**: e.g., *"Set a 45-minute limit on YouTube and 30 minutes on Instagram"* → updates app limits immediately.
-  - **Create / Edit / Toggle Focus Schedules**: e.g., *"Create a morning study schedule from 8 AM to 10 AM on weekdays"* → creates and saves the schedule.
-  - **Control Blockers**: e.g., *"Turn on the 18+ adult site blocker, block reddit.com, and mute notifications"* → toggles the 18+ filter, adds the website to blocked sites, and enables the notification blocker.
-  - **Start / Configure Focus Sessions**: e.g., *"Start a 45-minute Physics focus session"* → configures and starts a normal focus session.
-  - **Strict Mode Blocked**: Any request to enable or modify Strict Mode is blocked by the human-only safety rule.
-
----
-
-## 7. 24/7 Proactive AI Notification Engine
-
-For signed-in users, a periodic background worker runs 24/7 to evaluate device usage telemetry and cloud-synced study goals, generating four distinct categories of smart notifications:
-
-1. **Real-Time App Usage Spike Warnings**:
-   - Detects rapid continuous usage or approaching daily limits on distracting apps and sends a personalized intervention nudge with a quick action to cap the app.
-2. **Morning Focus Plan & Evening Usage Reflection Briefings**:
-   - **Morning Briefing**: Summarizes today's scheduled focus blocks, target study hours, and top priority subject.
-   - **Evening Reflection**: Reviews total focus time achieved vs. screen time, streak progress, and a practical adjustment for tomorrow.
-3. **High-Distraction Hour Smart Nudges**:
-   - Recognizes when the user enters their historical peak distraction window with no active schedule and nudges them to start a focus session.
-4. **Weekly Deep-Dive Productivity & Digital Wellbeing Report**:
-   - Delivers a comprehensive weekly summary comparing total focus hours, most-used apps, time saved by blockers, and suggested limit calibrations for the upcoming week.
+1. `app/src/main/java/com/example/feature/youtube/detector/YouTubeDetectionRules.kt`
+   - Expand `EXCLUDED_RECOMMENDATION_VIEW_IDS` with full-screen recommendation/overlay container IDs (`fullscreen_engagement`, `autonav`, `endscreen`, `more_videos`, `related_endscreen`, `quick_actions`) and add player-control resource ID & content-description matchers.
+2. `app/src/main/java/com/example/feature/youtube/engine/YouTubeNodeExtractor.kt`
+   - Add `isPlayerControlOrFullscreenInteraction(event, rootNode)` so full-screen toggles and player control clicks are recognized as safe in-player interactions.
+   - Add `isFullScreenVideoPlayback(rootNode)` and `exitFullScreenIfPossible(rootNode)`.
+   - Tighten `extractChannelFromWatchPlayer` and `extractHandleFromWatchSubtree` so they never scrape full-screen recommendation strips when the portrait watch header is absent.
+3. `app/src/main/java/com/example/feature/youtube/engine/YouTubeContentBlockEngine.kt`
+   - Preserve `lastApprovedChannel`, `lastApprovedHandle`, and `lastApprovedVideoKey` across full-screen transitions, orientation changes, and player control clicks.
+   - Maintain `ALLOW` while in full screen for a latched approved video even when player controls auto-hide, only invalidating when a different video title or video-card click is detected.
+   - Return a dedicated signal (`needsExitFullScreenForVerification`) when a new unverified video starts in full screen with hidden channel metadata.
+4. `app/src/main/java/com/example/feature/youtube/detector/YouTubeContentInspectionEngine.kt`
+   - Keep `YouTubePlaybackSandbox` active across full-screen toggles and player control clicks; only exit the sandbox when an actual video navigation or title change occurs.
+5. `app/src/main/java/com/example/core/accessibility/FocusAccessibilityService.kt`
+   - Filter out player-control/full-screen clicks from triggering `YouTubePlaybackSandbox.onVideoNavigationOccurred()`.
+   - Handle `needsExitFullScreenForVerification` by automatically exiting full screen once to read the portrait watch header before making a block decision.
+   - Update `handleYouTubeUnapprovedChannelBlocked` to properly exit full screen and close the unapproved video if a block occurs while in full screen.
+6. `app/src/test/java/com/example/feature/youtube/YouTubeFullScreenApprovalTest.kt`
+   - Add unit tests verifying:
+     - Approved portrait video -> Enter Full Screen -> controls hidden > 5s -> stays `ALLOW` (no false block).
+     - Approved full-screen video -> tap Play/Pause, Seek, Quality, Exit Full Screen -> stays `ALLOW`.
+     - Full-screen "More videos" shelf visible with unapproved channel cards -> ignored while watching approved video, blocked immediately if an unapproved card is clicked.
+     - Unverified video starting directly in full screen -> triggers one-time full-screen exit for portrait header verification instead of immediate false block.

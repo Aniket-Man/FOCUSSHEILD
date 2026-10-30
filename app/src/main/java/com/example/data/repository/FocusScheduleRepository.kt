@@ -92,6 +92,13 @@ class FocusScheduleRepository(
     }
 
     suspend fun updateSchedule(schedule: FocusScheduleEntity): SaveResult {
+        val existing = dao.getScheduleById(schedule.id)
+        if (existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
+            val reason = "Active Schedule Locked: Cannot edit \"${existing.title}\" while its scheduled focus window is running."
+            Log.w(TAG, "updateSchedule rejected '${existing.title}' (${existing.id}): window is currently active")
+            return SaveResult.Rejected(reason)
+        }
+
         val normalized = validateAndNormalize(schedule)
             ?: return reject("updateSchedule", schedule)
 
@@ -113,7 +120,12 @@ class FocusScheduleRepository(
         return SaveResult.Saved(normalized)
     }
 
-    suspend fun toggleScheduleEnabled(id: String, isEnabled: Boolean) {
+    suspend fun toggleScheduleEnabled(id: String, isEnabled: Boolean): Boolean {
+        val existing = dao.getScheduleById(id)
+        if (!isEnabled && existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
+            Log.w(TAG, "Refused to disable schedule '${existing.title}' ($id): window is currently active")
+            return false
+        }
         dao.setScheduleEnabled(id, isEnabled)
         val updated = dao.getScheduleById(id)
         if (updated != null) {
@@ -134,14 +146,21 @@ class FocusScheduleRepository(
                 }
             }
         }
+        return true
     }
 
-    suspend fun deleteSchedule(id: String) {
+    suspend fun deleteSchedule(id: String): Boolean {
+        val existing = dao.getScheduleById(id)
+        if (existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
+            Log.w(TAG, "Refused to delete schedule '${existing.title}' ($id): window is currently active")
+            return false
+        }
         dao.deleteScheduleById(id)
         SyncTracker.enqueueDelete(SyncTables.FOCUS_SCHEDULES, id)
         context?.let { ctx ->
             FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, id)
         }
+        return true
     }
 
     /**

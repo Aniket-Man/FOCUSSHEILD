@@ -62,6 +62,7 @@ class YouTubeStudyDwellTracker private constructor(
     )
 
     private var active: Segment? = null
+    private var activeBrowser: Segment? = null
     private var screenInteractive = true
 
     /**
@@ -102,10 +103,48 @@ class YouTubeStudyDwellTracker private constructor(
         enqueueAllowedEvent(channelName, videoTitle, session, timestamp)
     }
 
+    /**
+     * Called when an allowed study website is being viewed inside an in-app or external browser
+     * during an active study session.
+     */
+    @Synchronized
+    fun onAllowedBrowserContent(
+        domain: String?,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
+        if (!screenInteractive) return
+        val normalizedDomain = domain?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+
+        val session = currentSession()
+        val key = "${session?.id.orEmpty()}|browser|$normalizedDomain"
+
+        if (activeBrowser?.key == key) return
+
+        closeActiveBrowser(timestamp, "domain changed")
+        if (session == null) return
+
+        activeBrowser = Segment(
+            key = key,
+            sessionId = session.id,
+            subject = session.subject,
+            topic = session.topic,
+            channelName = normalizedDomain,
+            videoTitle = normalizedDomain,
+            startedAt = timestamp
+        )
+    }
+
     /** Closes any open segment. Safe to call on every hook; a call with nothing open does nothing. */
     @Synchronized
     fun flush(reason: String) {
-        closeActive(System.currentTimeMillis(), reason)
+        val now = System.currentTimeMillis()
+        closeActive(now, reason)
+        closeActiveBrowser(now, reason)
+    }
+
+    @Synchronized
+    fun flushBrowser(reason: String) {
+        closeActiveBrowser(System.currentTimeMillis(), reason)
     }
 
     /**
@@ -116,6 +155,7 @@ class YouTubeStudyDwellTracker private constructor(
     fun onScreenOff(timestamp: Long = System.currentTimeMillis()) {
         screenInteractive = false
         closeActive(timestamp, "screen off")
+        closeActiveBrowser(timestamp, "screen off")
     }
 
     @Synchronized
@@ -148,6 +188,32 @@ class YouTubeStudyDwellTracker private constructor(
                 )
             } catch (e: Exception) {
                 Log.e(tag, "Failed to record YouTube study segment ($reason): ${e.message}")
+            }
+        }
+    }
+
+    private fun closeActiveBrowser(timestamp: Long, reason: String) {
+        val segment = activeBrowser ?: return
+        activeBrowser = null
+
+        val durationMillis = timestamp - segment.startedAt
+        if (durationMillis < minimumSegmentMillis) {
+            return
+        }
+
+        scope.launch {
+            try {
+                analyticsRepository.recordBrowserStudyActivity(
+                    sessionId = segment.sessionId,
+                    subject = segment.subject,
+                    topic = segment.topic,
+                    domain = segment.channelName,
+                    durationMillis = durationMillis,
+                    startedAt = segment.startedAt,
+                    endedAt = timestamp
+                )
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to record Browser study segment ($reason): ${e.message}")
             }
         }
     }

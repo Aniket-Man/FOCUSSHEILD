@@ -267,8 +267,8 @@ class SessionViewModel(
                 topic = setup.selectedTopic,
                 goal = setup.sessionGoal,
                 activeTimeString = when (setup.selectedMode) {
-                    SessionMode.TIMER -> String.format("%02d:00:00", setup.durationMinutes / 60)
-                    SessionMode.POMODORO -> String.format("%02d:00", setup.pomodoroFocusMinutes)
+                    SessionMode.TIMER -> String.format(java.util.Locale.US, "%02d:%02d:00", setup.durationMinutes / 60, setup.durationMinutes % 60)
+                    SessionMode.POMODORO -> String.format(java.util.Locale.US, "%02d:00", setup.pomodoroFocusMinutes)
                     SessionMode.STOPWATCH -> "00:00:00"
                 },
                 isSessionRunning = false,
@@ -330,6 +330,10 @@ class SessionViewModel(
 
     fun setDuration(minutes: Int) {
         _setupState.update { it.copy(durationMinutes = minutes, validationError = null) }
+    }
+
+    fun setPomodoroFocusMinutes(minutes: Int) {
+        _setupState.update { it.copy(pomodoroFocusMinutes = minutes, validationError = null) }
     }
 
     fun setSubject(subject: String) {
@@ -437,6 +441,14 @@ class SessionViewModel(
                 )
                 if (enabled) {
                     prefs.updateBlockUninstall(true)
+                    if (_setupState.value.strictModeConfig.lockAppLimits) {
+                        val appLimitRepo = FocusShieldApp.instance.appLimitRepository
+                        appLimitRepo.getAllLimits().forEach { limit ->
+                            if (!limit.isStrictOverride) {
+                                appLimitRepo.updateStrictMode(limit.packageName, true)
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) { }
         }
@@ -469,6 +481,14 @@ class SessionViewModel(
                         prefs.updateYouTubeShortsBlocking(true)
                         prefs.updateInstagramReelsBlocking(true)
                         prefs.updateFacebookReelsBlocking(true)
+                    }
+                    if (config.lockAppLimits) {
+                        val appLimitRepo = FocusShieldApp.instance.appLimitRepository
+                        appLimitRepo.getAllLimits().forEach { limit ->
+                            if (!limit.isStrictOverride) {
+                                appLimitRepo.updateStrictMode(limit.packageName, true)
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) { }
@@ -923,7 +943,7 @@ class SessionViewModel(
                     forcedEndTime = summary?.endedAt?.takeIf { it > 0L }
                 )
             }
-            resetToIdle()
+            resetToIdle(force = true)
             onComplete()
             // Clear pending summary state after navigation completes so no blank screen flashes
             _pendingSessionSummary.value = null
@@ -934,12 +954,23 @@ class SessionViewModel(
      * User clicked "Don't Save": discards session data without writing to database.
      */
     fun discardPendingSession(onComplete: () -> Unit = {}) {
-        resetToIdle()
+        resetToIdle(force = true)
         onComplete()
         _pendingSessionSummary.value = null
     }
 
-    fun resetToIdle() {
+    fun resetToIdle(force: Boolean = false) {
+        if (!force) {
+            val current = sessionManager.activeSession.value
+            val state = sessionManager.sessionState.value
+            if (current != null &&
+                !current.isCompleted &&
+                !current.isCancelled &&
+                (state == SessionState.RUNNING || state == SessionState.PAUSED)
+            ) {
+                return
+            }
+        }
         sessionManager.resetToIdle()
         try {
             val context = FocusShieldApp.instance

@@ -500,6 +500,56 @@ object DeviceUsageStatsHelper {
     }
 
     /**
+     * Formats milliseconds for the Digital Wellbeing ring center (e.g., "9 hr, 34 min" or "42 min").
+     */
+    fun formatWellbeingRingDuration(millis: Long): String {
+        if (millis <= 0L) return "0 min"
+        if (millis < 60_000L) return "< 1 min"
+        val totalMinutes = millis / 60_000L
+        val hours = totalMinutes / 60
+        val mins = totalMinutes % 60
+        return when {
+            hours > 0 && mins > 0 -> "$hours hr, $mins min"
+            hours > 0 -> "$hours hr"
+            else -> "$mins min"
+        }
+    }
+
+    /**
+     * Formats milliseconds for the Digital Wellbeing "App activity details" list rows
+     * (e.g., "4 minutes", "1 minute", "Less than 1 minute", "1 hr, 20 min").
+     */
+    fun formatWellbeingAppRowDuration(millis: Long): String {
+        if (millis <= 0L) return "0 minutes"
+        if (millis < 60_000L) return "Less than 1 minute"
+        val totalMinutes = millis / 60_000L
+        val hours = totalMinutes / 60
+        val mins = totalMinutes % 60
+        return when {
+            hours > 0 && mins > 0 -> "$hours hr, $mins min"
+            hours > 0 -> "$hours hr"
+            mins == 1L -> "1 minute"
+            else -> "$mins minutes"
+        }
+    }
+
+    /**
+     * Returns true for core system apps (Settings, Play Store, Phone/Contacts) that show
+     * the info (i) icon instead of an hourglass timer in Digital Wellbeing.
+     */
+    fun isSystemExemptFromTimer(packageName: String): Boolean {
+        val pkg = packageName.lowercase()
+        return pkg == "com.android.settings" ||
+            pkg == "com.android.vending" ||
+            pkg == "com.google.android.dialer" ||
+            pkg == "com.android.dialer" ||
+            pkg == "com.samsung.android.dialer" ||
+            pkg == "com.google.android.contacts" ||
+            pkg == "com.android.contacts" ||
+            pkg == "com.samsung.android.app.contacts"
+    }
+
+    /**
      * Opens system Usage Access Settings so user can enable device screen time tracking.
      */
     fun openUsageAccessSettings(context: Context) {
@@ -568,7 +618,8 @@ object DeviceUsageStatsHelper {
      */
     fun getTodayDigitalWellbeingSnapshot(
         context: Context,
-        persistedUnlocks: Int = 0
+        persistedUnlocks: Int = 0,
+        persistedNotifications: Int = 0
     ): DigitalWellbeingSnapshot {
         val hasPerm = hasUsageStatsPermission(context)
         val (startOfDay, now) = getTodayBounds()
@@ -590,6 +641,7 @@ object DeviceUsageStatsHelper {
                 totalScreenTimeMillis = 0L,
                 formattedTotalScreenTime = "0m",
                 unlocksCount = persistedUnlocks,
+                notificationsCount = persistedNotifications,
                 totalAppLaunches = 0,
                 apps = emptyList(),
                 hourlyUsageMinutes = List(24) { 0 },
@@ -604,6 +656,7 @@ object DeviceUsageStatsHelper {
         val packageIntervals = mutableMapOf<String, MutableList<Pair<Long, Long>>>()
         val packageLaunches = mutableMapOf<String, Int>()
         var keyguardHiddenCount = 0
+        var notificationInterruptionCount = 0
         var lastForegroundPkg: String? = null
 
         if (usm != null) {
@@ -618,6 +671,10 @@ object DeviceUsageStatsHelper {
 
                     if (type == UsageEvents.Event.KEYGUARD_HIDDEN) {
                         keyguardHiddenCount++
+                    }
+                    // UsageEvents.Event.NOTIFICATION_INTERRUPTION == 12
+                    if (type == 12) {
+                        notificationInterruptionCount++
                     }
 
                     val pkg = event.packageName
@@ -768,6 +825,11 @@ object DeviceUsageStatsHelper {
         val hourlyMinutes = hourlyMillis.map { (it / 60_000L).toInt().coerceIn(0, 60) }
         val totalLaunches = packageLaunches.values.sum()
         val effectiveUnlocks = maxOf(persistedUnlocks, keyguardHiddenCount)
+        val effectiveNotifications = if (notificationInterruptionCount > 0) {
+            notificationInterruptionCount + persistedNotifications
+        } else {
+            maxOf(persistedNotifications, totalLaunches)
+        }
         val topAppToday = appItems.firstOrNull { it.usageMillis > 0L }?.appName
         val weeklyHistory = getWeeklyDailyUsageHistory(
             context = context,
@@ -782,6 +844,7 @@ object DeviceUsageStatsHelper {
             totalScreenTimeMillis = totalMillis,
             formattedTotalScreenTime = formatDurationHoursMins(totalMillis),
             unlocksCount = effectiveUnlocks,
+            notificationsCount = effectiveNotifications,
             totalAppLaunches = totalLaunches,
             apps = appItems,
             hourlyUsageMinutes = hourlyMinutes,
@@ -974,6 +1037,7 @@ data class DigitalWellbeingSnapshot(
     val totalScreenTimeMillis: Long,
     val formattedTotalScreenTime: String,
     val unlocksCount: Int,
+    val notificationsCount: Int = 0,
     val totalAppLaunches: Int,
     val apps: List<WellbeingAppUsageItem>,
     val hourlyUsageMinutes: List<Int>,

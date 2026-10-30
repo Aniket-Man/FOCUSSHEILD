@@ -74,6 +74,35 @@ class TimerEngine(
         return false
     }
 
+    fun restore(
+        durationMillis: Long,
+        elapsedAtSaveMillis: Long,
+        savedAtTimestamp: Long,
+        wasPaused: Boolean,
+        now: Long = currentTimeProvider()
+    ) {
+        val safeDuration = durationMillis.coerceAtLeast(1000L)
+        plannedDurationMillis = safeDuration
+        val safeElapsedAtSave = elapsedAtSaveMillis.coerceIn(0L, safeDuration)
+        if (wasPaused) {
+            startTimestamp = (now - safeElapsedAtSave).coerceAtLeast(1L)
+            pauseTimestamp = now
+            accumulatedPausedMillis = 0L
+            isRunning = true
+            isPaused = true
+            isCompleted = false
+        } else {
+            val deltaSinceSave = if (savedAtTimestamp > 0L) (now - savedAtTimestamp).coerceAtLeast(0L) else 0L
+            val currentElapsed = (safeElapsedAtSave + deltaSinceSave).coerceIn(0L, safeDuration)
+            startTimestamp = (now - currentElapsed).coerceAtLeast(1L)
+            pauseTimestamp = 0L
+            accumulatedPausedMillis = 0L
+            isRunning = true
+            isPaused = false
+            isCompleted = false
+        }
+    }
+
     fun reset() {
         plannedDurationMillis = 0L
         startTimestamp = 0L

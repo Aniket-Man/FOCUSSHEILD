@@ -136,4 +136,97 @@ class BackgroundPersistenceAndSessionRestorationTest {
         FocusSessionForegroundService.start(context)
         FocusSessionForegroundService.stop(context)
     }
+
+    @Test
+    fun testStrictModeSession_cannotBePausedOrEndedEarly() {
+        val manager = FocusSessionManager.instance
+
+        val startResult = manager.startSession(
+            mode = SessionMode.TIMER,
+            subject = "Mathematics",
+            topic = "Calculus",
+            plannedDurationMillis = 120 * 60 * 1000L,
+            isStrictMode = true
+        )
+        assertTrue(startResult.isSuccess)
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+
+        // Attempting to pause in Strict Mode must be rejected
+        val paused = manager.pauseSession()
+        assertEquals(false, paused)
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+
+        val toggled = manager.togglePause()
+        assertEquals(false, toggled)
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+
+        // Attempting to end or cancel early in Strict Mode must be rejected
+        assertNull(manager.endSession())
+        assertNull(manager.cancelSession())
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+    }
+
+    @Test
+    fun testPausedSession_persistsAndRestoresAcrossAppClose() {
+        val manager = FocusSessionManager.instance
+
+        val startResult = manager.startSession(
+            mode = SessionMode.TIMER,
+            subject = "Biology",
+            topic = "Genetics",
+            plannedDurationMillis = 120 * 60 * 1000L,
+            isStrictMode = false
+        )
+        assertTrue(startResult.isSuccess)
+
+        // Pause the non-strict session and save to disk
+        assertTrue(manager.pauseSession())
+        assertEquals(SessionState.PAUSED, manager.sessionState.value)
+        manager.saveActiveSessionToDisk(context)
+
+        // Simulate app closed from Recents
+        manager.resetToIdle()
+        assertNull(manager.activeSession.value)
+
+        // Restore from disk when service or app restarts
+        val restored = manager.restoreActiveSessionFromDisk(context)
+        assertNotNull(restored)
+        assertEquals(SessionState.PAUSED, restored!!.state)
+        assertEquals(SessionState.PAUSED, manager.sessionState.value)
+        assertEquals("Biology", restored.subject)
+    }
+
+    @Test
+    fun testManualBreakInStrictMode_persistsAndRestoresBreakAfterAppClose() {
+        val manager = FocusSessionManager.instance
+
+        val startResult = manager.startSession(
+            mode = SessionMode.TIMER,
+            subject = "Physics",
+            topic = "Electromagnetism",
+            plannedDurationMillis = 120 * 60 * 1000L,
+            isStrictMode = true
+        )
+        assertTrue(startResult.isSuccess)
+
+        // Start a 5-minute break during a 2-hour Strict Mode session
+        val breakInfo = manager.startBreak(durationMinutes = 5)
+        assertNotNull(breakInfo)
+        assertTrue(manager.breakManager.isBreakActive)
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+
+        manager.saveActiveSessionToDisk(context)
+
+        // Simulate app closed from Recents
+        manager.resetToIdle()
+        assertNull(manager.activeSession.value)
+
+        // Restore from disk and verify break and session remain intact
+        val restored = manager.restoreActiveSessionFromDisk(context)
+        assertNotNull(restored)
+        assertTrue(manager.breakManager.isBreakActive)
+        assertEquals(SessionState.RUNNING, manager.sessionState.value)
+        assertNotNull(restored!!.manualBreak)
+        assertTrue(restored.remainingDurationMillis > 119 * 60 * 1000L)
+    }
 }

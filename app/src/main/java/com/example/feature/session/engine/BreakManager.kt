@@ -146,6 +146,35 @@ class BreakManager(
     }
 
     /**
+     * Restores an active break from disk if it has not yet expired.
+     */
+    fun restoreBreak(
+        id: String,
+        sessionId: String,
+        requestedDurationMillis: Long,
+        startedAt: Long,
+        endsAt: Long,
+        now: Long = currentTimeProvider()
+    ): ManualBreakInfo? {
+        if (now >= endsAt || requestedDurationMillis <= 0L) {
+            _activeBreak.value = null
+            return null
+        }
+        val elapsed = (now - startedAt).coerceIn(0L, requestedDurationMillis)
+        val restored = ManualBreakInfo(
+            id = id,
+            sessionId = sessionId,
+            requestedDurationMillis = requestedDurationMillis,
+            startedAt = startedAt,
+            endsAt = endsAt,
+            status = BreakStatus.BREAK_ACTIVE,
+            actualDurationMillis = elapsed
+        )
+        _activeBreak.value = restored
+        return restored
+    }
+
+    /**
      * Resets active break state.
      */
     fun reset() {

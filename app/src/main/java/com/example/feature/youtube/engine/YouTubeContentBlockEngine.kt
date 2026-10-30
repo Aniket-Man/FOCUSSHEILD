@@ -54,6 +54,9 @@ object YouTubeContentBlockEngine {
     private var lastApprovedChannel: String? = null
 
     @Volatile
+    private var lastApprovedHandle: String? = null
+
+    @Volatile
     private var lastClickOrNavigationAt: Long = 0L
 
     @Volatile
@@ -66,22 +69,28 @@ object YouTubeContentBlockEngine {
     private var pendingClickedAt: Long = 0L
 
     @Volatile
+    private var lastFullScreenVerifyExitKey: String? = null
+
+    @Volatile
+    private var lastFullScreenVerifyExitAt: Long = 0L
+
+    @Volatile
     var isCurrentlyOnApprovedWatchPage: Boolean = false
         private set
 
     /**
      * Notifies the block engine that the user clicked or navigated inside YouTube.
-     * Clears latched approval state so a newly clicked video from the below-player feed
-     * must be freshly verified rather than inheriting the previous video's approval.
+     * Ignores in-player control clicks (e.g. "Enter full screen", "Exit full screen", Play/Pause,
+     * Seek bar, Video Quality, Playback Speed, Captions) so full-screen playback never loses its
+     * verified channel approval.
      */
     fun onUserNavigationOrClick(
         event: AccessibilityEvent? = null,
         currentTime: Long = System.currentTimeMillis()
     ) {
-        lastApprovedVideoKey = null
-        lastApprovedChannel = null
-        lastClickOrNavigationAt = currentTime
-        currentVideoFirstSeenAt = currentTime
+        if (event != null && YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event)) {
+            return
+        }
 
         val (clickedChannel, clickedTitle) = YouTubeNodeExtractor.extractClickedVideoCardIdentity(event)
         if (!clickedChannel.isNullOrBlank()) {
@@ -89,6 +98,30 @@ object YouTubeContentBlockEngine {
             pendingClickedTitle = clickedTitle
             pendingClickedAt = currentTime
         }
+
+        // Window state changes inside YouTube (such as rotating to landscape full screen or opening
+        // the video quality bottom sheet) should NOT wipe out a verified watch-page approval up front;
+        // title-change and surface-change checks in checkSandboxStillValid / evaluate handle real navigations.
+        val isWindowChangeOnly = event != null &&
+                (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                        event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED)
+        if (isWindowChangeOnly && (lastApprovedChannel != null || com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive)) {
+            return
+        }
+
+        lastApprovedVideoKey = null
+        lastApprovedChannel = null
+        lastApprovedHandle = null
+        lastClickOrNavigationAt = currentTime
+        currentVideoFirstSeenAt = currentTime
+    }
+
+    /**
+     * Resets the metadata grace window when FocusAccessibilityService exits full screen back to
+     * portrait mode to inspect the portrait channel header.
+     */
+    fun onExitedFullScreenForVerification(currentTime: Long = System.currentTimeMillis()) {
+        currentVideoFirstSeenAt = currentTime
     }
 
     /**
@@ -98,10 +131,10 @@ object YouTubeContentBlockEngine {
      *  - Shorts opens,
      *  - The watch page is exited,
      *  - The strict watch-header video title changes to a different video, or
-     *  - An unapproved channel appears in the active watch header.
+     *  - An unapproved channel appears in the active portrait watch header.
      *
-     * Scrolling down the recommendation feed hides the watch header (returning null/empty for strict
-     * watch header signals while recommendation cards are excluded), so scrolling stays 100% uninterrupted.
+     * In Full-Screen mode (or when scrolling down the recommendation feed), the portrait watch header
+     * is hidden, so the sandbox remains active as long as the video title has not changed.
      */
     fun checkSandboxStillValid(
         rootNode: AccessibilityNodeInfo?,
@@ -114,13 +147,13 @@ object YouTubeContentBlockEngine {
 
         if (YouTubeNodeExtractor.detectShorts(rootNode, event)) {
             com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
-            onUserNavigationOrClick(event, currentTime)
+            resetVideoTracking()
             return false
         }
 
         if (!YouTubeNodeExtractor.detectWatchPage(rootNode)) {
             com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
-            onUserNavigationOrClick(event, currentTime)
+            resetVideoTracking()
             return false
         }
 
@@ -132,17 +165,29 @@ object YouTubeContentBlockEngine {
         ) {
             // A different video title is now rendered in the active watch header!
             com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
-            onUserNavigationOrClick(event, currentTime)
+            lastApprovedVideoKey = null
+            lastApprovedChannel = null
+            lastApprovedHandle = null
+            currentVideoFirstSeenAt = currentTime
             return false
+        }
+
+        // While in Full-Screen mode, the portrait channel header is hidden and overlays may show
+        // "More videos" recommendations. Keep the sandbox locked unless the video title changed above.
+        if (YouTubeNodeExtractor.isFullScreenVideoPlayback(rootNode)) {
+            return true
         }
 
         val identity = YouTubeNodeExtractor.extractChannelIdentity(rootNode)
         if (identity.isIdentifiable) {
             val isApproved = isChannelIdentityApproved(identity, approvedChannelIds, approvedChannelNames)
             if (!isApproved) {
-                // Positively identified an unapproved channel in the watch header!
+                // Positively identified an unapproved channel in the portrait watch header!
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
-                onUserNavigationOrClick(event, currentTime)
+                lastApprovedVideoKey = null
+                lastApprovedChannel = null
+                lastApprovedHandle = null
+                currentVideoFirstSeenAt = currentTime
                 return false
             }
         }
@@ -191,6 +236,8 @@ object YouTubeContentBlockEngine {
             }
         }
 
+        val isFullScreen = YouTubeNodeExtractor.isFullScreenVideoPlayback(rootNode)
+
         // 2.1 Ad detection (Sponsor / Skip Ad / Ad countdown / Visit advertiser)
         val isAd = YouTubeNodeExtractor.detectAd(rootNode)
 
@@ -208,8 +255,16 @@ object YouTubeContentBlockEngine {
 
         // 3. DUAL CHANNEL IDENTITY EXTRACTION (@handle under title + Channel Name from Subscribe/Avatar/Owner)
         val title = YouTubeNodeExtractor.extractVideoTitle(rootNode)
-        val identity = YouTubeNodeExtractor.extractChannelIdentity(rootNode)
-        val fallbackChannel = if (!identity.isIdentifiable) resolveChannelFromText(rootNode) else null
+        val identity = if (isFullScreen) {
+            // In full-screen mode, only accept strict portrait header signals if explicitly present
+            YouTubeNodeExtractor.WatchChannelIdentity(
+                channelHandle = null,
+                channelName = YouTubeNodeExtractor.extractChannelFromSubscribeButton(rootNode)
+            )
+        } else {
+            YouTubeNodeExtractor.extractChannelIdentity(rootNode)
+        }
+        val fallbackChannel = if (!isFullScreen && !identity.isIdentifiable) resolveChannelFromText(rootNode) else null
 
         if (title != null) lastSeenVideoTitle = title
         trackVideo(title, currentTime)
@@ -231,43 +286,71 @@ object YouTubeContentBlockEngine {
 
         var hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank()
         var isPositivelyApproved = isHandleApproved || isNameApproved || isFallbackApproved
+        var approvedChannelFromCardClick: String? = null
 
         // If the user just clicked a video card whose channel was extracted from the click event:
         //  - If the clicked card is from an UNAPPROVED channel, block it once the transition begins (>= 150ms)
         //    even if the watch header is still rendering or briefly holding the old video's header.
+        //  - If the clicked card is from an APPROVED channel and we are in full screen (where the portrait
+        //    header will not render), approve the new video directly from the verified card click.
         val clickedChan = pendingClickedChannel
+        val clickedTitle = pendingClickedTitle
         val clickedAge = currentTime - pendingClickedAt
-        if (!clickedChan.isNullOrBlank() && clickedAge in 150L..4500L) {
+        if (!clickedChan.isNullOrBlank() && clickedAge in 0L..6000L) {
             val isClickedChanApproved = isChannelApproved(clickedChan, approvedChannelIds, approvedChannelNames)
-            if (!isClickedChanApproved && (isStillShowingOldVideoImmediatelyAfterClick || !hasPositiveChannelIdentification)) {
+            if (!isClickedChanApproved && clickedAge >= 150L && (isStillShowingOldVideoImmediatelyAfterClick || !hasPositiveChannelIdentification)) {
                 pendingClickedChannel = null
                 pendingClickedTitle = null
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
                 isCurrentlyOnApprovedWatchPage = false
                 return YouTubeBlockDecision.blockedChannel(clickedChan)
+            } else if (isClickedChanApproved && !hasPositiveChannelIdentification) {
+                val titleMatchesClicked = clickedTitle.isNullOrBlank() ||
+                        title.isNullOrBlank() ||
+                        title.equals(clickedTitle, ignoreCase = true) ||
+                        title.contains(clickedTitle, ignoreCase = true) ||
+                        clickedTitle.contains(title, ignoreCase = true)
+                if (titleMatchesClicked && (!isStillShowingOldVideoImmediatelyAfterClick || isFullScreen)) {
+                    hasPositiveChannelIdentification = true
+                    isPositivelyApproved = true
+                    approvedChannelFromCardClick = clickedChan
+                    if (!title.isNullOrBlank() && !isStillShowingOldVideoImmediatelyAfterClick) {
+                        pendingClickedChannel = null
+                        pendingClickedTitle = null
+                    }
+                }
             }
         }
-        if (hasPositiveChannelIdentification && !isStillShowingOldVideoImmediatelyAfterClick) {
+        if (hasPositiveChannelIdentification && !isStillShowingOldVideoImmediatelyAfterClick && approvedChannelFromCardClick == null) {
             pendingClickedChannel = null
             pendingClickedTitle = null
         }
 
         // 3.1 ACTIVE SESSION LATCH & SAFE PLAYBACK SANDBOX:
-        // Only latch when NOT inside the post-click transition cooldown window.
+        // Keep approved status locked across full-screen transitions, hidden player controls (title == null),
+        // and portrait scrolling as long as the video title has not changed to a different video.
         val isInPostClickCooldown = currentTime < com.example.feature.youtube.detector.YouTubePlaybackSandbox.navigationCooldownUntil
         val isSandboxActiveForPlayback = com.example.feature.youtube.detector.YouTubePlaybackSandbox.isSandboxActive
-        val isLatchedApproved = !hasPositiveChannelIdentification && !isInPostClickCooldown && (
-            (lastApprovedVideoKey != null && title != null && currentVideoKey == lastApprovedVideoKey) ||
+        val isSameOrHiddenTitle = title == null ||
+                lastApprovedVideoKey == null ||
+                currentVideoKey.equals(lastApprovedVideoKey, ignoreCase = true)
+
+        val isLatchedApproved = !hasPositiveChannelIdentification && (
+            (!isInPostClickCooldown && lastApprovedChannel != null && isSameOrHiddenTitle) ||
+            (isFullScreen && lastApprovedChannel != null && isSameOrHiddenTitle) ||
             isSandboxActiveForPlayback
         )
 
         val approved = isPositivelyApproved || isLatchedApproved
         val displayChannel = when {
+            approvedChannelFromCardClick != null -> approvedChannelFromCardClick
             isNameApproved -> identity.channelName
             isHandleApproved -> identity.channelName ?: identity.channelHandle
             isFallbackApproved -> fallbackChannel
             hasPositiveChannelIdentification -> identity.preferredDisplay ?: fallbackChannel
-            isLatchedApproved -> lastApprovedChannel ?: lastSeenChannelName ?: com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
+            isLatchedApproved -> lastApprovedChannel
+                ?: com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
+                ?: lastSeenChannelName
             else -> null
         }
         if (displayChannel != null && !isStillShowingOldVideoImmediatelyAfterClick) {
@@ -277,12 +360,17 @@ object YouTubeContentBlockEngine {
         // 3.2 SMART AD DETECTION & HANDLING RULES:
         if (isAd) {
             if (approved && !isStillShowingOldVideoImmediatelyAfterClick) {
-                lastApprovedVideoKey = currentVideoKey
+                if (currentVideoKey != null) {
+                    lastApprovedVideoKey = currentVideoKey
+                }
                 lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
+                if (!identity.channelHandle.isNullOrBlank()) {
+                    lastApprovedHandle = identity.channelHandle
+                }
                 isCurrentlyOnApprovedWatchPage = true
                 return YouTubeBlockDecision.approvedChannel(
                     channel = lastApprovedChannel ?: "Approved Channel",
-                    title = title,
+                    title = title ?: lastSeenVideoTitle,
                     isAdPlaying = true
                 )
             } else if (hasPositiveChannelIdentification && !isPositivelyApproved) {
@@ -308,26 +396,34 @@ object YouTubeContentBlockEngine {
 
         // 3.3 NORMAL VIDEO PLAYBACK (No Ad):
         if (approved) {
-            // Only enter the passive Safe Playback Sandbox when positively approved AND outside the
-            // immediate post-click transition guard (or after the new video title has loaded).
-            val canEnterSandboxNow = isPositivelyApproved &&
+            // Immediately record the approved channel and video key so switching to full screen
+            // at any moment (even within the first second of playback) preserves the approved lock.
+            if (!isStillShowingOldVideoImmediatelyAfterClick) {
+                if (currentVideoKey != null) {
+                    lastApprovedVideoKey = currentVideoKey
+                }
+                lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
+                if (!identity.channelHandle.isNullOrBlank()) {
+                    lastApprovedHandle = identity.channelHandle
+                }
+                isCurrentlyOnApprovedWatchPage = true
+            }
+
+            val canEnterSandboxNow = (isPositivelyApproved || (isFullScreen && isLatchedApproved)) &&
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.canEnterSandbox(title, currentTime)
 
             if (canEnterSandboxNow) {
-                lastApprovedVideoKey = currentVideoKey
-                lastApprovedChannel = displayChannel ?: lastApprovedChannel ?: "Approved Channel"
-                isCurrentlyOnApprovedWatchPage = true
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
                     channel = com.example.feature.youtube.detector.ChannelIdentityInfo(
                         channelName = lastApprovedChannel,
-                        channelHandle = identity.channelHandle
+                        channelHandle = identity.channelHandle ?: lastApprovedHandle
                     ),
-                    title = title ?: lastSeenVideoTitle
+                    title = title ?: lastApprovedVideoKey ?: lastSeenVideoTitle
                 )
             }
             return YouTubeBlockDecision.approvedChannel(
                 channel = displayChannel ?: lastApprovedChannel ?: "Approved Channel",
-                title = title,
+                title = title ?: lastApprovedVideoKey ?: lastSeenVideoTitle,
                 isAdPlaying = false
             )
         } else if (hasPositiveChannelIdentification) {
@@ -337,8 +433,25 @@ object YouTubeContentBlockEngine {
             return YouTubeBlockDecision.blockedChannel(displayChannel)
         }
 
+        // 3.4 UNVERIFIED VIDEO IN FULL SCREEN:
+        // If a brand-new or unverified video is playing in full-screen mode and its channel metadata
+        // is hidden because full-screen mode hides the portrait watch header, auto-exit full screen once
+        // so FocusShield can read the portrait channel header and verify instead of falsely blocking.
+        val elapsedForCurrentVideo = currentTime - currentVideoFirstSeenAt
+        if (isFullScreen && elapsedForCurrentVideo >= 900L) {
+            val fsKey = currentVideoKey ?: "__unverified_fullscreen__"
+            val canAutoExitFs = fsKey != lastFullScreenVerifyExitKey ||
+                    (currentTime - lastFullScreenVerifyExitAt) > 6000L
+            if (canAutoExitFs) {
+                lastFullScreenVerifyExitKey = fsKey
+                lastFullScreenVerifyExitAt = currentTime
+                currentVideoFirstSeenAt = currentTime
+                return YouTubeBlockDecision.exitFullScreenForVerification(title)
+            }
+        }
+
         // 4. Channel metadata not rendered yet: wait briefly, then treat as unknown.
-        val withinGrace = (currentTime - currentVideoFirstSeenAt) < CHANNEL_METADATA_GRACE_MILLIS
+        val withinGrace = elapsedForCurrentVideo < CHANNEL_METADATA_GRACE_MILLIS
         if (withinGrace) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
@@ -386,6 +499,12 @@ object YouTubeContentBlockEngine {
             "owner_name",
             "channel_title"
         )
+        val excludedTitleIds = listOf(
+            "watch_title_text",
+            "watch_metadata_title",
+            "video_title",
+            "title"
+        )
         val builder = StringBuilder()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(rootNode)
@@ -394,7 +513,13 @@ object YouTubeContentBlockEngine {
             val node = queue.removeFirst()
             visited++
             val resId = node.viewIdResourceName ?: ""
-            if (watchIds.any { resId.contains(it, ignoreCase = true) }) {
+            val isTitle = excludedTitleIds.any { resId.contains(it, ignoreCase = true) } &&
+                    !resId.contains("channel_title", ignoreCase = true) &&
+                    !resId.contains("subtitle", ignoreCase = true)
+            if (!isTitle &&
+                watchIds.any { resId.contains(it, ignoreCase = true) } &&
+                !YouTubeNodeExtractor.isNodeInExcludedContainer(node)
+            ) {
                 node.text?.let { builder.append(it).append(" ") }
                 node.contentDescription?.let { builder.append(it).append(" ") }
             }
@@ -414,13 +539,21 @@ object YouTubeContentBlockEngine {
     private fun trackVideo(title: String?, currentTime: Long) {
         val videoKey = title?.trim()?.takeIf { it.isNotEmpty() }
         if (videoKey != null) {
-            if (videoKey != currentVideoKey) {
+            if (currentVideoKey == null) {
+                // First time seeing the title for the current video (e.g. title node rendered slightly after channel header)
+                currentVideoKey = videoKey
+                if (lastApprovedChannel != null && lastApprovedVideoKey == null) {
+                    lastApprovedVideoKey = videoKey
+                }
+            } else if (!videoKey.equals(currentVideoKey, ignoreCase = true)) {
                 currentVideoKey = videoKey
                 currentVideoFirstSeenAt = currentTime
                 lastSeenChannelName = null
                 lastApprovedVideoKey = null
                 lastApprovedChannel = null
+                lastApprovedHandle = null
                 isCurrentlyOnApprovedWatchPage = false
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
             }
         } else {
             if (currentVideoFirstSeenAt == 0L) {
@@ -436,6 +569,7 @@ object YouTubeContentBlockEngine {
         wasAdPlayingOnLastTick = false
         lastApprovedVideoKey = null
         lastApprovedChannel = null
+        lastApprovedHandle = null
         isCurrentlyOnApprovedWatchPage = false
         com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
     }
@@ -445,10 +579,16 @@ object YouTubeContentBlockEngine {
      */
     fun reset() {
         resetVideoTracking()
+        com.example.feature.youtube.detector.YouTubePlaybackSandbox.reset()
         lastSeenChannelName = null
         lastSeenVideoTitle = null
         lastApprovedVideoKey = null
         lastApprovedChannel = null
+        lastApprovedHandle = null
+        pendingClickedChannel = null
+        pendingClickedTitle = null
+        lastFullScreenVerifyExitKey = null
+        lastFullScreenVerifyExitAt = 0L
         isCurrentlyOnApprovedWatchPage = false
     }
 

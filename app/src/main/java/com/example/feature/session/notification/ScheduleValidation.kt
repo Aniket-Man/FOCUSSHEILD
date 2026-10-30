@@ -132,6 +132,36 @@ object ScheduleValidation {
         return firstIntervals.any { a -> secondIntervals.any { b -> a.first < b.second && b.first < a.second } }
     }
 
+    /**
+     * True when [schedule] is enabled and [nowMillis] falls inside one of its active time windows.
+     */
+    fun isCurrentlyActiveWindow(
+        schedule: FocusScheduleEntity,
+        nowMillis: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = TimeZone.getDefault()
+    ): Boolean {
+        if (!schedule.isEnabled) return false
+        val window = windowOf(schedule) ?: return false
+
+        if (isOneTime(schedule)) {
+            val startMillis = ScheduleAlarmPlanner.oneTimeTrigger(
+                schedule.scheduledDateMillis,
+                window.startMinutes,
+                timeZone
+            )
+            val endMillis = startMillis + window.lengthMinutes * MILLIS_PER_MINUTE
+            return nowMillis in startMillis until endMillis
+        }
+
+        val days = daysOf(schedule, timeZone) ?: return false
+        val intervals = weekIntervals(days, window)
+        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = nowMillis }
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+        val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val currentWeekMinute = (dayOfWeek - 1) * MINUTES_PER_DAY + minuteOfDay
+        return intervals.any { (from, to) -> currentWeekMinute in from until to }
+    }
+
     // ---- internals ---------------------------------------------------------------------
 
     private const val MINUTES_PER_DAY = 24 * 60

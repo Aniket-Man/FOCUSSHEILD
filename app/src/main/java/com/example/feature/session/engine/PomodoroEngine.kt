@@ -167,6 +167,47 @@ class PomodoroEngine(
         phaseAccumulatedPausedMillis = 0L
     }
 
+    fun restore(
+        pomodoroConfig: PomodoroConfig,
+        phase: PomodoroPhase,
+        cycle: Int,
+        phaseRemainingAtSaveMillis: Long,
+        totalFocusElapsedAtSaveMillis: Long,
+        savedAtTimestamp: Long,
+        wasPaused: Boolean,
+        now: Long = currentTimeProvider()
+    ) {
+        config = pomodoroConfig
+        currentPhase = phase
+        currentCycle = cycle.coerceIn(1, pomodoroConfig.totalCycles.coerceAtLeast(1))
+        isRunning = true
+        isPaused = wasPaused
+        isCompleted = false
+
+        val plannedPhaseDuration = getPlannedPhaseDuration().coerceAtLeast(1000L)
+        val phaseElapsedAtSave = (plannedPhaseDuration - phaseRemainingAtSaveMillis.coerceIn(0L, plannedPhaseDuration))
+            .coerceIn(0L, plannedPhaseDuration)
+
+        // Completed focus time prior to the current phase
+        completedFocusDurationMillis = if (phase == PomodoroPhase.FOCUS) {
+            (totalFocusElapsedAtSaveMillis - phaseElapsedAtSave).coerceAtLeast(0L)
+        } else {
+            totalFocusElapsedAtSaveMillis.coerceAtLeast(0L)
+        }
+
+        if (wasPaused) {
+            phaseStartTimestamp = (now - phaseElapsedAtSave).coerceAtLeast(1L)
+            phasePauseTimestamp = now
+            phaseAccumulatedPausedMillis = 0L
+        } else {
+            val deltaSinceSave = if (savedAtTimestamp > 0L) (now - savedAtTimestamp).coerceAtLeast(0L) else 0L
+            val currentPhaseElapsed = (phaseElapsedAtSave + deltaSinceSave).coerceIn(0L, plannedPhaseDuration)
+            phaseStartTimestamp = (now - currentPhaseElapsed).coerceAtLeast(1L)
+            phasePauseTimestamp = 0L
+            phaseAccumulatedPausedMillis = 0L
+        }
+    }
+
     fun reset() {
         currentPhase = PomodoroPhase.FOCUS
         currentCycle = 1

@@ -117,6 +117,10 @@ class SyncEngine(
             .filter { it.op == SyncTracker.OP_DELETE }
             .map { it.rowId }
             .toMutableSet()
+        val locallyModifiedScheduleIds = pendingScheduleOps
+            .filter { it.op == SyncTracker.OP_UPSERT }
+            .map { it.rowId }
+            .toSet()
 
         // Execute pending Firestore deletions FIRST so deleted items never reappear on pull
         for (planId in deletedPlanIds) {
@@ -135,7 +139,7 @@ class SyncEngine(
             } catch (_: Exception) {}
         }
 
-        // 1. Push Local Sessions
+        // 1. Push Local Sessions (preserving full session timing, Pomodoro cycles, and completion status)
         val initialLocalSessions = database.sessionDao().getAllSessionsAscending()
         for (session in initialLocalSessions) {
             val sessionDoc = userDoc.collection("sessions").document(session.id)
@@ -143,12 +147,19 @@ class SyncEngine(
                 "id" to session.id,
                 "userId" to uid,
                 "mode" to session.mode.name,
+                "title" to session.title,
                 "durationMinutes" to ((session.actualDurationMillis / (1000 * 60)).toInt()),
+                "plannedDurationMillis" to session.plannedDurationMillis,
                 "subject" to session.subject,
                 "topic" to session.topic,
                 "goal" to session.goal,
                 "actualDurationMillis" to session.actualDurationMillis,
+                "startTime" to session.startTime,
+                "endTime" to session.endTime,
                 "completed" to session.completed,
+                "cancelled" to session.cancelled,
+                "pomodoroCycles" to session.pomodoroCycles,
+                "completedPomodoroCycles" to session.completedPomodoroCycles,
                 "completedAt" to Timestamp(Date(session.endTime)),
                 "createdAt" to Timestamp(Date(session.createdAt))
             )
@@ -173,27 +184,36 @@ class SyncEngine(
                     val durMillis = durMinutes * 60 * 1000L
                     val subject = doc.getString("subject") ?: "Study"
                     val topic = doc.getString("topic") ?: "General"
+                    val title = doc.getString("title")?.takeIf { it.isNotBlank() } ?: "$subject - $topic"
                     val goal = doc.getString("goal") ?: "Deep Focus"
                     val actualMillis = doc.getLong("actualDurationMillis") ?: durMillis
+                    val plannedMillis = doc.getLong("plannedDurationMillis") ?: durMillis.coerceAtLeast(actualMillis)
                     val completed = doc.getBoolean("completed") ?: true
-                    val completedAt = doc.getTimestamp("completedAt")?.toDate()?.time ?: System.currentTimeMillis()
+                    val cancelled = doc.getBoolean("cancelled") ?: !completed
+                    val completedAt = doc.getTimestamp("completedAt")?.toDate()?.time
+                        ?: doc.getLong("endTime")
+                        ?: System.currentTimeMillis()
+                    val startTime = doc.getLong("startTime") ?: (completedAt - actualMillis)
+                    val endTime = doc.getLong("endTime") ?: completedAt
+                    val pomodoroCycles = (doc.getLong("pomodoroCycles") ?: 1L).toInt()
+                    val completedPomodoroCycles = (doc.getLong("completedPomodoroCycles") ?: if (completed) 1L else 0L).toInt()
                     val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: completedAt
 
                     val restoredSession = SessionRecordEntity(
                         id = id,
                         mode = mode,
-                        title = "$subject - $topic",
+                        title = title,
                         subject = subject,
                         topic = topic,
                         goal = goal,
-                        plannedDurationMillis = durMillis,
+                        plannedDurationMillis = plannedMillis,
                         actualDurationMillis = actualMillis,
-                        startTime = completedAt - actualMillis,
-                        endTime = completedAt,
+                        startTime = startTime,
+                        endTime = endTime,
                         completed = completed,
-                        cancelled = !completed,
-                        pomodoroCycles = 1,
-                        completedPomodoroCycles = 1,
+                        cancelled = cancelled,
+                        pomodoroCycles = pomodoroCycles,
+                        completedPomodoroCycles = completedPomodoroCycles,
                         createdAt = createdAt
                     )
                     database.sessionDao().insertSession(restoredSession)
@@ -203,11 +223,26 @@ class SyncEngine(
             handleFirestoreError(e, OperationType.LIST, "${userDoc.path}/sessions")
         }
 
-        // 3. Sync Profile Document (computed after merging local + remote sessions)
+        // 2b. Two-Way Append-Only Sync for Study Activities (YouTube Study Mode & Study Browser usage)
+        syncStudyActivitiesWithFirestore(userDoc, uid)
+
+        // 2c. Two-Way Append-Only Sync for Break Records
+        syncBreakRecordsWithFirestore(userDoc, uid)
+
+        // 2d. Two-Way Append-Only Sync for Blocked Attempts (Apps, Shorts, Reels, Websites)
+        syncBlockedAttemptsWithFirestore(userDoc, uid)
+
+        // 3. Sync Profile & Aggregated Statistics Document (computed after merging local + remote history)
         val mergedSessions = database.sessionDao().getAllSessionsAscending()
-        val calculatedStreak = com.example.feature.analytics.domain.StreakCalculator.calculate(mergedSessions).currentStreak
+        val mergedActivities = runCatching { database.cloudBulkDao().activities() }.getOrDefault(emptyList())
+        val mergedAttempts = runCatching { database.cloudBulkDao().blockedAttempts() }.getOrDefault(emptyList())
         val currentPrefs = preferencesRepository.preferencesFlow.first()
+        val streakResult = com.example.feature.analytics.domain.StreakCalculator.calculate(
+            sessions = mergedSessions,
+            minDailyThresholdMinutes = currentPrefs.minimumStreakThresholdMinutes
+        )
         var userGoalMinutes = currentPrefs.dailyGoalMinutes
+        var minStreakThreshold = currentPrefs.minimumStreakThresholdMinutes
 
         try {
             val userSnap = userDoc.get().await()
@@ -215,19 +250,47 @@ class SyncEngine(
                 val remoteGoal = userSnap.getLong("dailyStudyGoalMinutes")?.toInt()
                 if (remoteGoal != null && remoteGoal > 0 && initialLocalSessions.isEmpty() && userGoalMinutes == 240) {
                     userGoalMinutes = remoteGoal
+                    preferencesRepository.updateDailyGoalMinutes(remoteGoal)
+                }
+                val remoteThreshold = userSnap.getLong("minimumStreakThresholdMinutes")?.toInt()
+                if (remoteThreshold != null && remoteThreshold > 0 && initialLocalSessions.isEmpty() && minStreakThreshold == 20) {
+                    minStreakThreshold = remoteThreshold
+                    preferencesRepository.updateMinimumStreakThresholdMinutes(remoteThreshold)
                 }
                 val remoteDisplayName = userSnap.getString("displayName")
                 if (!remoteDisplayName.isNullOrBlank() && currentPrefs.userName == "Focus Scholar") {
                     preferencesRepository.updateUserName(remoteDisplayName)
                 }
             }
+
+            val localTotalStudyMillis = mergedSessions.sumOf { it.actualDurationMillis }
+            val localCompletedSessions = mergedSessions.count { it.completed }
+            val localYtMillis = mergedActivities
+                .filter { it.source == com.example.data.local.entity.StudyActivitySource.YOUTUBE }
+                .sumOf { it.durationMillis }
+            val localBrowserMillis = mergedActivities
+                .filter { it.source == com.example.data.local.entity.StudyActivitySource.BROWSER }
+                .sumOf { it.durationMillis }
+            val localBlockedCount = mergedAttempts.size
+
+            val remoteLongestStreak = if (userSnap.exists()) (userSnap.getLong("longestStreak")?.toInt() ?: 0) else 0
+            val remoteTotalStudyMillis = if (userSnap.exists()) (userSnap.getLong("totalStudyTimeMillis") ?: 0L) else 0L
+            val remoteCompletedSessions = if (userSnap.exists()) (userSnap.getLong("completedSessionsCount")?.toInt() ?: 0) else 0
+
             val existingCreatedAt = if (userSnap.exists()) userSnap.get("createdAt") else null
             val profilePayload = hashMapOf<String, Any>(
                 "userId" to uid,
                 "displayName" to (authRepository.currentDisplayName().takeUnless { it.isNullOrBlank() } ?: currentPrefs.userName),
                 "email" to (authRepository.currentUserEmail() ?: ""),
                 "dailyStudyGoalMinutes" to userGoalMinutes,
-                "currentStreak" to calculatedStreak,
+                "minimumStreakThresholdMinutes" to minStreakThreshold,
+                "currentStreak" to streakResult.currentStreak,
+                "longestStreak" to maxOf(streakResult.longestStreak, remoteLongestStreak),
+                "totalStudyTimeMillis" to maxOf(localTotalStudyMillis, remoteTotalStudyMillis),
+                "completedSessionsCount" to maxOf(localCompletedSessions, remoteCompletedSessions),
+                "youtubeStudyTimeMillis" to localYtMillis,
+                "browserStudyTimeMillis" to localBrowserMillis,
+                "blockedAttemptsCount" to localBlockedCount,
                 "updatedAt" to FieldValue.serverTimestamp(),
                 "createdAt" to (existingCreatedAt ?: FieldValue.serverTimestamp())
             )
@@ -236,6 +299,7 @@ class SyncEngine(
             handleFirestoreError(e, OperationType.WRITE, userDoc.path)
             throw e
         }
+
 
         // 4. Push Local Study Plans
         val localPlans = database.studyPlanDao().getAllPlans()
@@ -421,6 +485,7 @@ class SyncEngine(
         } catch (_: Exception) {
             emptyList()
         }
+        // 7a. Push locally modified schedules first so local edits take precedence
         for (schedule in localSchedules) {
             if (schedule.id in deletedScheduleIds || isLegacyPreloadedSchedule(schedule.title, schedule.subjectName, schedule.startTime, schedule.endTime)) {
                 database.focusScheduleDao().deleteScheduleById(schedule.id)
@@ -429,33 +494,13 @@ class SyncEngine(
                 } catch (_: Exception) {}
                 continue
             }
-            val scheduleDoc = userDoc.collection("focus_schedules").document(schedule.id)
-            val schedulePayload = hashMapOf<String, Any>(
-                "id" to schedule.id,
-                "userId" to uid,
-                "title" to schedule.title,
-                "daysOfWeek" to schedule.daysOfWeek,
-                "startTime" to schedule.startTime,
-                "endTime" to schedule.endTime,
-                "isEnabled" to schedule.isEnabled,
-                "isAutoStartSession" to schedule.isAutoStartSession,
-                "mode" to schedule.mode,
-                "subjectName" to schedule.subjectName,
-                "colorHex" to schedule.colorHex,
-                "repeatEnabled" to schedule.repeatEnabled,
-                "scheduledDateMillis" to schedule.scheduledDateMillis,
-                "breakMinutes" to schedule.breakMinutes,
-                "description" to schedule.description,
-                "blockedAppPackages" to schedule.blockedAppPackages,
-                "blockNotifications" to schedule.blockNotifications,
-                "createdAt" to Timestamp(Date(schedule.createdAt)),
-                "updatedAt" to Timestamp(Date(System.currentTimeMillis()))
-            )
-            try {
-                scheduleDoc.set(schedulePayload, SetOptions.merge()).await()
-            } catch (_: Exception) {}
+            if (schedule.id in locallyModifiedScheduleIds) {
+                pushScheduleToFirestore(userDoc, uid, schedule)
+            }
         }
 
+        // 7b. Pull remote schedules from Firestore (insert new or update existing if not locally modified)
+        val remoteScheduleIdsSeen = mutableSetOf<String>()
         try {
             val remoteSchedulesSnap = userDoc.collection("focus_schedules").get().await()
             for (doc in remoteSchedulesSnap.documents) {
@@ -472,31 +517,59 @@ class SyncEngine(
                     continue
                 }
 
+                if (title.isBlank()) continue
+                remoteScheduleIdsSeen.add(id)
+
                 val existing = database.focusScheduleDao().getScheduleById(id)
-                if (existing == null && title.isNotBlank()) {
-                    val restoredSchedule = FocusScheduleEntity(
-                        id = id,
-                        title = title,
-                        daysOfWeek = doc.getString("daysOfWeek") ?: "MON,TUE,WED,THU,FRI",
-                        startTime = startTime,
-                        endTime = endTime,
-                        isEnabled = doc.getBoolean("isEnabled") ?: true,
-                        isAutoStartSession = doc.getBoolean("isAutoStartSession") ?: true,
-                        mode = doc.getString("mode") ?: "TIMER",
-                        subjectName = subjectName,
-                        colorHex = doc.getString("colorHex") ?: "#4F46E5",
-                        repeatEnabled = doc.getBoolean("repeatEnabled") ?: true,
-                        scheduledDateMillis = doc.getLong("scheduledDateMillis") ?: 0L,
-                        breakMinutes = (doc.getLong("breakMinutes") ?: 5L).toInt(),
-                        description = doc.getString("description") ?: "",
-                        blockedAppPackages = doc.getString("blockedAppPackages") ?: "",
-                        blockNotifications = doc.getBoolean("blockNotifications") ?: false,
-                        createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis()
-                    )
-                    database.focusScheduleDao().insertSchedule(restoredSchedule)
+                val remoteEntity = FocusScheduleEntity(
+                    id = id,
+                    title = title,
+                    daysOfWeek = doc.getString("daysOfWeek") ?: "MON,TUE,WED,THU,FRI",
+                    startTime = startTime,
+                    endTime = endTime,
+                    isEnabled = doc.getBoolean("isEnabled") ?: true,
+                    isAutoStartSession = doc.getBoolean("isAutoStartSession") ?: true,
+                    mode = doc.getString("mode") ?: "TIMER",
+                    subjectName = subjectName,
+                    colorHex = doc.getString("colorHex") ?: "#4F46E5",
+                    repeatEnabled = doc.getBoolean("repeatEnabled") ?: true,
+                    scheduledDateMillis = doc.getLong("scheduledDateMillis") ?: 0L,
+                    breakMinutes = (doc.getLong("breakMinutes") ?: 5L).toInt(),
+                    description = doc.getString("description") ?: "",
+                    blockedAppPackages = doc.getString("blockedAppPackages") ?: "",
+                    blockNotifications = doc.getBoolean("blockNotifications") ?: false,
+                    createdAt = doc.getTimestamp("createdAt")?.toDate()?.time
+                        ?: existing?.createdAt
+                        ?: System.currentTimeMillis()
+                )
+
+                if (existing == null) {
+                    database.focusScheduleDao().insertSchedule(remoteEntity)
+                } else if (existing.id !in locallyModifiedScheduleIds && existing != remoteEntity) {
+                    database.focusScheduleDao().updateSchedule(remoteEntity)
                 }
             }
         } catch (_: Exception) {}
+
+        // 7c. Push any local schedules not yet in Firestore so cloud + local are fully merged
+        val mergedLocalSchedules = try {
+            database.focusScheduleDao().getAllSchedules()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        for (schedule in mergedLocalSchedules) {
+            if (schedule.id in deletedScheduleIds) continue
+            if (schedule.id !in remoteScheduleIdsSeen && schedule.id !in locallyModifiedScheduleIds) {
+                pushScheduleToFirestore(userDoc, uid, schedule)
+            }
+        }
+
+        // Re-arm schedule alarms so any pulled or updated schedules are reflected in AlarmManager
+        if (appContext != null) {
+            try {
+                appContext.focusScheduleRepository.syncAllAlarms(appContext)
+            } catch (_: Exception) {}
+        }
 
         // Clear local outbox as data is synchronized
         try {
@@ -534,6 +607,38 @@ class SyncEngine(
         }
     }
 
+    private suspend fun pushScheduleToFirestore(
+        userDoc: com.google.firebase.firestore.DocumentReference,
+        uid: String,
+        schedule: FocusScheduleEntity
+    ) {
+        val scheduleDoc = userDoc.collection("focus_schedules").document(schedule.id)
+        val schedulePayload = hashMapOf<String, Any>(
+            "id" to schedule.id,
+            "userId" to uid,
+            "title" to schedule.title,
+            "daysOfWeek" to schedule.daysOfWeek,
+            "startTime" to schedule.startTime,
+            "endTime" to schedule.endTime,
+            "isEnabled" to schedule.isEnabled,
+            "isAutoStartSession" to schedule.isAutoStartSession,
+            "mode" to schedule.mode,
+            "subjectName" to schedule.subjectName,
+            "colorHex" to schedule.colorHex,
+            "repeatEnabled" to schedule.repeatEnabled,
+            "scheduledDateMillis" to schedule.scheduledDateMillis,
+            "breakMinutes" to schedule.breakMinutes,
+            "description" to schedule.description,
+            "blockedAppPackages" to schedule.blockedAppPackages,
+            "blockNotifications" to schedule.blockNotifications,
+            "createdAt" to Timestamp(Date(schedule.createdAt)),
+            "updatedAt" to Timestamp(Date(System.currentTimeMillis()))
+        )
+        try {
+            scheduleDoc.set(schedulePayload, SetOptions.merge()).await()
+        } catch (_: Exception) {}
+    }
+
     private fun isLegacyPreloadedStudyPlan(
         id: String,
         subjectName: String,
@@ -547,6 +652,227 @@ class SyncEngine(
             (subjectName == "Mathematics" && topicName == "Calculus" && startTime == "14:00" && endTime == "15:30")
     }
 
+    private suspend fun syncStudyActivitiesWithFirestore(
+        userDoc: com.google.firebase.firestore.DocumentReference,
+        uid: String
+    ) {
+        val localActivities = runCatching { database.cloudBulkDao().activities() }.getOrDefault(emptyList())
+        val localIds = localActivities.map { it.id }.toSet()
+
+        // Push local study activities (YouTube Study Mode & Study Browser usage)
+        for (act in localActivities) {
+            val docRef = userDoc.collection("study_activities").document(act.id)
+            val payload = hashMapOf<String, Any?>(
+                "id" to act.id,
+                "userId" to uid,
+                "sessionId" to act.sessionId,
+                "activityType" to act.activityType.name,
+                "source" to act.source.name,
+                "subject" to act.subject,
+                "topic" to act.topic,
+                "channelName" to act.channelName,
+                "channelId" to act.channelId,
+                "videoTitle" to act.videoTitle,
+                "startedAt" to act.startedAt,
+                "endedAt" to act.endedAt,
+                "durationMillis" to act.durationMillis,
+                "createdAt" to act.createdAt
+            )
+            try {
+                docRef.set(payload, SetOptions.merge()).await()
+            } catch (_: Exception) {}
+        }
+
+        // Pull remote study activities missing locally
+        try {
+            val snap = userDoc.collection("study_activities").get().await()
+            val toInsert = mutableListOf<com.example.data.local.entity.StudyActivityEntity>()
+            for (doc in snap.documents) {
+                val id = doc.getString("id") ?: doc.id
+                if (id in localIds) continue
+                val typeStr = doc.getString("activityType") ?: "FOCUS_SESSION"
+                val sourceStr = doc.getString("source") ?: "TIMER"
+                val activityType = runCatching {
+                    com.example.data.local.entity.StudyActivityType.valueOf(typeStr)
+                }.getOrDefault(com.example.data.local.entity.StudyActivityType.FOCUS_SESSION)
+                val source = runCatching {
+                    com.example.data.local.entity.StudyActivitySource.valueOf(sourceStr)
+                }.getOrDefault(com.example.data.local.entity.StudyActivitySource.TIMER)
+                val durationMillis = doc.getLong("durationMillis") ?: 0L
+                val endedAt = doc.getLong("endedAt") ?: System.currentTimeMillis()
+                val startedAt = doc.getLong("startedAt") ?: (endedAt - durationMillis)
+                val createdAt = doc.getLong("createdAt")
+                    ?: doc.getTimestamp("createdAt")?.toDate()?.time
+                    ?: endedAt
+
+                toInsert.add(
+                    com.example.data.local.entity.StudyActivityEntity(
+                        id = id,
+                        sessionId = doc.getString("sessionId") ?: "",
+                        activityType = activityType,
+                        source = source,
+                        subject = doc.getString("subject") ?: "Study",
+                        topic = doc.getString("topic") ?: "General",
+                        channelName = doc.getString("channelName"),
+                        channelId = doc.getString("channelId"),
+                        videoTitle = doc.getString("videoTitle"),
+                        startedAt = startedAt,
+                        endedAt = endedAt,
+                        durationMillis = durationMillis,
+                        createdAt = createdAt
+                    )
+                )
+            }
+            if (toInsert.isNotEmpty()) {
+                database.cloudBulkDao().insertActivitiesMissing(toInsert)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun syncBreakRecordsWithFirestore(
+        userDoc: com.google.firebase.firestore.DocumentReference,
+        uid: String
+    ) {
+        val localBreaks = runCatching { database.cloudBulkDao().breaks() }.getOrDefault(emptyList())
+        val localIds = localBreaks.map { it.id }.toSet()
+
+        for (brk in localBreaks) {
+            val docRef = userDoc.collection("break_records").document(brk.id)
+            val payload = hashMapOf<String, Any>(
+                "id" to brk.id,
+                "userId" to uid,
+                "sessionId" to brk.sessionId,
+                "requestedDurationMillis" to brk.requestedDurationMillis,
+                "actualDurationMillis" to brk.actualDurationMillis,
+                "startTime" to brk.startTime,
+                "endTime" to brk.endTime,
+                "completed" to brk.completed,
+                "createdAt" to brk.createdAt
+            )
+            try {
+                docRef.set(payload, SetOptions.merge()).await()
+            } catch (_: Exception) {}
+        }
+
+        try {
+            val snap = userDoc.collection("break_records").get().await()
+            val toInsert = mutableListOf<com.example.data.local.entity.BreakRecordEntity>()
+            for (doc in snap.documents) {
+                val id = doc.getString("id") ?: doc.id
+                if (id in localIds) continue
+                val sessionId = doc.getString("sessionId") ?: continue
+                val actualDurationMillis = doc.getLong("actualDurationMillis") ?: 0L
+                val requestedDurationMillis = doc.getLong("requestedDurationMillis") ?: actualDurationMillis
+                val endTime = doc.getLong("endTime") ?: System.currentTimeMillis()
+                val startTime = doc.getLong("startTime") ?: (endTime - actualDurationMillis)
+                val createdAt = doc.getLong("createdAt")
+                    ?: doc.getTimestamp("createdAt")?.toDate()?.time
+                    ?: endTime
+
+                toInsert.add(
+                    com.example.data.local.entity.BreakRecordEntity(
+                        id = id,
+                        sessionId = sessionId,
+                        requestedDurationMillis = requestedDurationMillis,
+                        actualDurationMillis = actualDurationMillis,
+                        startTime = startTime,
+                        endTime = endTime,
+                        completed = doc.getBoolean("completed") ?: true,
+                        createdAt = createdAt
+                    )
+                )
+            }
+            if (toInsert.isNotEmpty()) {
+                database.cloudBulkDao().insertBreaksMissing(toInsert)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun syncBlockedAttemptsWithFirestore(
+        userDoc: com.google.firebase.firestore.DocumentReference,
+        uid: String
+    ) {
+        val localAttempts = runCatching { database.cloudBulkDao().blockedAttempts() }.getOrDefault(emptyList())
+        val localEventIds = localAttempts.map { it.eventId }.toSet()
+
+        // Push recent blocked attempts (last 500 events to keep sync fast while preserving analytics history)
+        val attemptsToPush = if (localAttempts.size > 500) {
+            localAttempts.sortedByDescending { it.timestamp }.take(500)
+        } else {
+            localAttempts
+        }
+        for (att in attemptsToPush) {
+            if (att.eventId.isBlank()) continue
+            val docRef = userDoc.collection("blocked_attempts").document(att.eventId)
+            val payload = hashMapOf<String, Any?>(
+                "eventId" to att.eventId,
+                "userId" to uid,
+                "timestamp" to att.timestamp,
+                "eventType" to att.eventType.name,
+                "source" to att.source.name,
+                "packageName" to att.packageName,
+                "appName" to att.appName,
+                "domain" to att.domain,
+                "channelId" to att.channelId,
+                "channelName" to att.channelName,
+                "videoTitle" to att.videoTitle,
+                "matchedKeyword" to att.matchedKeyword,
+                "ruleRef" to att.ruleRef,
+                "sessionId" to att.sessionId,
+                "scheduleId" to att.scheduleId,
+                "subject" to att.subject,
+                "topic" to att.topic,
+                "deviceId" to att.deviceId,
+                "createdAt" to att.timestamp
+            )
+            try {
+                docRef.set(payload, SetOptions.merge()).await()
+            } catch (_: Exception) {}
+        }
+
+        try {
+            val snap = userDoc.collection("blocked_attempts").get().await()
+            val toInsert = mutableListOf<com.example.data.local.entity.BlockedAttemptEntity>()
+            for (doc in snap.documents) {
+                val eventId = doc.getString("eventId") ?: doc.id
+                if (eventId.isBlank() || eventId in localEventIds) continue
+                val eventTypeStr = doc.getString("eventType") ?: "LEGACY"
+                val sourceStr = doc.getString("source") ?: "LEGACY"
+                val eventType = runCatching {
+                    com.example.data.local.entity.BlockedEventType.valueOf(eventTypeStr)
+                }.getOrDefault(com.example.data.local.entity.BlockedEventType.LEGACY)
+                val source = runCatching {
+                    com.example.data.local.entity.BlockedEventSource.valueOf(sourceStr)
+                }.getOrDefault(com.example.data.local.entity.BlockedEventSource.LEGACY)
+
+                toInsert.add(
+                    com.example.data.local.entity.BlockedAttemptEntity(
+                        eventId = eventId,
+                        timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
+                        eventType = eventType,
+                        source = source,
+                        packageName = doc.getString("packageName") ?: "",
+                        appName = doc.getString("appName") ?: "",
+                        domain = doc.getString("domain"),
+                        channelId = doc.getString("channelId"),
+                        channelName = doc.getString("channelName"),
+                        videoTitle = doc.getString("videoTitle"),
+                        matchedKeyword = doc.getString("matchedKeyword"),
+                        ruleRef = doc.getString("ruleRef"),
+                        sessionId = doc.getString("sessionId"),
+                        scheduleId = doc.getString("scheduleId"),
+                        subject = doc.getString("subject"),
+                        topic = doc.getString("topic"),
+                        deviceId = doc.getString("deviceId")
+                    )
+                )
+            }
+            if (toInsert.isNotEmpty()) {
+                database.cloudBulkDao().insertBlockedAttemptsMissing(toInsert)
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun isLegacyPreloadedSchedule(
         title: String,
         subjectName: String,
@@ -557,3 +883,4 @@ class SyncEngine(
             (title == "Afternoon Focus Window" && subjectName == "General Study" && startTime == "14:00" && endTime == "16:00")
     }
 }
+

@@ -49,6 +49,7 @@ fun FocusSessionCard(
     subjectName: String = "Physics",
     subtitleText: String? = null,
     isPaused: Boolean = false,
+    isStrictMode: Boolean = false,
     onTogglePause: () -> Unit = {},
     onCardClick: () -> Unit = {},
     onStartSessionClick: () -> Unit = {}
@@ -109,8 +110,14 @@ fun FocusSessionCard(
                 .padding(horizontal = 24.dp, vertical = 26.dp)
         ) {
             // Top Label
+            val headerLabel = when {
+                isActive && isStrictMode -> "STRICT FOCUS • ${subjectName.uppercase()}"
+                isActive && isPaused -> "PAUSED SESSION • ${subjectName.uppercase()}"
+                isActive -> "FOCUS SESSION • ${subjectName.uppercase()}"
+                else -> "READY TO FOCUS"
+            }
             Text(
-                text = if (isActive) "FOCUS SESSION • ${subjectName.uppercase()}" else "READY TO FOCUS",
+                text = headerLabel,
                 style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
                     color = Color.White.copy(alpha = 0.88f),
                     fontWeight = FontWeight.Bold,
@@ -139,7 +146,11 @@ fun FocusSessionCard(
             Button(
                 onClick = {
                     if (isActive) {
-                        onTogglePause()
+                        if (isStrictMode && !isPaused) {
+                            onCardClick()
+                        } else {
+                            onTogglePause()
+                        }
                     } else {
                         onStartSessionClick()
                     }
@@ -165,15 +176,22 @@ fun FocusSessionCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
+                    val showPlayIcon = !isActive || isPaused || isStrictMode
+                    val buttonLabel = when {
+                        !isActive -> "Start Session"
+                        isPaused -> "Resume"
+                        isStrictMode -> "Open Timer"
+                        else -> "Pause"
+                    }
                     Icon(
-                        imageVector = if (!isActive || isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                        contentDescription = if (isActive && !isPaused) "Pause" else "Start",
+                        imageVector = if (showPlayIcon) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                        contentDescription = buttonLabel,
                         tint = Color(0xFF6B36F6),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (!isActive) "Start Session" else if (isPaused) "Resume" else "Pause",
+                        text = buttonLabel,
                         style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF6B36F6),

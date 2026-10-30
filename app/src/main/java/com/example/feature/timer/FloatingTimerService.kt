@@ -173,11 +173,39 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             return
         }
 
+        if (FocusSessionManager.instance.activeSession.value == null) {
+            FocusSessionManager.instance.restoreActiveSessionFromDisk(this)
+        }
+
         if (Settings.canDrawOverlays(this)) {
             setupOverlayWindow()
             observeSessionState()
         } else {
             stopSelf()
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (FocusSessionManager.instance.activeSession.value == null) {
+            FocusSessionManager.instance.restoreActiveSessionFromDisk(this)
+        }
+        val current = FocusSessionManager.instance.activeSession.value
+        if (current == null || current.isCompleted || current.isCancelled) {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+        if (Settings.canDrawOverlays(this) && overlayView == null) {
+            setupOverlayWindow()
+            observeSessionState()
+        }
+        return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val current = FocusSessionManager.instance.activeSession.value
+        if (current != null && (current.state == SessionState.RUNNING || current.state == SessionState.PAUSED)) {
+            FocusSessionManager.instance.saveActiveSessionToDisk(this)
         }
     }
 
@@ -399,7 +427,12 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private fun observeSessionState() {
         serviceScope.launch {
             FocusSessionManager.instance.activeSession.collectLatest { session ->
-                if (session == null || session.isCompleted || session.isCancelled) {
+                if (session == null) {
+                    val restored = FocusSessionManager.instance.restoreActiveSessionFromDisk(this@FloatingTimerService)
+                    if (restored == null || restored.isCompleted || restored.isCancelled) {
+                        stopSelf()
+                    }
+                } else if (session.isCompleted || session.isCancelled) {
                     stopSelf()
                 }
             }

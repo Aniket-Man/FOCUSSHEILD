@@ -8,6 +8,7 @@ import com.example.data.preferences.FocusPreferences
 import com.example.data.repository.AnalyticsRepository
 import com.example.feature.analytics.domain.AnalyticsPeriod
 import com.example.feature.analytics.domain.PeriodAnalyticsSummary
+import com.example.feature.analytics.domain.TodayStudySummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +24,8 @@ data class AnalyticsUiState(
     val customStartMillis: Long? = null,
     val customEndMillis: Long? = null,
     val summary: PeriodAnalyticsSummary = PeriodAnalyticsSummary(),
+    val todaySummary: TodayStudySummary = TodayStudySummary(),
+    val preferences: FocusPreferences = FocusPreferences(),
     val dailyGoalMinutes: Int = 240,
     val streakThresholdMinutes: Int = 20,
     val isLoading: Boolean = false
@@ -52,14 +55,17 @@ class AnalyticsViewModel(
                 customEnd = filter.customEnd
             )
         },
+        analyticsRepository.todaySummaryFlow,
         analyticsRepository.preferencesFlow,
         _filterState
-    ) { summary, prefs: FocusPreferences, filter ->
+    ) { summary, todaySummary, prefs: FocusPreferences, filter ->
         AnalyticsUiState(
             selectedPeriod = filter.period,
             customStartMillis = filter.customStart,
             customEndMillis = filter.customEnd,
             summary = summary,
+            todaySummary = todaySummary,
+            preferences = prefs,
             dailyGoalMinutes = prefs.dailyGoalMinutes,
             streakThresholdMinutes = prefs.minimumStreakThresholdMinutes,
             isLoading = false

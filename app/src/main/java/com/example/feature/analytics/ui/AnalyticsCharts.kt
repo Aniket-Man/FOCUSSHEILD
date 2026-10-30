@@ -1,7 +1,6 @@
 package com.example.feature.analytics.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
@@ -60,8 +58,8 @@ enum class ChartType {
 }
 
 /**
- * Interactive Weekly & Period Study Hours Chart powered by Vico Charting Library.
- * Displays daily study hours against the configured daily study goal with Bar and Line views.
+ * Gridless Weekly & Period Study Hours Chart powered by Vico Charting Library.
+ * Displays daily study hours without any card borders, boxes, or chart gridlines.
  */
 @Composable
 fun WeeklyStudyHoursChartCard(
@@ -75,7 +73,6 @@ fun WeeklyStudyHoursChartCard(
 
     val goalHours = dailyGoalMinutes / 60f
 
-    // Convert milliseconds to hours (float)
     val entries = remember(dailyChart) {
         dailyChart.mapIndexed { index, day ->
             val hours = (day.studyTimeMillis / (1000f * 60f * 60f)).coerceAtLeast(0f)
@@ -109,303 +106,265 @@ fun WeeklyStudyHoursChartCard(
     val avgHours = if (summary.dailyChart.isNotEmpty()) totalHours / summary.dailyChart.size else 0f
     val goalsMetCount = dailyChart.count { it.isGoalMet }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(1.dp, FocusShapes.card, ambientColor = Color.Black.copy(alpha = 0.02f))
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .padding(16.dp)
-            .testTag("weekly_study_hours_chart")
+            .padding(vertical = 8.dp)
+            .testTag("weekly_study_hours_chart"),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // Header with Chart Type Toggle
+        // Header with Chart Type Toggle (Gridless)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Study hours visualizer",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        color = FocusColors.TextPrimary,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 18.sp
+                    )
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${summary.dateRangeLabel} • Goal: ${String.format(Locale.US, "%.1fh", goalHours)}/day",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = FocusColors.TextSecondary,
+                        fontSize = 13.sp
+                    )
+                )
+            }
+
+            // Minimal Bar / Line Switcher
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (chartType == ChartType.BAR) FocusColors.Primary.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable { chartType = ChartType.BAR }
+                        .padding(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BarChart,
+                        contentDescription = "Bar Chart",
+                        tint = if (chartType == ChartType.BAR) FocusColors.Primary else FocusColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (chartType == ChartType.LINE) FocusColors.Primary.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable { chartType = ChartType.LINE }
+                        .padding(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ShowChart,
+                        contentDescription = "Line Chart",
+                        tint = if (chartType == ChartType.LINE) FocusColors.Primary else FocusColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Gridless Digital Wellbeing-style counters row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GridlessChartMetric(
+                value = String.format(Locale.US, "%.1fh", totalHours),
+                label = "Total study"
+            )
+            GridlessChartMetric(
+                value = String.format(Locale.US, "%.1fh", avgHours),
+                label = "Avg / day"
+            )
+            GridlessChartMetric(
+                value = "$goalsMetCount/${dailyChart.size}",
+                label = "Goals met"
+            )
+        }
+
+        if (dailyChart.isNotEmpty()) {
+            // Gridless Vico Chart (no guidelines, no axis lines, no ticks)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(175.dp)
+                    .padding(top = 4.dp)
+            ) {
+                val primaryColor = FocusColors.Primary.toArgb()
+
+                val startAxis = rememberStartAxis(
+                    valueFormatter = verticalAxisValueFormatter,
+                    label = textComponent(
+                        color = FocusColors.TextSecondary,
+                        textSize = 10.sp
+                    ),
+                    guideline = null,
+                    tick = null,
+                    axis = null
+                )
+
+                val bottomAxis = rememberBottomAxis(
+                    valueFormatter = horizontalAxisValueFormatter,
+                    label = textComponent(
+                        color = FocusColors.TextSecondary,
+                        textSize = 10.sp
+                    ),
+                    guideline = null,
+                    tick = null,
+                    axis = null
+                )
+
+                when (chartType) {
+                    ChartType.BAR -> {
+                        val columnComponent = lineComponent(
+                            color = FocusColors.Primary,
+                            thickness = 14.dp,
+                            shape = Shapes.roundedCornerShape(allPercent = 30)
+                        )
+
+                        Chart(
+                            chart = columnChart(
+                                columns = listOf(columnComponent)
+                            ),
+                            chartModelProducer = chartModelProducer,
+                            startAxis = startAxis,
+                            bottomAxis = bottomAxis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    ChartType.LINE -> {
+                        val lineSpec = LineChart.LineSpec(
+                            lineColor = primaryColor,
+                            lineThicknessDp = 2.5f,
+                            lineBackgroundShader = null
+                        )
+
+                        Chart(
+                            chart = lineChart(
+                                lines = listOf(lineSpec)
+                            ),
+                            chartModelProducer = chartModelProducer,
+                            startAxis = startAxis,
+                            bottomAxis = bottomAxis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+            // Interactive Day Selector Row (Gridless)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                dailyChart.forEachIndexed { index, day ->
+                    val isSelected = selectedDayIndex == index
+                    val hasStudy = day.studyTimeMillis > 0
+
+                    Column(
+                        modifier = Modifier
+                            .clip(FocusShapes.small)
+                            .clickable {
+                                selectedDayIndex = if (selectedDayIndex == index) -1 else index
+                            }
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (isSelected) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        day.isGoalMet -> FocusColors.EmeraldSuccess
+                                        hasStudy -> FocusColors.Primary
+                                        else -> FocusColors.TextMuted.copy(alpha = 0.35f)
+                                    }
+                                )
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = day.formattedStudyTime,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = if (isSelected) FocusColors.Primary else FocusColors.TextSecondary,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Selected Day Details Line (Gridless)
+            if (selectedDayIndex in dailyChart.indices) {
+                val day = dailyChart[selectedDayIndex]
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        if (day.isGoalMet) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = FocusColors.EmeraldSuccess,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                         Text(
-                            text = "STUDY HOURS VISUALIZER",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
+                            text = "${day.dateFormatted} (${day.dayLabel})",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = FocusColors.TextPrimary,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp
                             )
                         )
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${summary.dateRangeLabel} • Goal: ${String.format(Locale.US, "%.1fh", goalHours)}/day",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextMuted,
-                            fontSize = 11.sp
+                        text = "${day.formattedStudyTime} • ${day.sessionCount} sessions",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = FocusColors.Primary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
                         )
-                    )
-                }
-
-                // Bar / Line Switcher
-                Row(
-                    modifier = Modifier
-                        .clip(FocusShapes.pill)
-                        .background(FocusColors.SurfaceSubtle)
-                        .padding(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(if (chartType == ChartType.BAR) FocusColors.Primary else Color.Transparent)
-                            .clickable { chartType = ChartType.BAR }
-                            .padding(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.BarChart,
-                            contentDescription = "Bar Chart",
-                            tint = if (chartType == ChartType.BAR) Color.White else FocusColors.TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(if (chartType == ChartType.LINE) FocusColors.Primary else Color.Transparent)
-                            .clickable { chartType = ChartType.LINE }
-                            .padding(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.ShowChart,
-                            contentDescription = "Line Chart",
-                            tint = if (chartType == ChartType.LINE) Color.White else FocusColors.TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
-            // Summary Stats Pill Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                StatChip(
-                    label = "Total",
-                    value = String.format(Locale.US, "%.1fh", totalHours),
-                    color = FocusColors.Primary,
-                    modifier = Modifier.weight(1f)
-                )
-                StatChip(
-                    label = "Avg/Day",
-                    value = String.format(Locale.US, "%.1fh", avgHours),
-                    color = FocusColors.AmberOrange,
-                    modifier = Modifier.weight(1f)
-                )
-                StatChip(
-                    label = "Goals Met",
-                    value = "$goalsMetCount/${dailyChart.size}",
-                    color = FocusColors.EmeraldSuccess,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (dailyChart.isNotEmpty()) {
-                // Vico Chart
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(170.dp)
-                        .padding(top = 8.dp)
-                ) {
-                    val primaryColor = FocusColors.Primary.toArgb()
-
-                    val startAxis = rememberStartAxis(
-                        valueFormatter = verticalAxisValueFormatter,
-                        label = textComponent(
-                            color = FocusColors.TextSecondary,
-                            textSize = 10.sp
-                        ),
-                        guideline = lineComponent(
-                            color = FocusColors.CardBorderSubtle,
-                            thickness = 1.dp
-                        ),
-                        tick = lineComponent(
-                            color = FocusColors.CardBorderSubtle,
-                            thickness = 1.dp
-                        )
-                    )
-
-                    val bottomAxis = rememberBottomAxis(
-                        valueFormatter = horizontalAxisValueFormatter,
-                        label = textComponent(
-                            color = FocusColors.TextSecondary,
-                            textSize = 10.sp
-                        ),
-                        guideline = null,
-                        tick = lineComponent(
-                            color = FocusColors.CardBorderSubtle,
-                            thickness = 1.dp
-                        )
-                    )
-
-                    when (chartType) {
-                        ChartType.BAR -> {
-                            val columnComponent = lineComponent(
-                                color = FocusColors.Primary,
-                                thickness = 14.dp,
-                                shape = Shapes.roundedCornerShape(allPercent = 25)
-                            )
-
-                            Chart(
-                                chart = columnChart(
-                                    columns = listOf(columnComponent)
-                                ),
-                                chartModelProducer = chartModelProducer,
-                                startAxis = startAxis,
-                                bottomAxis = bottomAxis,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        ChartType.LINE -> {
-                            val lineSpec = LineChart.LineSpec(
-                                lineColor = primaryColor,
-                                lineThicknessDp = 2.5f,
-                                lineBackgroundShader = null
-                            )
-
-                            Chart(
-                                chart = lineChart(
-                                    lines = listOf(lineSpec)
-                                ),
-                                chartModelProducer = chartModelProducer,
-                                startAxis = startAxis,
-                                bottomAxis = bottomAxis,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-
-                // Interactive Day Selector Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    dailyChart.forEachIndexed { index, day ->
-                        val isSelected = selectedDayIndex == index
-                        val hasStudy = day.studyTimeMillis > 0
-
-                        Column(
-                            modifier = Modifier
-                                .clip(FocusShapes.small)
-                                .clickable {
-                                    selectedDayIndex = if (selectedDayIndex == index) -1 else index
-                                }
-                                .background(if (isSelected) FocusColors.PrimaryContainer else Color.Transparent)
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            day.isGoalMet -> FocusColors.EmeraldSuccess
-                                            hasStudy -> FocusColors.Primary
-                                            else -> FocusColors.TextMuted.copy(alpha = 0.3f)
-                                        }
-                                    )
-                            )
-                            Text(
-                                text = day.formattedStudyTime,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = if (isSelected) FocusColors.Primary else FocusColors.TextMuted,
-                                    fontSize = 9.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            )
-                        }
-                    }
-                }
-
-                // Selected Day Details Banner
-                if (selectedDayIndex in dailyChart.indices) {
-                    val day = dailyChart[selectedDayIndex]
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.small)
-                            .background(FocusColors.SurfaceSubtle)
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                if (day.isGoalMet) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = null,
-                                        tint = FocusColors.EmeraldSuccess,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Text(
-                                    text = "${day.dateFormatted} (${day.dayLabel})",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-                            Text(
-                                text = "${day.formattedStudyTime} • ${day.sessionCount} sessions",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.Primary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No study sessions in this period",
-                        style = MaterialTheme.typography.bodySmall.copy(color = FocusColors.TextMuted)
                     )
                 }
             }
+        } else {
+            Text(
+                text = "No study sessions recorded in this period",
+                style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary),
+                modifier = Modifier.padding(vertical = 12.dp)
+            )
         }
     }
 }
 
 /**
- * Focus Streak & Consistency Visualization Card powered by Vico Charting & Compose.
- * Displays streak progression, consistency curve, daily qualifying thresholds, and milestone tracker.
+ * Gridless Focus Streak & Consistency Visualization powered by Vico Charting & Compose.
+ * Displays streak progression, qualifying days, and consistency curve without boxes or gridlines.
  */
 @Composable
 fun FocusStreakChartCard(
@@ -416,7 +375,6 @@ fun FocusStreakChartCard(
     val dailyChart = summary.dailyChart
     val thresholdMinutes = streak.thresholdMinutes
 
-    // Convert daily study minutes for streak visualization
     val entries = remember(dailyChart) {
         dailyChart.mapIndexed { index, day ->
             val minutes = (day.studyTimeMillis / (1000f * 60f)).coerceAtLeast(0f)
@@ -445,219 +403,187 @@ fun FocusStreakChartCard(
         }
     }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(1.dp, FocusShapes.card, ambientColor = Color.Black.copy(alpha = 0.02f))
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .padding(16.dp)
-            .testTag("focus_streak_chart")
+            .padding(vertical = 8.dp)
+            .testTag("focus_streak_chart"),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // Streak Header
+        // Streak Header (Gridless)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.AmberLight),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.LocalFireDepartment,
-                            contentDescription = "Streak",
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
+                Icon(
+                    imageVector = Icons.Filled.LocalFireDepartment,
+                    contentDescription = "Streak",
+                    tint = FocusColors.AmberOrange,
+                    modifier = Modifier.size(26.dp)
+                )
 
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "${streak.currentStreak} day focus streak",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                color = FocusColors.TextPrimary,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 18.sp
+                            )
+                        )
+                        if (streak.isStreakActiveToday) {
                             Text(
-                                text = "${streak.currentStreak} Day Focus Streak",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = FocusColors.TextPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
+                                text = "• Active today",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = FocusColors.EmeraldSuccess,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
                                 )
                             )
-                            if (streak.isStreakActiveToday) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(FocusShapes.pill)
-                                        .background(FocusColors.EmeraldLight)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Active Today",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FocusColors.EmeraldSuccess,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 9.sp
-                                        )
-                                    )
-                                }
-                            }
                         }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Longest: ${streak.longestStreak} days • Total study days: ${streak.totalStudyDays} • Threshold: ${thresholdMinutes}m/day",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = FocusColors.TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        // Streak Timeline Indicators (Gridless)
+        if (dailyChart.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                dailyChart.forEach { day ->
+                    val minutes = day.studyTimeMillis / (60 * 1000)
+                    val qualified = minutes >= thresholdMinutes
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "Longest: ${streak.longestStreak} days • Min threshold: ${thresholdMinutes}m/day",
-                            style = MaterialTheme.typography.bodySmall.copy(
+                            text = day.dayLabel.take(1),
+                            style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocusColors.TextSecondary,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         )
+
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        qualified -> FocusColors.AmberOrange
+                                        minutes > 0 -> FocusColors.Primary.copy(alpha = 0.35f)
+                                        else -> Color.Transparent
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (qualified) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocalFireDepartment,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            } else if (minutes > 0) {
+                                Text(
+                                    text = "${minutes}m",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = FocusColors.TextPrimary,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .clip(CircleShape)
+                                        .background(FocusColors.TextMuted.copy(alpha = 0.4f))
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Streak Timeline Badges
-            if (dailyChart.isNotEmpty()) {
-                Row(
+            // Vico Consistency Trend Line (Gridless)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Daily focus duration trend",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = FocusColors.TextSecondary,
+                        fontSize = 13.sp
+                    )
+                )
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(FocusShapes.medium)
-                        .background(FocusColors.SurfaceSubtle)
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .height(130.dp)
                 ) {
-                    dailyChart.forEach { day ->
-                        val minutes = day.studyTimeMillis / (60 * 1000)
-                        val qualified = minutes >= thresholdMinutes
+                    val amberColor = FocusColors.AmberOrange.toArgb()
 
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = day.dayLabel.take(1),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusColors.TextSecondary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            qualified -> FocusColors.AmberOrange
-                                            minutes > 0 -> FocusColors.PrimaryLight
-                                            else -> FocusColors.CardBorderSubtle
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (qualified) {
-                                    Icon(
-                                        imageVector = Icons.Filled.LocalFireDepartment,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                } else if (minutes > 0) {
-                                    Text(
-                                        text = "${minutes}m",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = Color.White,
-                                            fontSize = 8.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(4.dp)
-                                            .clip(CircleShape)
-                                            .background(FocusColors.TextMuted.copy(alpha = 0.5f))
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Vico Consistency Trend Line
-                Column {
-                    Text(
-                        text = "DAILY FOCUS DURATION VS THRESHOLD",
-                        style = MaterialTheme.typography.labelSmall.copy(
+                    val startAxis = rememberStartAxis(
+                        valueFormatter = verticalAxisValueFormatter,
+                        label = textComponent(
                             color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                            textSize = 9.sp
+                        ),
+                        guideline = null,
+                        tick = null,
+                        axis = null
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    val bottomAxis = rememberBottomAxis(
+                        valueFormatter = horizontalAxisValueFormatter,
+                        label = textComponent(
+                            color = FocusColors.TextSecondary,
+                            textSize = 9.sp
+                        ),
+                        guideline = null,
+                        tick = null,
+                        axis = null
+                    )
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                    ) {
-                        val amberColor = FocusColors.AmberOrange.toArgb()
+                    val lineSpec = LineChart.LineSpec(
+                        lineColor = amberColor,
+                        lineThicknessDp = 2.5f,
+                        lineBackgroundShader = null
+                    )
 
-                        val startAxis = rememberStartAxis(
-                            valueFormatter = verticalAxisValueFormatter,
-                            label = textComponent(
-                                color = FocusColors.TextSecondary,
-                                textSize = 9.sp
-                            ),
-                            guideline = lineComponent(
-                                color = FocusColors.CardBorderSubtle,
-                                thickness = 1.dp
-                            ),
-                            tick = lineComponent(
-                                color = FocusColors.CardBorderSubtle,
-                                thickness = 1.dp
-                            )
-                        )
-
-                        val bottomAxis = rememberBottomAxis(
-                            valueFormatter = horizontalAxisValueFormatter,
-                            label = textComponent(
-                                color = FocusColors.TextSecondary,
-                                textSize = 9.sp
-                            ),
-                            guideline = null,
-                            tick = lineComponent(
-                                color = FocusColors.CardBorderSubtle,
-                                thickness = 1.dp
-                            )
-                        )
-
-                        val lineSpec = LineChart.LineSpec(
-                            lineColor = amberColor,
-                            lineThicknessDp = 2.5f,
-                            lineBackgroundShader = null
-                        )
-
-                        Chart(
-                            chart = lineChart(
-                                lines = listOf(lineSpec)
-                            ),
-                            chartModelProducer = chartModelProducer,
-                            startAxis = startAxis,
-                            bottomAxis = bottomAxis,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    Chart(
+                        chart = lineChart(
+                            lines = listOf(lineSpec)
+                        ),
+                        chartModelProducer = chartModelProducer,
+                        startAxis = startAxis,
+                        bottomAxis = bottomAxis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
@@ -665,34 +591,30 @@ fun FocusStreakChartCard(
 }
 
 @Composable
-private fun StatChip(
-    label: String,
+private fun GridlessChartMetric(
     value: String,
-    color: Color,
+    label: String,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .clip(FocusShapes.small)
-            .background(FocusColors.SurfaceSubtle)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    color = FocusColors.TextMuted,
-                    fontSize = 9.sp
-                )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineSmall.copy(
+                color = FocusColors.TextPrimary,
+                fontWeight = FontWeight.Normal,
+                fontSize = 24.sp
             )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = FocusColors.TextSecondary,
+                fontSize = 13.sp
             )
-        }
+        )
     }
 }

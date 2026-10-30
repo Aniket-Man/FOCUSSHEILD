@@ -65,14 +65,41 @@ class WebsiteBlockerViewModel(
         }
     }
 
+    private suspend fun isStrictProtectionLocked(): Boolean {
+        return try {
+            com.example.feature.applimits.engine.AppLimitStrictModeEngine.instance.isStrictProtectionLocked()
+        } catch (_: Exception) {
+            val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+            active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
+        }
+    }
+
     fun toggleAdultBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = "Strict Mode Active: 18+ Adult Website Shield cannot be disabled while Strict Mode is active.",
+                        successMessage = null
+                    )
+                }
+                return@launch
+            }
             preferencesRepository.updateAutoAdultWebsiteBlocking(enabled)
         }
     }
 
     fun toggleManualBlocking(enabled: Boolean) {
         viewModelScope.launch {
+            if (!enabled && isStrictProtectionLocked()) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = "Strict Mode Active: Website Blocking cannot be disabled while Strict Mode is active.",
+                        successMessage = null
+                    )
+                }
+                return@launch
+            }
             preferencesRepository.updateManualWebsiteBlocking(enabled)
         }
     }
@@ -112,13 +139,31 @@ class WebsiteBlockerViewModel(
 
     fun deleteWebsite(domain: String) {
         viewModelScope.launch {
+            if (isStrictProtectionLocked()) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = "Strict Mode Active: Cannot remove \"$domain\" while Strict Mode is active.",
+                        successMessage = null
+                    )
+                }
+                return@launch
+            }
             repository.removeWebsite(domain)
-            _uiState.update { it.copy(successMessage = "Removed \"$domain\" from block list") }
+            _uiState.update { it.copy(successMessage = "Removed \"$domain\" from block list", errorMessage = null) }
         }
     }
 
     fun toggleWebsite(domain: String, isEnabled: Boolean) {
         viewModelScope.launch {
+            if (!isEnabled && isStrictProtectionLocked()) {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = "Strict Mode Active: Cannot disable \"$domain\" while Strict Mode is active.",
+                        successMessage = null
+                    )
+                }
+                return@launch
+            }
             repository.toggleWebsite(domain, isEnabled)
         }
     }

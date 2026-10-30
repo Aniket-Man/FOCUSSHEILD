@@ -242,13 +242,21 @@ fun PlannerScreen(
     val selectedDayOfWeekAbbr = remember(selectedDate) {
         SimpleDateFormat("EEE", Locale.ENGLISH).format(selectedDate).uppercase(Locale.ENGLISH)
     }
+    val selectedDateKey = remember(selectedDate) {
+        SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(selectedDate)
+    }
 
-    val activeDaySchedules = remember(focusSchedules, selectedDayOfWeekAbbr) {
+    val activeDaySchedules = remember(focusSchedules, selectedDayOfWeekAbbr, selectedDateKey) {
+        val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
         focusSchedules.filter { entity ->
-            val days = entity.daysOfWeek.uppercase(Locale.ENGLISH)
-            days.contains(selectedDayOfWeekAbbr) || days.contains("DAILY") || days.isEmpty() ||
-                    (days.contains("MON - FRI") && (selectedDayOfWeekAbbr in listOf("MON", "TUE", "WED", "THU", "FRI"))) ||
-                    (days.contains("WEEKENDS") && (selectedDayOfWeekAbbr in listOf("SAT", "SUN")))
+            if (!entity.repeatEnabled && entity.scheduledDateMillis > 0L) {
+                dateFmt.format(Date(entity.scheduledDateMillis)) == selectedDateKey
+            } else {
+                val days = entity.daysOfWeek.uppercase(Locale.ENGLISH)
+                days.contains(selectedDayOfWeekAbbr) || days.contains("DAILY") || days.isEmpty() ||
+                        (days.contains("MON - FRI") && (selectedDayOfWeekAbbr in listOf("MON", "TUE", "WED", "THU", "FRI"))) ||
+                        (days.contains("WEEKENDS") && (selectedDayOfWeekAbbr in listOf("SAT", "SUN")))
+            }
         }
     }
 
@@ -521,6 +529,8 @@ fun PlannerScreen(
                             scheduleToDelete = schedule
                         },
                         onStartSession = {
+                            val durationMins = com.example.feature.session.notification.ScheduleTime
+                                .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 60
                             onStartPlanSession(
                                 StudyPlanItem(
                                     id = schedule.id,
@@ -531,6 +541,7 @@ fun PlannerScreen(
                                     isCompleted = false,
                                     startTime = schedule.startTime,
                                     endTime = schedule.endTime,
+                                    durationMinutes = durationMins,
                                     targetDate = selectedDate.time
                                 )
                             )
@@ -595,6 +606,13 @@ fun PlannerScreen(
                                         plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
                                     },
                                     onAdd = {
+                                        val defaultPkgs = setOf(
+                                            "com.google.android.youtube",
+                                            "com.android.chrome",
+                                            "com.opera.browser",
+                                            "com.brave.browser",
+                                            "com.instagram.android"
+                                        ) + blockedApps.map { it.packageName }
                                         viewModel.addFocusSchedule(
                                             title = preset.title,
                                             daysOfWeek = "MON,TUE,WED,THU,FRI",
@@ -607,8 +625,8 @@ fun PlannerScreen(
                                             scheduledDateMillis = selectedDate.time,
                                             breakMinutes = 5,
                                             description = "Scheduled daily routine",
-                                            blockedAppPackages = emptySet(),
-                                            blockNotifications = false
+                                            blockedAppPackages = defaultPkgs,
+                                            blockNotifications = true
                                         )
                                         dismissedSuggestions.add(preset.id)
                                         plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
@@ -666,6 +684,7 @@ fun PlannerScreen(
                 initialSchedule = editingSchedule,
                 initialBlockNotifications = editingSchedule?.blockNotifications ?: false,
                 availableBlockedApps = blockedApps,
+                selectedDateMillis = selectedDate.time,
                 onOpenBlockedApps = onOpenBlockedApps,
                 onDismiss = {
                     showAddEditScheduleDialog = false
@@ -975,13 +994,22 @@ private fun ScheduleCardItem(
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                        if (schedule.subjectName.isNotEmpty()) {
-                            Text(
-                                text = schedule.subjectName,
-                                color = textSecondary,
-                                fontSize = 12.sp
-                            )
+                        val blockedCount = schedule.blockedAppPackages.split(',').count { it.isNotBlank() }
+                        val modeLabel = when (schedule.mode.uppercase(Locale.ENGLISH)) {
+                            "POMODORO" -> "Pomodoro"
+                            "STOPWATCH" -> "Stopwatch"
+                            else -> "Timer"
                         }
+                        val subMeta = buildList {
+                            if (schedule.subjectName.isNotBlank()) add(schedule.subjectName)
+                            add(modeLabel)
+                            if (blockedCount > 0) add("$blockedCount apps blocked")
+                        }.joinToString(" • ")
+                        Text(
+                            text = subMeta,
+                            color = textSecondary,
+                            fontSize = 12.sp
+                        )
                     }
                 }
 
@@ -1012,7 +1040,7 @@ private fun ScheduleCardItem(
                         fontSize = 14.sp
                     )
                     Text(
-                        text = schedule.daysOfWeek.ifEmpty { "Daily" },
+                        text = "${schedule.daysOfWeek.ifEmpty { "Daily" }} • ${schedule.breakMinutes}m break",
                         color = textSecondary,
                         fontSize = 12.sp
                     )

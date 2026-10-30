@@ -57,9 +57,33 @@ class FocusSessionManager(
     val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
 
     private var tickerJob: Job? = null
+    @Volatile
+    private var cachedAppContext: Context? = null
+    @Volatile
+    private var lastDiskSaveTimestamp: Long = 0L
 
     companion object {
         val instance: FocusSessionManager by lazy { FocusSessionManager() }
+    }
+
+    private fun resolveContext(explicitContext: Context? = null): Context? {
+        if (explicitContext != null) {
+            cachedAppContext = explicitContext.applicationContext ?: explicitContext
+            return cachedAppContext
+        }
+        cachedAppContext?.let { return it }
+        return try {
+            if (com.example.FocusShieldApp::class.java.declaredFields.any { it.name == "instance" }) {
+                com.example.FocusShieldApp.instance.applicationContext.also { cachedAppContext = it }
+            } else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun persistSnapshotSafely(context: Context? = null) {
+        val ctx = resolveContext(context) ?: return
+        saveActiveSessionToDisk(ctx)
     }
 
     /**
@@ -167,6 +191,8 @@ class FocusSessionManager(
 
         _activeSession.value = session
         _sessionState.value = SessionState.RUNNING
+        lastDiskSaveTimestamp = now
+        persistSnapshotSafely()
 
         startTicker()
         return Result.success(session)
@@ -177,9 +203,13 @@ class FocusSessionManager(
      * task clears, and low memory reclaims.
      */
     fun saveActiveSessionToDisk(context: Context) {
+        cachedAppContext = context.applicationContext ?: context
         val current = _activeSession.value ?: return
+        val now = currentTimeProvider()
+        lastDiskSaveTimestamp = now
         try {
             val prefs = context.getSharedPreferences("focus_active_session_prefs", Context.MODE_PRIVATE)
+            val activeBreak = current.manualBreak
             prefs.edit().apply {
                 putString("id", current.id)
                 putString("mode", current.mode.name)
@@ -205,7 +235,18 @@ class FocusSessionManager(
                 putLong("pomodoroShortBreakDuration", current.pomodoroConfig.shortBreakDurationMillis)
                 putLong("pomodoroLongBreakDuration", current.pomodoroConfig.longBreakDurationMillis)
                 putLong("totalBreakDurationMillis", current.totalBreakDurationMillis)
-                putLong("savedAt", currentTimeProvider())
+                if (activeBreak != null && activeBreak.isActive) {
+                    putString("manualBreakId", activeBreak.id)
+                    putLong("manualBreakRequestedMillis", activeBreak.requestedDurationMillis)
+                    putLong("manualBreakStartedAt", activeBreak.startedAt)
+                    putLong("manualBreakEndsAt", activeBreak.endsAt)
+                } else {
+                    remove("manualBreakId")
+                    remove("manualBreakRequestedMillis")
+                    remove("manualBreakStartedAt")
+                    remove("manualBreakEndsAt")
+                }
+                putLong("savedAt", now)
                 apply()
             }
         } catch (e: Exception) {
@@ -217,6 +258,7 @@ class FocusSessionManager(
      * Clears persisted active session state from disk.
      */
     fun clearActiveSessionFromDisk(context: Context) {
+        cachedAppContext = context.applicationContext ?: context
         try {
             val prefs = context.getSharedPreferences("focus_active_session_prefs", Context.MODE_PRIVATE)
             prefs.edit().clear().apply()
@@ -229,12 +271,13 @@ class FocusSessionManager(
      * Restores an active session from disk if one was running/paused prior to process restart.
      */
     fun restoreActiveSessionFromDisk(context: Context): FocusSession? {
+        cachedAppContext = context.applicationContext ?: context
         try {
             val prefs = context.getSharedPreferences("focus_active_session_prefs", Context.MODE_PRIVATE)
             val id = prefs.getString("id", null) ?: return null
             val modeStr = prefs.getString("mode", null) ?: return null
             val stateStr = prefs.getString("state", null) ?: return null
-            val state = try { SessionState.valueOf(stateStr) } catch (e: Exception) { return null }
+            var state = try { SessionState.valueOf(stateStr) } catch (e: Exception) { return null }
 
             if (state != SessionState.RUNNING && state != SessionState.PAUSED) {
                 return null
@@ -246,6 +289,9 @@ class FocusSessionManager(
             val goal = prefs.getString("goal", "") ?: ""
             val startedAt = prefs.getLong("startedAt", currentTimeProvider())
             val plannedDuration = prefs.getLong("plannedDurationMillis", 60 * 60 * 1000L)
+            val savedElapsed = prefs.getLong("elapsedDurationMillis", 0L)
+            val savedRemaining = prefs.getLong("remainingDurationMillis", plannedDuration)
+            val savedAt = prefs.getLong("savedAt", startedAt)
             val isAppBlocking = prefs.getBoolean("isAppBlockingEnabled", true)
             val isStrictMode = prefs.getBoolean("isStrictModeEnabled", false)
             val isStudyChannels = prefs.getBoolean("isStudyChannelsEnabled", true)
@@ -253,9 +299,15 @@ class FocusSessionManager(
             val blockedAppPackages = prefs.getStringSet("blockedAppPackages", emptySet()) ?: emptySet()
             val blockNotifications = prefs.getBoolean("blockNotifications", false)
             val defaultBreakMinutes = prefs.getInt("defaultBreakMinutes", 5)
-            val totalBreakDuration = prefs.getLong("totalBreakDurationMillis", 0L)
+            var totalBreakDuration = prefs.getLong("totalBreakDurationMillis", 0L)
             val currentCycle = prefs.getInt("currentCycle", 1)
             val totalCycles = prefs.getInt("totalCycles", 4)
+            val savedPhaseStr = prefs.getString("pomodoroPhase", null)
+            val savedPhase = try {
+                if (savedPhaseStr != null) PomodoroPhase.valueOf(savedPhaseStr) else PomodoroPhase.FOCUS
+            } catch (_: Exception) {
+                PomodoroPhase.FOCUS
+            }
             val pomodoroConfig = PomodoroConfig(
                 focusDurationMillis = prefs.getLong("pomodoroFocusDuration", 25 * 60 * 1000L),
                 shortBreakDurationMillis = prefs.getLong("pomodoroShortBreakDuration", 5 * 60 * 1000L),
@@ -271,31 +323,95 @@ class FocusSessionManager(
                 return null
             }
 
-            // Re-initialize engine
+            // In Strict Mode (non-Stopwatch), a session cannot remain paused indefinitely across app close
+            if (isStrictMode && mode != SessionMode.STOPWATCH && state == SessionState.PAUSED) {
+                state = SessionState.RUNNING
+            }
+
+            // Restore manual break if one was active when saved
+            val manualBreakId = prefs.getString("manualBreakId", null)
+            val manualBreakRequested = prefs.getLong("manualBreakRequestedMillis", 0L)
+            val manualBreakStartedAt = prefs.getLong("manualBreakStartedAt", 0L)
+            val manualBreakEndsAt = prefs.getLong("manualBreakEndsAt", 0L)
+            val restoredBreak = if (manualBreakId != null && manualBreakEndsAt > 0L) {
+                if (now < manualBreakEndsAt) {
+                    breakManager.restoreBreak(
+                        id = manualBreakId,
+                        sessionId = id,
+                        requestedDurationMillis = manualBreakRequested,
+                        startedAt = manualBreakStartedAt,
+                        endsAt = manualBreakEndsAt,
+                        now = now
+                    )
+                } else {
+                    // Break finished while app was closed; credit break duration and resume study time from break end
+                    totalBreakDuration += manualBreakRequested.coerceAtLeast(0L)
+                    breakManager.reset()
+                    null
+                }
+            } else {
+                breakManager.reset()
+                null
+            }
+
+            // Effective timestamp from which running study time progressed since last save
+            val effectiveSavedAt = if (manualBreakId != null && manualBreakEndsAt > 0L && now >= manualBreakEndsAt) {
+                maxOf(savedAt, manualBreakEndsAt)
+            } else {
+                savedAt
+            }
+            val isEnginePaused = state == SessionState.PAUSED || restoredBreak != null
+
+            // Re-initialize engine using exact saved elapsed/remaining state
             when (mode) {
                 SessionMode.TIMER -> {
-                    if (now - startedAt > plannedDuration + 300_000L && state == SessionState.RUNNING) {
-                        // Timer expired while app was closed, clean up stale session
+                    val deltaSinceSave = if (!isEnginePaused && effectiveSavedAt > 0L) {
+                        (now - effectiveSavedAt).coerceAtLeast(0L)
+                    } else 0L
+                    if (!isEnginePaused && savedElapsed + deltaSinceSave > plannedDuration + 300_000L) {
+                        // Timer expired more than 5 minutes ago while app was closed
                         clearActiveSessionFromDisk(context)
                         return null
                     }
-                    timerEngine.start(plannedDuration, startedAt)
-                    if (state == SessionState.PAUSED) {
-                        timerEngine.pause(startedAt + prefs.getLong("elapsedDurationMillis", 0L))
-                    }
+                    timerEngine.restore(
+                        durationMillis = plannedDuration,
+                        elapsedAtSaveMillis = savedElapsed,
+                        savedAtTimestamp = effectiveSavedAt,
+                        wasPaused = isEnginePaused,
+                        now = now
+                    )
                 }
                 SessionMode.STOPWATCH -> {
-                    stopwatchEngine.start(startedAt)
-                    if (state == SessionState.PAUSED) {
-                        stopwatchEngine.pause(startedAt + prefs.getLong("elapsedDurationMillis", 0L))
-                    }
+                    stopwatchEngine.restore(
+                        elapsedAtSaveMillis = savedElapsed,
+                        savedAtTimestamp = effectiveSavedAt,
+                        wasPaused = isEnginePaused,
+                        now = now
+                    )
                 }
                 SessionMode.POMODORO -> {
-                    pomodoroEngine.start(pomodoroConfig, startedAt)
-                    if (state == SessionState.PAUSED) {
-                        pomodoroEngine.pause(now)
-                    }
+                    pomodoroEngine.restore(
+                        pomodoroConfig = pomodoroConfig,
+                        phase = savedPhase,
+                        cycle = currentCycle,
+                        phaseRemainingAtSaveMillis = savedRemaining,
+                        totalFocusElapsedAtSaveMillis = savedElapsed,
+                        savedAtTimestamp = effectiveSavedAt,
+                        wasPaused = isEnginePaused,
+                        now = now
+                    )
                 }
+            }
+
+            val restoredElapsed = when (mode) {
+                SessionMode.TIMER -> timerEngine.calculateElapsed(now)
+                SessionMode.STOPWATCH -> stopwatchEngine.calculateElapsed(now)
+                SessionMode.POMODORO -> pomodoroEngine.calculateTotalFocusElapsed(now)
+            }
+            val restoredRemaining = when (mode) {
+                SessionMode.TIMER -> timerEngine.calculateRemaining(now)
+                SessionMode.STOPWATCH -> 0L
+                SessionMode.POMODORO -> pomodoroEngine.calculatePhaseRemaining(now)
             }
 
             val session = FocusSession(
@@ -307,10 +423,10 @@ class FocusSessionManager(
                 state = state,
                 startedAt = startedAt,
                 plannedDurationMillis = plannedDuration,
-                elapsedDurationMillis = prefs.getLong("elapsedDurationMillis", 0L),
-                remainingDurationMillis = prefs.getLong("remainingDurationMillis", plannedDuration),
-                pomodoroPhase = if (mode == SessionMode.POMODORO) PomodoroPhase.FOCUS else null,
-                currentCycle = currentCycle,
+                elapsedDurationMillis = restoredElapsed,
+                remainingDurationMillis = restoredRemaining,
+                pomodoroPhase = if (mode == SessionMode.POMODORO) pomodoroEngine.currentPhase else null,
+                currentCycle = if (mode == SessionMode.POMODORO) pomodoroEngine.currentCycle else currentCycle,
                 totalCycles = totalCycles,
                 isAppBlockingEnabled = isAppBlocking,
                 isStrictModeEnabled = isStrictMode,
@@ -321,17 +437,32 @@ class FocusSessionManager(
                 blockNotifications = blockNotifications,
                 defaultBreakMinutes = defaultBreakMinutes,
                 pomodoroConfig = pomodoroConfig,
-                manualBreak = null,
+                manualBreak = restoredBreak,
                 totalBreakDurationMillis = totalBreakDuration
             )
 
             _activeSession.value = session
             _sessionState.value = state
 
+            // Recover or re-anchor StrictModeEngine lock if strict mode is enabled on this session
+            if (isStrictMode && mode != SessionMode.STOPWATCH) {
+                val recovered = StrictModeEngine.instance.recoverStateOnLaunch(context)
+                if (!recovered && restoredRemaining > 0L) {
+                    StrictModeEngine.instance.startStrictMode(
+                        context = context,
+                        sessionId = id,
+                        mode = mode,
+                        durationMillis = restoredRemaining
+                    )
+                }
+            }
+
+            // Always start ticker so active countdowns, breaks, and subsequent resumes tick reliably
+            startTicker()
             if (state == SessionState.RUNNING) {
-                startTicker()
                 syncStateFromEngines(now)
             }
+            persistSnapshotSafely(context)
 
             return _activeSession.value
         } catch (e: Exception) {
@@ -359,6 +490,8 @@ class FocusSessionManager(
         _activeSession.update {
             it?.copy(manualBreak = breakInfo)
         }
+        startTicker()
+        persistSnapshotSafely()
         return breakInfo
     }
 
@@ -387,18 +520,25 @@ class FocusSessionManager(
                 totalBreakDurationMillis = (it.totalBreakDurationMillis + addedBreakDuration)
             )
         }
+        startTicker()
         syncStateFromEngines(now)
+        persistSnapshotSafely()
         return endedBreak
     }
 
     /**
      * Pauses the active session.
+     * Guarded in Strict Mode (non-Stopwatch) so strict sessions cannot be arbitrarily paused.
      */
     fun pauseSession(): Boolean {
         val current = _activeSession.value ?: return false
         if (current.state != SessionState.RUNNING) return false
+        if (current.isStrictModeEnabled && current.mode != SessionMode.STOPWATCH) {
+            return false
+        }
 
         val now = currentTimeProvider()
+        syncStateFromEngines(now)
         when (current.mode) {
             SessionMode.TIMER -> timerEngine.pause(now)
             SessionMode.STOPWATCH -> stopwatchEngine.pause(now)
@@ -409,6 +549,7 @@ class FocusSessionManager(
         _activeSession.update {
             it?.copy(state = SessionState.PAUSED)
         }
+        persistSnapshotSafely()
         return true
     }
 
@@ -430,6 +571,9 @@ class FocusSessionManager(
         _activeSession.update {
             it?.copy(state = SessionState.RUNNING)
         }
+        startTicker()
+        syncStateFromEngines(now)
+        persistSnapshotSafely()
         return true
     }
 
@@ -460,6 +604,7 @@ class FocusSessionManager(
             _activeSession.update {
                 it?.copy(laps = stopwatchEngine.laps)
             }
+            persistSnapshotSafely()
         }
         return lap
     }
@@ -486,6 +631,7 @@ class FocusSessionManager(
             )
         )
         syncStateFromEngines(now)
+        persistSnapshotSafely()
     }
 
     /**
@@ -495,6 +641,13 @@ class FocusSessionManager(
         val now = currentTimeProvider()
         syncStateFromEngines(now)
         val current = _activeSession.value ?: return null
+        if (current.isStrictModeEnabled &&
+            current.mode != SessionMode.STOPWATCH &&
+            current.remainingDurationMillis > 0L &&
+            current.state != SessionState.COMPLETED
+        ) {
+            return null
+        }
         stopTicker()
         breakManager.reset()
 
@@ -519,6 +672,13 @@ class FocusSessionManager(
         val now = currentTimeProvider()
         syncStateFromEngines(now)
         val current = _activeSession.value ?: return null
+        if (current.isStrictModeEnabled &&
+            current.mode != SessionMode.STOPWATCH &&
+            current.remainingDurationMillis > 0L &&
+            current.state != SessionState.COMPLETED
+        ) {
+            return null
+        }
         stopTicker()
         breakManager.reset()
 
@@ -594,6 +754,7 @@ class FocusSessionManager(
                 )
                 _activeSession.value = resumed
                 current = resumed
+                persistSnapshotSafely()
                 onNotificationEvent?.invoke(SessionNotificationEvent.BreakExpired)
             } else {
                 // Break still actively counting down — update elapsed progress so StateFlow emits!
@@ -601,8 +762,15 @@ class FocusSessionManager(
                 _activeSession.update {
                     it?.copy(manualBreak = activeBreak)
                 }
+                if (now - lastDiskSaveTimestamp >= 5_000L) {
+                    persistSnapshotSafely()
+                }
                 return
             }
+        }
+
+        if (current.state == SessionState.PAUSED) {
+            return
         }
 
         when (current.mode) {
@@ -627,6 +795,9 @@ class FocusSessionManager(
                         elapsedDurationMillis = elapsed,
                         remainingDurationMillis = remaining
                     )
+                    if (now - lastDiskSaveTimestamp >= 5_000L) {
+                        persistSnapshotSafely()
+                    }
                 }
             }
             SessionMode.STOPWATCH -> {
@@ -636,6 +807,9 @@ class FocusSessionManager(
                     remainingDurationMillis = 0L,
                     laps = stopwatchEngine.laps
                 )
+                if (now - lastDiskSaveTimestamp >= 5_000L) {
+                    persistSnapshotSafely()
+                }
             }
             SessionMode.POMODORO -> {
                 val prevPhase = pomodoroEngine.currentPhase
@@ -675,6 +849,9 @@ class FocusSessionManager(
                         elapsedDurationMillis = totalFocusElapsed,
                         remainingDurationMillis = phaseRemaining
                     )
+                    if (transitioned || now - lastDiskSaveTimestamp >= 5_000L) {
+                        persistSnapshotSafely()
+                    }
                 }
             }
         }

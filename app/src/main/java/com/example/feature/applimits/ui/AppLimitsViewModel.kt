@@ -46,7 +46,8 @@ data class InstalledAppChoice(
     val packageName: String,
     val appName: String,
     val icon: Drawable? = null,
-    val isAlreadyLimited: Boolean = false
+    val isAlreadyLimited: Boolean = false,
+    val isStrictLocked: Boolean = false
 )
 
 data class AppLimitsUiState(
@@ -183,7 +184,9 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
                     addCategory(Intent.CATEGORY_LAUNCHER)
                 }
                 val resolveInfos = pm.queryIntentActivities(intent, 0)
-                val currentLimits = appLimitRepository.getAllLimits().map { it.packageName }.toSet()
+                val allLimits = appLimitRepository.getAllLimits()
+                val currentLimits = allLimits.map { it.packageName }.toSet()
+                val strictLimits = allLimits.filter { it.isStrictOverride }.map { it.packageName }.toSet()
 
                 val apps = resolveInfos.mapNotNull { resolveInfo ->
                     val pkg = resolveInfo.activityInfo.packageName
@@ -196,7 +199,8 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
                         packageName = pkg,
                         appName = name,
                         icon = icon,
-                        isAlreadyLimited = currentLimits.contains(pkg)
+                        isAlreadyLimited = currentLimits.contains(pkg),
+                        isStrictLocked = strictLimits.contains(pkg)
                     )
                 }.sortedBy { it.appName.lowercase() }
 
@@ -208,6 +212,10 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private val _strictLockMessage = MutableStateFlow<String?>(null)
     val strictLockMessage: StateFlow<String?> = _strictLockMessage.asStateFlow()
+
+    fun notifyStrictLock(message: String) {
+        _strictLockMessage.value = message
+    }
 
     fun clearStrictLockMessage() {
         _strictLockMessage.value = null
@@ -227,6 +235,11 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
         emergencyUsesAllowed: Int = 1
     ) {
         viewModelScope.launch {
+            val existing = appLimitRepository.getLimitByPackage(packageName)
+            if (existing?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: ${existing.appName} limit is locked and cannot be modified or deleted."
+                return@launch
+            }
             appLimitRepository.saveLimit(
                 packageName = packageName,
                 appName = appName,
@@ -242,7 +255,13 @@ class AppLimitsViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun updateStrictMode(packageName: String, isStrict: Boolean) {
         viewModelScope.launch {
+            val existing = appLimitRepository.getLimitByPackage(packageName)
+            if (!isStrict && existing?.isStrictOverride == true) {
+                _strictLockMessage.value = "Strict Mode Active: ${existing.appName} strict protection cannot be turned off."
+                return@launch
+            }
             appLimitRepository.updateStrictMode(packageName, isStrict)
+            loadInstalledApps()
         }
     }
 

@@ -232,8 +232,12 @@ fun AppLimitsDashboardScreen(
                         item = item,
                         onToggle = { isEnabled -> viewModel.toggleLimit(item.packageName, isEnabled) },
                         onEdit = {
-                            editingItem = item
-                            openAddLimitFlow()
+                            if (item.isStrictOverride) {
+                                viewModel.notifyStrictLock("Strict Mode Active: ${item.appName} limit is locked and cannot be edited or deleted.")
+                            } else {
+                                editingItem = item
+                                openAddLimitFlow()
+                            }
                         },
                         onDelete = { viewModel.deleteLimit(item.packageName) },
                         onUnlockToday = { viewModel.unlockForToday(item.packageName) },
@@ -544,40 +548,63 @@ private fun AppLimitCard(
                         onDismissRequest = { showMenu = false },
                         containerColor = FocusColors.Surface
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Edit Limit") },
-                            onClick = {
-                                showMenu = false
-                                onEdit()
-                            },
-                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Reset Today's Usage") },
-                            onClick = {
-                                showMenu = false
-                                onResetToday()
-                            },
-                            leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) }
-                        )
-                        if (!item.isBypassedToday) {
+                        if (item.isStrictOverride) {
                             DropdownMenuItem(
-                                text = { Text("Unlock for Rest of Today") },
+                                text = {
+                                    Text(
+                                        text = "Strict Mode Locked (Cannot edit or delete)",
+                                        color = FocusColors.BlockedRed,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                },
                                 onClick = {
                                     showMenu = false
-                                    onUnlockToday()
+                                    onDelete()
                                 },
-                                leadingIcon = { Icon(Icons.Rounded.LockOpen, contentDescription = null) }
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Lock,
+                                        contentDescription = null,
+                                        tint = FocusColors.BlockedRed
+                                    )
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Edit Limit") },
+                                onClick = {
+                                    showMenu = false
+                                    onEdit()
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Reset Today's Usage") },
+                                onClick = {
+                                    showMenu = false
+                                    onResetToday()
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) }
+                            )
+                            if (!item.isBypassedToday) {
+                                DropdownMenuItem(
+                                    text = { Text("Unlock for Rest of Today") },
+                                    onClick = {
+                                        showMenu = false
+                                        onUnlockToday()
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.LockOpen, contentDescription = null) }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Delete Limit", color = FocusColors.BlockedRed) },
+                                onClick = {
+                                    showMenu = false
+                                    onDelete()
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = FocusColors.BlockedRed) }
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Delete Limit", color = FocusColors.BlockedRed) },
-                            onClick = {
-                                showMenu = false
-                                onDelete()
-                            },
-                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = FocusColors.BlockedRed) }
-                        )
                     }
                 }
             }

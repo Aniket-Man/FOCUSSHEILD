@@ -310,20 +310,37 @@ private fun WheelNumberPicker(
     modifier: Modifier = Modifier
 ) {
     val itemHeight = 44.dp
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val itemHeightPx = with(density) { itemHeight.toPx() }
     val coroutineScope = rememberCoroutineScope()
-    val initialIndex = items.indexOf(initialValue).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val targetIndex = items.indexOf(initialValue).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
-    val selectedIndex by remember {
+    val selectedIndex by remember(items, itemHeightPx) {
         derivedStateOf {
-            val centerIndex = listState.firstVisibleItemIndex
-            centerIndex.coerceIn(0, items.lastIndex)
+            val baseIndex = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            val roundedIndex = if (itemHeightPx > 0f && offset >= itemHeightPx / 2f) {
+                baseIndex + 1
+            } else {
+                baseIndex
+            }
+            roundedIndex.coerceIn(0, items.lastIndex)
         }
     }
 
-    LaunchedEffect(selectedIndex) {
-        if (selectedIndex in items.indices) {
+    // Keep wheel position in sync when preset chips change initialValue externally
+    LaunchedEffect(initialValue) {
+        val idx = items.indexOf(initialValue)
+        if (idx >= 0 && idx != selectedIndex && !listState.isScrollInProgress) {
+            listState.scrollToItem(idx)
+        }
+    }
+
+    // Emit user scroll changes when wheel settles or moves
+    LaunchedEffect(selectedIndex, listState.isScrollInProgress) {
+        if (selectedIndex in items.indices && listState.isScrollInProgress) {
             onValueChange(items[selectedIndex])
         }
     }
@@ -368,12 +385,13 @@ private fun WheelNumberPicker(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 itemsIndexed(items) { index, itemValue ->
-                    val isSelected = index == selectedIndex
+                    val isSelected = itemValue == initialValue || (listState.isScrollInProgress && index == selectedIndex)
                     Box(
                         modifier = Modifier
                             .height(itemHeight)
                             .fillMaxWidth()
                             .clickable {
+                                onValueChange(itemValue)
                                 coroutineScope.launch {
                                     listState.animateScrollToItem(index)
                                 }
@@ -381,7 +399,7 @@ private fun WheelNumberPicker(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = String.format("%02d", itemValue),
+                            text = String.format(java.util.Locale.US, "%02d", itemValue),
                             style = MaterialTheme.typography.titleLarge.copy(
                                 color = if (isSelected) FocusColors.TextPrimary else FocusColors.TextMuted,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,

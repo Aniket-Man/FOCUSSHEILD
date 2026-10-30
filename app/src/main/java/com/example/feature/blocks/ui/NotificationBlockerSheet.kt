@@ -145,8 +145,17 @@ fun NotificationBlockerSheet(
     viewModel: NotificationBlockerViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val strictLockMessage by viewModel.strictLockMessage.collectAsStateWithLifecycle()
+    val sheetContext = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(strictLockMessage) {
+        strictLockMessage?.let { msg ->
+            android.widget.Toast.makeText(sheetContext, msg, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.clearStrictLockMessage()
+        }
+    }
 
     val isDark = LocalFocusColors.current.isDark
     val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)

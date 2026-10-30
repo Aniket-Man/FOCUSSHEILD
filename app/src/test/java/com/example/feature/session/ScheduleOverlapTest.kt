@@ -187,4 +187,21 @@ class ScheduleOverlapTest {
             )
         )
     }
+
+    @Test
+    fun `isCurrentlyActiveWindow detects active recurring and overnight windows`() {
+        val monday10Am = Calendar.getInstance(zone).apply {
+            clear()
+            set(2026, Calendar.MARCH, 2, 10, 0, 0) // 2026-03-02 is a Monday
+        }.timeInMillis
+        val monday12Pm = Calendar.getInstance(zone).apply {
+            clear()
+            set(2026, Calendar.MARCH, 2, 12, 0, 0)
+        }.timeInMillis
+
+        val morningSchedule = schedule("m", days = "MON,TUE,WED,THU,FRI", start = "09:00", end = "11:00")
+        assertTrue(ScheduleValidation.isCurrentlyActiveWindow(morningSchedule, monday10Am, zone))
+        assertFalse(ScheduleValidation.isCurrentlyActiveWindow(morningSchedule, monday12Pm, zone))
+        assertFalse(ScheduleValidation.isCurrentlyActiveWindow(morningSchedule.copy(isEnabled = false), monday10Am, zone))
+    }
 }

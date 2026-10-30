@@ -40,13 +40,29 @@ object YouTubeNodeExtractor {
         "$YT:id/watch_swipey_item",
         "$YT:id/watch_metadata_title",
         "$YT:id/watch_title_text",
-        "$YT:id/player_view"
+        "$YT:id/player_view",
+        "$YT:id/player_overlays",
+        "$YT:id/player_control_screen",
+        "$YT:id/youtube_controls_overlay",
+        "$YT:id/video_surface",
+        "$YT:id/fullscreen_button",
+        "$YT:id/youtube_controls_fullscreen_button",
+        "$YT:id/fullscreen_engagement_panel",
+        "$YT:id/quick_actions_container"
     )
 
     private val WATCH_CONTAINER_VIEW_IDS = listOf(
         "$YT:id/watch_header_layout",
         "$YT:id/watch_panel",
         "$YT:id/watch_layout"
+    )
+
+    private val PORTRAIT_WATCH_HEADER_VIEW_IDS = listOf(
+        "$YT:id/watch_header_layout",
+        "$YT:id/subscribe_button",
+        "$YT:id/subscribe_button_text",
+        "$YT:id/channel_handle",
+        "$YT:id/watch_metadata_byline"
     )
 
     private val AD_VIEW_IDS = listOf(
@@ -294,10 +310,161 @@ object YouTubeNodeExtractor {
                 val found = findNodesByViewId(rootNode, viewId) { it.isNotEmpty() } ?: false
                 if (found) return true
             }
-            findNodesByViewId(rootNode, "$YT:id/watch_title_text") { it.isNotEmpty() } ?: false
+            if (findNodesByViewId(rootNode, "$YT:id/watch_title_text") { it.isNotEmpty() } == true) {
+                return true
+            }
+            // In full-screen mode when player controls auto-hide, check if "Exit full screen" or
+            // landscape watch_while_layout without Home/Shorts/Search navigation is active.
+            isFullScreenVideoPlayback(rootNode)
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * Detects whether the YouTube video player is currently in Full-Screen mode.
+     * In full-screen mode, the portrait watch metadata header below the player is hidden:
+     *  - The full-screen toggle button exposes "Exit full screen" (instead of "Enter full screen"), OR
+     *  - Full-screen engagement / quick action containers are present, OR
+     *  - The active window bounds are in landscape orientation while not on Home/Shorts/Search, OR
+     *  - An active player surface is present while both the portrait watch header (subscribe/byline)
+     *    and bottom navigation bar (pivot_bar / home_feed) are absent.
+     */
+    fun isFullScreenVideoPlayback(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+        try {
+            if (detectShorts(rootNode, null) || isHomeFeed(rootNode)) return false
+
+            var hasExitFullScreenControl = false
+            var hasEnterFullScreenControl = false
+            var hasFullScreenContainer = false
+            var hasPlayerSurface = false
+            var hasPortraitHeaderOrSubscribe = false
+            var hasBottomNavOrSearch = false
+
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 220) {
+                val node = queue.removeFirst()
+                visited++
+
+                val resId = node.viewIdResourceName ?: ""
+                val rawResId = resId.substringAfterLast(":id/").substringAfterLast("/")
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+
+                if (desc.equals("Exit full screen", ignoreCase = true) ||
+                    desc.equals("Exit fullscreen", ignoreCase = true) ||
+                    rawResId.equals("exit_fullscreen", ignoreCase = true) ||
+                    rawResId.equals("exit_fullscreen_button", ignoreCase = true)
+                ) {
+                    hasExitFullScreenControl = true
+                }
+                if (desc.equals("Enter full screen", ignoreCase = true) ||
+                    desc.equals("Enter fullscreen", ignoreCase = true)
+                ) {
+                    hasEnterFullScreenControl = true
+                }
+                if (rawResId.contains("fullscreen_engagement", ignoreCase = true) ||
+                    rawResId.contains("quick_actions_container", ignoreCase = true)
+                ) {
+                    hasFullScreenContainer = true
+                }
+                if (rawResId.equals("player_view", ignoreCase = true) ||
+                    rawResId.equals("watch_player", ignoreCase = true) ||
+                    rawResId.equals("watch_panel", ignoreCase = true) ||
+                    rawResId.equals("player_overlays", ignoreCase = true) ||
+                    rawResId.equals("player_control_screen", ignoreCase = true) ||
+                    rawResId.equals("youtube_controls_overlay", ignoreCase = true) ||
+                    rawResId.equals("video_surface", ignoreCase = true) ||
+                    rawResId.equals("time_bar", ignoreCase = true) ||
+                    rawResId.equals("fullscreen_button", ignoreCase = true) ||
+                    rawResId.equals("youtube_controls_fullscreen_button", ignoreCase = true)
+                ) {
+                    hasPlayerSurface = true
+                }
+                if (rawResId.equals("watch_header_layout", ignoreCase = true) ||
+                    rawResId.equals("subscribe_button", ignoreCase = true) ||
+                    rawResId.equals("subscribe_button_text", ignoreCase = true) ||
+                    desc.startsWith("Subscribe to ", ignoreCase = true) ||
+                    desc.startsWith("Subscribed to ", ignoreCase = true)
+                ) {
+                    hasPortraitHeaderOrSubscribe = true
+                }
+                if (rawResId.contains("pivot_bar", ignoreCase = true) ||
+                    rawResId.contains("bottom_navigation", ignoreCase = true) ||
+                    rawResId.contains("search_results", ignoreCase = true) ||
+                    rawResId.contains("home_feed", ignoreCase = true)
+                ) {
+                    hasBottomNavOrSearch = true
+                }
+
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+
+            if (hasExitFullScreenControl || hasFullScreenContainer) return true
+            if (hasEnterFullScreenControl || hasPortraitHeaderOrSubscribe || hasBottomNavOrSearch) return false
+
+            val bounds = android.graphics.Rect()
+            rootNode.getBoundsInScreen(bounds)
+            val isLandscapeBounds = bounds.width() > bounds.height() && bounds.width() > 0
+            if (isLandscapeBounds && (hasPlayerSurface || visited > 1)) {
+                return true
+            }
+
+            if (hasPlayerSurface && !hasPortraitHeaderOrSubscribe && !hasBottomNavOrSearch) {
+                return true
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
+     * Attempts to click the "Exit full screen" button in the YouTube player overlay so the
+     * player transitions from full-screen mode back to the portrait watch page (without closing the video).
+     */
+    fun clickExitFullScreenButton(rootNode: AccessibilityNodeInfo?): Boolean {
+        if (rootNode == null) return false
+        try {
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 150) {
+                val node = queue.removeFirst()
+                visited++
+                val resId = node.viewIdResourceName ?: ""
+                val rawResId = resId.substringAfterLast(":id/").substringAfterLast("/")
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+
+                val isExitFs = desc.equals("Exit full screen", ignoreCase = true) ||
+                        desc.equals("Exit fullscreen", ignoreCase = true) ||
+                        rawResId.equals("exit_fullscreen_button", ignoreCase = true) ||
+                        (rawResId.contains("fullscreen_button", ignoreCase = true) &&
+                                !desc.equals("Enter full screen", ignoreCase = true))
+
+                if (isExitFs) {
+                    var target: AccessibilityNodeInfo? = node
+                    var depth = 0
+                    while (target != null && depth < 4) {
+                        if (target.isClickable) {
+                            if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                                return true
+                            }
+                        }
+                        target = try { target.parent } catch (_: Exception) { null }
+                        depth++
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        } catch (_: Exception) {}
+        return false
     }
 
     /**
@@ -478,10 +645,12 @@ object YouTubeNodeExtractor {
      * comment thread, or ad companion overlay so below-the-fold channels (e.g. BnfTV, Food Pharmer)
      * are never mistaken for the active video's channel.
      */
+    fun isNodeInExcludedContainer(node: AccessibilityNodeInfo?): Boolean = isInsideExcludedContainer(node)
+
     private fun isInsideExcludedContainer(node: AccessibilityNodeInfo?): Boolean {
         var current = node
         var depth = 0
-        while (current != null && depth < 5) {
+        while (current != null && depth < 6) {
             val resId = current.viewIdResourceName ?: ""
             if (resId.isNotEmpty()) {
                 if (YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any {
@@ -493,7 +662,8 @@ object YouTubeNodeExtractor {
             }
             val desc = current.contentDescription?.toString() ?: ""
             if (desc.contains(" - Go to channel - ", ignoreCase = true) ||
-                desc.endsWith("- play video", ignoreCase = true)
+                desc.endsWith("- play video", ignoreCase = true) ||
+                desc.equals("More videos", ignoreCase = true)
             ) {
                 return true
             }
@@ -535,6 +705,89 @@ object YouTubeNodeExtractor {
     }
 
     /**
+     * Determines whether a TYPE_VIEW_CLICKED event is an interaction with the video player's own controls
+     * (e.g. "Enter full screen", "Exit full screen", Play/Pause, Seek bar, 10s skip, Video quality,
+     * Playback speed, Captions, Lock screen, or tapping the player overlay to show/hide controls)
+     * rather than clicking a new video card.
+     */
+    fun isPlayerControlOrFullscreenInteraction(
+        event: AccessibilityEvent?,
+        rootNode: AccessibilityNodeInfo? = null
+    ): Boolean {
+        if (event == null || event.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            return false
+        }
+        try {
+            // If the click event carries a video card identity ("- Go to channel -"), it is a video navigation click!
+            val (clickedCardChannel, _) = extractClickedVideoCardIdentity(event)
+            if (!clickedCardChannel.isNullOrBlank()) {
+                return false
+            }
+
+            val eventDesc = event.contentDescription?.toString()?.trim() ?: ""
+            val eventText = event.text?.joinToString(" ") { it?.toString()?.trim() ?: "" }?.trim() ?: ""
+            val source = try { event.source } catch (_: Exception) { null }
+            val sourceResId = source?.viewIdResourceName ?: ""
+            val sourceDesc = source?.contentDescription?.toString()?.trim() ?: ""
+            val sourceText = source?.text?.toString()?.trim() ?: ""
+            val parent = try { source?.parent } catch (_: Exception) { null }
+            val parentResId = parent?.viewIdResourceName ?: ""
+            val parentDesc = parent?.contentDescription?.toString()?.trim() ?: ""
+
+            val allDescs = listOf(eventDesc, eventText, sourceDesc, sourceText, parentDesc)
+                .filter { it.isNotBlank() }
+            val allResIds = listOf(sourceResId, parentResId)
+                .filter { it.isNotBlank() }
+
+            // 1. Check explicit player control descriptions (Enter/Exit full screen, Play/Pause, Quality, Speed, Seek...)
+            for (d in allDescs) {
+                if (YouTubeDetectionRules.PLAYER_CONTROL_DESCRIPTIONS.any { d.equals(it, ignoreCase = true) }) {
+                    return true
+                }
+                if (d.startsWith("Enter full screen", ignoreCase = true) ||
+                    d.startsWith("Exit full screen", ignoreCase = true) ||
+                    d.startsWith("Full screen", ignoreCase = true) ||
+                    d.startsWith("Seek", ignoreCase = true) ||
+                    d.startsWith("Fast-forward", ignoreCase = true) ||
+                    d.startsWith("Fast forward", ignoreCase = true) ||
+                    d.startsWith("Rewind", ignoreCase = true) ||
+                    d.startsWith("Double-tap to seek", ignoreCase = true) ||
+                    d.startsWith("Playback speed", ignoreCase = true) ||
+                    d.startsWith("Video quality", ignoreCase = true) ||
+                    d.startsWith("Quality", ignoreCase = true) ||
+                    d.startsWith("Captions", ignoreCase = true) ||
+                    d.startsWith("Subtitles", ignoreCase = true)
+                ) {
+                    return true
+                }
+            }
+
+            // 2. Check explicit player control view IDs
+            for (res in allResIds) {
+                val rawRes = res.substringAfterLast(":id/").substringAfterLast("/")
+                if (YouTubeDetectionRules.PLAYER_CONTROL_VIEW_IDS.any { rawRes.equals(it, ignoreCase = true) || rawRes.contains(it, ignoreCase = true) }) {
+                    return true
+                }
+            }
+
+            // 3. Tapping the active video player surface itself (to show/hide full-screen or portrait overlay controls)
+            if (source != null && !isInsideExcludedContainer(source)) {
+                val rawSourceRes = sourceResId.substringAfterLast(":id/").substringAfterLast("/")
+                val rawParentRes = parentResId.substringAfterLast(":id/").substringAfterLast("/")
+                val playerSurfaceIds = listOf(
+                    "player_view", "watch_player", "player_overlays",
+                    "player_control_screen", "controls_layout", "youtube_controls_overlay",
+                    "scrim_overlay", "video_surface", "video_zoom_overlay"
+                )
+                if (playerSurfaceIds.any { rawSourceRes.equals(it, ignoreCase = true) || rawParentRes.equals(it, ignoreCase = true) }) {
+                    return true
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
      * When the user clicks a video card in the below-player recommendation feed (or search/home feed),
      * extracts the clicked video's (channelName, videoTitle) directly from the clicked AccessibilityEvent
      * if YouTube's accessibility card label ("<Title> - <Duration> - Go to channel - <Channel> - <Views> - <Time> - play video")
@@ -548,10 +801,9 @@ object YouTubeNodeExtractor {
             val eventDesc = event.contentDescription?.toString()?.trim() ?: ""
             val eventText = event.text?.joinToString(" ") { it?.toString()?.trim() ?: "" }?.trim() ?: ""
 
-            // Ignore clicks on overflow menu, pause/play controls, collapse, etc.
-            val ignoredControlLabels = listOf(
-                "Action menu", "More actions", "Pause video", "Play video", "Pause", "Play",
-                "Expand", "Collapse", "Close", "Navigate up", "Share", "Like", "Dislike", "Save"
+            // Ignore clicks on overflow menu, pause/play controls, full screen toggle, collapse, etc.
+            val ignoredControlLabels = YouTubeDetectionRules.PLAYER_CONTROL_DESCRIPTIONS + listOf(
+                "Action menu", "Navigate up", "Share", "Like", "Dislike", "Save"
             )
             if (ignoredControlLabels.any { eventDesc.equals(it, ignoreCase = true) || eventText.equals(it, ignoreCase = true) }) {
                 return null to null
@@ -819,6 +1071,10 @@ object YouTubeNodeExtractor {
      * Scans specifically the watch player metadata subtree for @handle nodes.
      */
     private fun extractHandleFromWatchSubtree(rootNode: AccessibilityNodeInfo): String? {
+        if (isFullScreenVideoPlayback(rootNode)) {
+            val strictHeader = findFirstMatching(rootNode, listOf("$YT:id/watch_header_layout")) { it }
+            return if (strictHeader != null) scanSubtreeForHandle(strictHeader) else null
+        }
         val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
         if (watchContainer != null) {
             val fromContainer = scanSubtreeForHandle(watchContainer)
@@ -875,6 +1131,10 @@ object YouTubeNodeExtractor {
      * "Subscribe to [Channel]", "@handle", or "Go to channel [Name]" nodes.
      */
     private fun extractChannelFromWatchPlayer(rootNode: AccessibilityNodeInfo): String? {
+        if (isFullScreenVideoPlayback(rootNode)) {
+            val strictHeader = findFirstMatching(rootNode, listOf("$YT:id/watch_header_layout")) { it }
+            return if (strictHeader != null) scanSubtreeForWatchChannel(strictHeader) else null
+        }
         val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it }
         if (watchContainer != null) {
             val fromContainer = scanSubtreeForWatchChannel(watchContainer)

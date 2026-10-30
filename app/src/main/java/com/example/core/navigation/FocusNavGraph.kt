@@ -191,6 +191,14 @@ fun FocusNavGraph(
     LaunchedEffect(incomingPlanPayload, isSplashRoute) {
         val payload = incomingPlanPayload ?: return@LaunchedEffect
         if (isSplashRoute) return@LaunchedEffect
+        val existingActive = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+        if (existingActive != null && (existingActive.isRunning || existingActive.isPaused)) {
+            navController.navigate(Screen.ActiveSession.route) {
+                launchSingleTop = true
+            }
+            onPlanPayloadHandled()
+            return@LaunchedEffect
+        }
         sessionViewModel.configureForStudyPlan(
             subjectName = payload.subject,
             topicName = payload.topic,
@@ -282,8 +290,15 @@ fun FocusNavGraph(
             HomeScreen(
                 viewModel = homeViewModel,
                 sessionViewModel = sessionViewModel,
-                onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
-                onNavigateToActiveSession = { navController.navigate(Screen.ActiveSession.route) },
+                onNavigateToStartSession = {
+                    val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    if (active != null && (active.isRunning || active.isPaused)) {
+                        navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                    } else {
+                        navController.navigate(Screen.StartSession.route)
+                    }
+                },
+                onNavigateToActiveSession = { navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true } },
                 onNavigateToModeSelection = { navController.navigate(Screen.ModeSelection.route) },
                 onNavigateToPlannerTab = { handleBottomTabNavigation(BottomTab.PLANNER, navController) },
                 onNavigateToStatsTab = { handleBottomTabNavigation(BottomTab.STATS, navController) },
@@ -307,14 +322,19 @@ fun FocusNavGraph(
                     }
                 },
                 onStartPlanSession = { planItem ->
-                    sessionViewModel.configureForStudyPlan(
-                        subjectName = planItem.subject,
-                        topicName = planItem.topic,
-                        durationMinutes = planItem.durationMinutes,
-                        planId = planItem.id,
-                        notes = planItem.notes
-                    )
-                    navController.navigate(Screen.SessionSetup.route)
+                    val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    if (active != null && (active.isRunning || active.isPaused)) {
+                        navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                    } else {
+                        sessionViewModel.configureForStudyPlan(
+                            subjectName = planItem.subject,
+                            topicName = planItem.topic,
+                            durationMinutes = planItem.durationMinutes,
+                            planId = planItem.id,
+                            notes = planItem.notes
+                        )
+                        navController.navigate(Screen.SessionSetup.route)
+                    }
                 }
             )
         }
@@ -327,14 +347,19 @@ fun FocusNavGraph(
                     handleBottomTabNavigation(tab, navController)
                 },
                 onStartPlanSession = { planItem ->
-                    sessionViewModel.configureForStudyPlan(
-                        subjectName = planItem.subject,
-                        topicName = planItem.topic,
-                        durationMinutes = planItem.durationMinutes,
-                        planId = planItem.id,
-                        notes = planItem.notes
-                    )
-                    navController.navigate(Screen.SessionSetup.route)
+                    val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    if (active != null && (active.isRunning || active.isPaused)) {
+                        navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                    } else {
+                        sessionViewModel.configureForStudyPlan(
+                            subjectName = planItem.subject,
+                            topicName = planItem.topic,
+                            durationMinutes = planItem.durationMinutes,
+                            planId = planItem.id,
+                            notes = planItem.notes
+                        )
+                        navController.navigate(Screen.SessionSetup.route)
+                    }
                 },
                 onOpenBlockedApps = { navController.navigate(Screen.BlockedApps.route) }
             )
@@ -345,7 +370,14 @@ fun FocusNavGraph(
             val resolvedAnalyticsVm = analyticsViewModel ?: viewModel()
             AnalyticsScreen(
                 viewModel = resolvedAnalyticsVm,
-                onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) },
+                onNavigateToStartSession = {
+                    val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    if (active != null && (active.isRunning || active.isPaused)) {
+                        navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                    } else {
+                        navController.navigate(Screen.StartSession.route)
+                    }
+                },
                 onTabSelected = { tab ->
                     handleBottomTabNavigation(tab, navController)
                 },
@@ -391,7 +423,14 @@ fun FocusNavGraph(
             SessionsHistoryScreen(
                 viewModel = resolvedHistoryVm,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToStartSession = { navController.navigate(Screen.StartSession.route) }
+                onNavigateToStartSession = {
+                    val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
+                    if (active != null && (active.isRunning || active.isPaused)) {
+                        navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                    } else {
+                        navController.navigate(Screen.StartSession.route)
+                    }
+                }
             )
         }
 

@@ -105,10 +105,10 @@ fun AppLimitOverlayScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var appIconDrawable by remember { mutableStateOf<Drawable?>(null) }
-    var strictModeEnabledState by remember { mutableStateOf(isStrict) }
-    var showMotivationalQuitDialog by remember { mutableStateOf(false) }
-    var showStrictModeInfoDialog by remember { mutableStateOf(false) }
+    var appIconDrawable by remember(packageName) { mutableStateOf<Drawable?>(null) }
+    var strictModeEnabledState by remember(packageName, isStrict) { mutableStateOf(isStrict) }
+    var showMotivationalQuitDialog by remember(packageName) { mutableStateOf(false) }
+    var showStrictModeInfoDialog by remember(packageName) { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
         try {
@@ -597,10 +597,8 @@ fun AppLimitOverlayScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     val emergencyRemaining = (emergencyUsesAllowed - emergencyUsesCount).coerceAtLeast(0)
                     Text(
-                        text = if (strictModeEnabledState && emergencyRemaining == 0) {
-                            "Strict Mode is active and your emergency passes are exhausted. No extensions available until tomorrow."
-                        } else if (strictModeEnabledState) {
-                            "Daily allowance reached. You have $emergencyRemaining emergency pass${if (emergencyRemaining > 1) "es" else ""} available before strict lockdown."
+                        text = if (strictModeEnabledState) {
+                            "Strict Mode is active and today's allowance is exhausted. No emergency extensions are available until tomorrow."
                         } else {
                             "You have exhausted today's allowance. Take a deep breath and close the app to protect your discipline streak."
                         },
@@ -611,8 +609,8 @@ fun AppLimitOverlayScreen(
                         )
                     )
 
-                    // Emergency Pass if available (supported in both normal and strict mode)
-                    if (emergencyRemaining > 0) {
+                    // Emergency Pass is only available when Strict Mode is NOT active
+                    if (emergencyRemaining > 0 && !strictModeEnabledState) {
                         Spacer(modifier = Modifier.height(14.dp))
                         OutlinedButton(
                             onClick = onUseEmergency,

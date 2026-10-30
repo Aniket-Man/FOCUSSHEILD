@@ -54,6 +54,10 @@ class AppLimitRepository(
         emergencyUsesAllowed: Int = 1
     ) {
         val existing = appLimitDao.getLimitByPackage(packageName)
+        if (existing?.isStrictOverride == true) {
+            // Strict Mode is locked for this app: do not allow overwriting, disabling, or weakening the limit.
+            return
+        }
         val entity = AppLimitEntity(
             packageName = packageName,
             appName = appName,
@@ -81,15 +85,26 @@ class AppLimitRepository(
      * what actually happened on this device, and removing a limit is not a statement that the time
      * already spent did not happen. Clearing usage for an app that is no longer limited is the same
      * thing the user gets by leaving the limit off — nothing reads these rows without a limit config.
+     *
+     * In Strict Mode (`isStrictOverride == true`), deletion is strictly forbidden from any entry point.
      */
-    suspend fun deleteLimit(packageName: String) {
+    suspend fun deleteLimit(packageName: String): Boolean {
+        val existing = appLimitDao.getLimitByPackage(packageName)
+        if (existing?.isStrictOverride == true) {
+            return false
+        }
         appLimitDao.deleteByPackage(packageName)
         try {
             com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
         } catch (_: Exception) {}
+        return true
     }
 
-    suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean) {
+    suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean): Boolean {
+        val existing = appLimitDao.getLimitByPackage(packageName)
+        if (!isEnabled && existing?.isStrictOverride == true) {
+            return false
+        }
         appLimitDao.setEnabled(packageName, isEnabled)
 
         if (isEnabled) {
@@ -108,9 +123,14 @@ class AppLimitRepository(
                 com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDisabled(packageName)
             }
         } catch (_: Exception) {}
+        return true
     }
 
     suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
+        val existing = appLimitDao.getLimitByPackage(packageName)
+        if (existing?.isStrictOverride == true) {
+            return
+        }
         appLimitDao.updateDailyLimitMinutes(packageName, minutes)
         try {
             appLimitDao.getLimitByPackage(packageName)?.let {
@@ -120,6 +140,10 @@ class AppLimitRepository(
     }
 
     suspend fun updateStrictMode(packageName: String, isStrict: Boolean) {
+        val existing = appLimitDao.getLimitByPackage(packageName)
+        if (existing?.isStrictOverride == true && !isStrict) {
+            return
+        }
         appLimitDao.updateStrictMode(packageName, isStrict)
     }
 
@@ -161,6 +185,10 @@ class AppLimitRepository(
      * Resets usedMillis to 0 for a specific app and date. Used by the "Reset Today's Usage" button.
      */
     suspend fun resetUsage(packageName: String, dateString: String = getTodayDateString()) {
+        val limit = appLimitDao.getLimitByPackage(packageName)
+        if (limit?.isStrictOverride == true) {
+            return
+        }
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
         if (existing != null) {
             val updated = existing.copy(
@@ -238,9 +266,12 @@ class AppLimitRepository(
     }
 
     suspend fun setBypassedForToday(packageName: String, dateString: String = getTodayDateString(), bypassed: Boolean) {
+        val limit = appLimitDao.getLimitByPackage(packageName)
+        if (bypassed && limit?.isStrictOverride == true) {
+            return
+        }
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
         if (existing == null) {
-            val limit = appLimitDao.getLimitByPackage(packageName)
             val newRecord = DailyAppUsageEntity(
                 packageName = packageName,
                 dateString = dateString,
