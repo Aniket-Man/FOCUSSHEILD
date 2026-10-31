@@ -29,7 +29,8 @@ object ScheduledSessionFactory {
         val plannedDurationMillis: Long,
         val blockedAppPackages: Set<String>,
         val blockNotifications: Boolean,
-        val breakMinutes: Int
+        val breakMinutes: Int,
+        val scheduledEndTimeMillis: Long = 0L
     )
 
     sealed interface Result {
@@ -39,7 +40,14 @@ object ScheduledSessionFactory {
         data class Rejected(val reason: String) : Result
     }
 
-    fun draftFor(schedule: FocusScheduleEntity): Result {
+    fun draftFor(schedule: FocusScheduleEntity): Result =
+        draftFor(schedule = schedule, nowMillis = null)
+
+    fun draftFor(
+        schedule: FocusScheduleEntity,
+        nowMillis: Long?,
+        timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()
+    ): Result {
         val mode = parseModeOrNull(schedule.mode)
             ?: return Result.Rejected(
                 "unrecognised session mode '${schedule.mode}' (expected TIMER, POMODORO or STOPWATCH)"
@@ -56,6 +64,34 @@ object ScheduledSessionFactory {
             )
         }
 
+        val fullWindowMillis = durationMinutes * 60_000L
+        var plannedMillis = fullWindowMillis
+        var endMillis = 0L
+
+        if (nowMillis != null && nowMillis > 0L) {
+            val activeBounds = ScheduleValidation.activeWindowBoundsMillis(
+                schedule = schedule.copy(isEnabled = true),
+                nowMillis = nowMillis,
+                timeZone = timeZone
+            )
+            if (activeBounds != null) {
+                endMillis = activeBounds.endMillis
+                plannedMillis = (activeBounds.endMillis - nowMillis).coerceAtLeast(1_000L)
+            } else {
+                val dateBounds = ScheduleValidation.resolveWindowBoundsForDate(
+                    schedule = schedule,
+                    referenceDateMillis = nowMillis,
+                    timeZone = timeZone
+                )
+                if (dateBounds != null && nowMillis < dateBounds.endMillis) {
+                    endMillis = dateBounds.endMillis
+                    plannedMillis = (dateBounds.endMillis - nowMillis).coerceAtLeast(1_000L)
+                } else {
+                    endMillis = nowMillis + fullWindowMillis
+                }
+            }
+        }
+
         val subject = schedule.subjectName.ifBlank { schedule.title }.ifBlank { "Study Session" }
         val goal = schedule.description.ifBlank {
             "Automated Focus Window (${schedule.startTime} - ${schedule.endTime})"
@@ -67,10 +103,11 @@ object ScheduledSessionFactory {
                 subject = subject,
                 topic = schedule.description.ifBlank { "Automated Schedule: ${schedule.title}" },
                 goal = goal,
-                plannedDurationMillis = durationMinutes * 60_000L,
+                plannedDurationMillis = plannedMillis,
                 blockedAppPackages = parsePackageList(schedule.blockedAppPackages),
                 blockNotifications = schedule.blockNotifications,
-                breakMinutes = schedule.breakMinutes.coerceIn(0, MAX_BREAK_MINUTES)
+                breakMinutes = schedule.breakMinutes.coerceIn(0, MAX_BREAK_MINUTES),
+                scheduledEndTimeMillis = endMillis
             )
         )
     }

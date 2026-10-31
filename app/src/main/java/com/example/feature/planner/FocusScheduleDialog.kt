@@ -216,7 +216,7 @@ fun FocusScheduleDialog(
     var tag by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.subjectName.takeIf { !it.isNullOrBlank() } ?: "Untagged") }
     var isAutoStart by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.isAutoStartSession ?: true) }
     var blockNotifications by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.blockNotifications ?: initialBlockNotifications) }
-    var selectedMode by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.mode?.uppercase(Locale.ENGLISH) ?: "TIMER") }
+    var selectedMode by rememberSaveable(scheduleKey) { mutableStateOf("TIMER") }
 
     val effectiveScheduleDate = remember(initialSchedule?.scheduledDateMillis, selectedDateMillis) {
         val initMillis = initialSchedule?.scheduledDateMillis ?: 0L
@@ -563,19 +563,7 @@ fun FocusScheduleDialog(
                                 .padding(horizontal = 20.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            // 1. Segmented Mode Picker (Timer | Stopwatch | Pomodoro) — matching FocusSessionSetupSheet
-                            ScheduleModeSegmentedSelector(
-                                selectedMode = selectedMode,
-                                onModeSelected = { mode ->
-                                    selectedMode = mode
-                                    if (mode == "POMODORO" && breakMinutes == 0) {
-                                        breakMinutes = 5
-                                        numberOfBreaks = 1
-                                    }
-                                }
-                            )
-
-                            // 2. Emoji Box + Schedule Name Input Box
+                            // 1. Emoji Box + Schedule Name Input Box
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -935,45 +923,98 @@ fun FocusScheduleDialog(
                                         }
                                     }
 
-                                    if (selectedMode != "STOPWATCH") {
-                                        HorizontalDivider(thickness = 1.dp, color = dividerColor)
+                                    HorizontalDivider(thickness = 1.dp, color = dividerColor)
 
-                                        // "Break" Row (matching FocusSessionSetupSheet)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { showBreakPicker = true }
-                                                .padding(horizontal = 16.dp, vertical = 16.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Break",
-                                                color = textPrimary,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Medium
+                                    // Clock Window Summary Row (Start Time -> Stop Time)
+                                    val previewBounds = remember(startTime, endTime, repeatEnabled, selectedDaysList, effectiveScheduleDate) {
+                                        val selectedDayCode = SimpleDateFormat("EEE", Locale.ENGLISH)
+                                            .format(effectiveScheduleDate)
+                                            .uppercase(Locale.ENGLISH)
+                                        val previewDays = if (repeatEnabled) selectedDaysList.joinToString(",") else selectedDayCode
+                                        val previewSchedule = FocusScheduleEntity(
+                                            id = "preview",
+                                            title = title.ifBlank { "Schedule" },
+                                            daysOfWeek = previewDays,
+                                            startTime = startTime,
+                                            endTime = endTime,
+                                            repeatEnabled = repeatEnabled,
+                                            scheduledDateMillis = effectiveScheduleDate.time,
+                                            isEnabled = true
+                                        )
+                                        com.example.feature.session.notification.ScheduleValidation.activeWindowBoundsMillis(
+                                            previewSchedule,
+                                            System.currentTimeMillis()
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                if (previewBounds != null) Color(0xFF22C55E).copy(alpha = 0.10f)
+                                                else FocusColors.Primary.copy(alpha = 0.08f)
                                             )
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                val breakLabel = if (numberOfBreaks <= 0 || breakMinutes <= 0) {
-                                                    "No breaks"
-                                                } else {
-                                                    "$numberOfBreaks break (${breakMinutes}m each)"
-                                                }
-                                                Text(
-                                                    text = breakLabel,
-                                                    color = textSecondary,
-                                                    fontSize = 15.sp
-                                                )
-                                                Icon(
-                                                    imageVector = Icons.Rounded.KeyboardArrowRight,
-                                                    contentDescription = null,
-                                                    tint = textSecondary,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Starts at ${formatTimeDisplay(startTime)} • Stops at ${formatTimeDisplay(endTime)}",
+                                                color = if (previewBounds != null) Color(0xFF22C55E) else FocusColors.Primary,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            val subNote = if (previewBounds != null && isAutoStart) {
+                                                val remMins = ((previewBounds.remainingMillis(System.currentTimeMillis()) + 59_999L) / 60_000L).coerceAtLeast(1L)
+                                                "Active window now • Auto-starts immediately for ${remMins}m until ${formatTimeDisplay(endTime)}"
+                                            } else {
+                                                "Timer automatically stops at ${formatTimeDisplay(endTime)} and logs pure study time"
                                             }
+                                            Text(
+                                                text = subNote,
+                                                color = textSecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    HorizontalDivider(thickness = 1.dp, color = dividerColor)
+
+                                    // "Break" Row (matching FocusSessionSetupSheet)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showBreakPicker = true }
+                                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Break",
+                                            color = textPrimary,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            val breakLabel = if (numberOfBreaks <= 0 || breakMinutes <= 0) {
+                                                "No breaks"
+                                            } else {
+                                                "$numberOfBreaks break (${breakMinutes}m each)"
+                                            }
+                                            Text(
+                                                text = breakLabel,
+                                                color = textSecondary,
+                                                fontSize = 15.sp
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Rounded.KeyboardArrowRight,
+                                                contentDescription = null,
+                                                tint = textSecondary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
                                         }
                                     }
                                 }

@@ -33,7 +33,13 @@ data class FocusSession(
     val defaultBreakMinutes: Int = 5,
     val pomodoroConfig: PomodoroConfig = PomodoroConfig(),
     val manualBreak: ManualBreakInfo? = null,
-    val totalBreakDurationMillis: Long = 0L
+    val totalBreakDurationMillis: Long = 0L,
+    /**
+     * When > 0L, this session is anchored to a scheduled wall-clock end time (epoch millis).
+     * The session strictly stops at [scheduledEndTimeMillis], while [elapsedDurationMillis]
+     * tracks only active focused study time (excluding pauses and breaks).
+     */
+    val scheduledEndTimeMillis: Long = 0L
 ) {
     val isRunning: Boolean get() = state == SessionState.RUNNING
     val isPaused: Boolean get() = state == SessionState.PAUSED
@@ -52,7 +58,12 @@ data class FocusSession(
         get() = when (mode) {
             SessionMode.TIMER -> {
                 if (plannedDurationMillis <= 0) 0f
-                else (elapsedDurationMillis.toFloat() / plannedDurationMillis.toFloat()).coerceIn(0f, 1f)
+                else if (scheduledEndTimeMillis > 0L) {
+                    val wallElapsed = (plannedDurationMillis - remainingDurationMillis).coerceIn(0L, plannedDurationMillis)
+                    (wallElapsed.toFloat() / plannedDurationMillis.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    (elapsedDurationMillis.toFloat() / plannedDurationMillis.toFloat()).coerceIn(0f, 1f)
+                }
             }
             SessionMode.POMODORO -> {
                 val phaseDuration = when (pomodoroPhase) {

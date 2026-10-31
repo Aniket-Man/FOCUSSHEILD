@@ -133,15 +133,28 @@ object ScheduleValidation {
     }
 
     /**
-     * True when [schedule] is enabled and [nowMillis] falls inside one of its active time windows.
+     * Exact epoch millisecond boundaries `[startMillis, endMillis)` for one occurrence of a schedule.
      */
-    fun isCurrentlyActiveWindow(
+    data class WindowBounds(
+        val startMillis: Long,
+        val endMillis: Long
+    ) {
+        val totalDurationMillis: Long get() = (endMillis - startMillis).coerceAtLeast(0L)
+        fun remainingMillis(nowMillis: Long): Long = (endMillis - nowMillis).coerceAtLeast(0L)
+    }
+
+    /**
+     * When [schedule] is enabled and [nowMillis] falls inside one of its active time windows,
+     * returns the exact `[startMillis, endMillis)` epoch timestamps for that active occurrence.
+     * Returns null otherwise.
+     */
+    fun activeWindowBoundsMillis(
         schedule: FocusScheduleEntity,
         nowMillis: Long = System.currentTimeMillis(),
         timeZone: TimeZone = TimeZone.getDefault()
-    ): Boolean {
-        if (!schedule.isEnabled) return false
-        val window = windowOf(schedule) ?: return false
+    ): WindowBounds? {
+        if (!schedule.isEnabled) return null
+        val window = windowOf(schedule) ?: return null
 
         if (isOneTime(schedule)) {
             val startMillis = ScheduleAlarmPlanner.oneTimeTrigger(
@@ -150,17 +163,74 @@ object ScheduleValidation {
                 timeZone
             )
             val endMillis = startMillis + window.lengthMinutes * MILLIS_PER_MINUTE
-            return nowMillis in startMillis until endMillis
+            return if (nowMillis in startMillis until endMillis) {
+                WindowBounds(startMillis, endMillis)
+            } else {
+                null
+            }
         }
 
-        val days = daysOf(schedule, timeZone) ?: return false
-        val intervals = weekIntervals(days, window)
-        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = nowMillis }
-        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
-        val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        val currentWeekMinute = (dayOfWeek - 1) * MINUTES_PER_DAY + minuteOfDay
-        return intervals.any { (from, to) -> currentWeekMinute in from until to }
+        val days = daysOf(schedule, timeZone) ?: return null
+        // Check today (0) and yesterday (-1, for overnight windows that started before midnight)
+        for (dayOffset in listOf(0, -1)) {
+            val cal = Calendar.getInstance(timeZone).apply {
+                timeInMillis = nowMillis
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                if (dayOffset != 0) {
+                    add(Calendar.DAY_OF_YEAR, dayOffset)
+                }
+            }
+            val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+            if (dayOfWeek !in days) continue
+
+            cal.set(Calendar.HOUR_OF_DAY, window.startMinutes / 60)
+            cal.set(Calendar.MINUTE, window.startMinutes % 60)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+
+            val startMillis = cal.timeInMillis
+            val endMillis = startMillis + window.lengthMinutes * MILLIS_PER_MINUTE
+            if (nowMillis in startMillis until endMillis) {
+                return WindowBounds(startMillis, endMillis)
+            }
+        }
+        return null
     }
+
+    /**
+     * Computes the `[startMillis, endMillis)` window for [schedule] on the calendar date of
+     * [referenceDateMillis] (or the currently active window if [referenceDateMillis] is already inside it).
+     */
+    fun resolveWindowBoundsForDate(
+        schedule: FocusScheduleEntity,
+        referenceDateMillis: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = TimeZone.getDefault()
+    ): WindowBounds? {
+        activeWindowBoundsMillis(schedule.copy(isEnabled = true), referenceDateMillis, timeZone)?.let {
+            return it
+        }
+        val window = windowOf(schedule) ?: return null
+        val anchorMillis = if (isOneTime(schedule)) schedule.scheduledDateMillis else referenceDateMillis
+        val startMillis = ScheduleAlarmPlanner.oneTimeTrigger(
+            anchorDateMillis = anchorMillis,
+            minutesOfDay = window.startMinutes,
+            timeZone = timeZone
+        )
+        val endMillis = startMillis + window.lengthMinutes * MILLIS_PER_MINUTE
+        return WindowBounds(startMillis, endMillis)
+    }
+
+    /**
+     * True when [schedule] is enabled and [nowMillis] falls inside one of its active time windows.
+     */
+    fun isCurrentlyActiveWindow(
+        schedule: FocusScheduleEntity,
+        nowMillis: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = TimeZone.getDefault()
+    ): Boolean = activeWindowBoundsMillis(schedule, nowMillis, timeZone) != null
 
     // ---- internals ---------------------------------------------------------------------
 

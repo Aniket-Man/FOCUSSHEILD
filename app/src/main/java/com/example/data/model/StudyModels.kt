@@ -16,7 +16,11 @@ data class StudyPlanItem(
     val status: String = "PLANNED",
     val notes: String = "",
     val hasOverlap: Boolean = false,
-    val targetDate: Long = System.currentTimeMillis()
+    val targetDate: Long = System.currentTimeMillis(),
+    val scheduledEndTimeMillis: Long = 0L,
+    val blockedAppPackages: Set<String> = emptySet(),
+    val breakMinutes: Int = 5,
+    val blockNotifications: Boolean = false
 )
 
 data class FocusMetric(

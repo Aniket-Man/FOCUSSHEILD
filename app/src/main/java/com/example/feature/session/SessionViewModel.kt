@@ -58,6 +58,10 @@ data class SessionSetupState(
     val strictModeConfig: StrictModeConfig = StrictModeConfig(),
     val isStudyChannelsEnabled: Boolean = false,
     val planId: String? = null,
+    val startTime: String = "",
+    val endTime: String = "",
+    val scheduledEndTimeMillis: Long = 0L,
+    val blockNotifications: Boolean = false,
     // Pomodoro specific configuration
     val pomodoroFocusMinutes: Int = 25,
     val pomodoroShortBreakMinutes: Int = 5,
@@ -301,6 +305,7 @@ class SessionViewModel(
             it.copy(
                 selectedMode = mode,
                 durationMinutes = if (mode.defaultMinutes > 0) mode.defaultMinutes else it.durationMinutes,
+                scheduledEndTimeMillis = 0L,
                 validationError = null
             )
         }
@@ -314,22 +319,38 @@ class SessionViewModel(
         topicName: String,
         durationMinutes: Int,
         planId: String? = null,
-        notes: String = ""
+        notes: String = "",
+        startTime: String = "",
+        endTime: String = "",
+        scheduledEndTimeMillis: Long = 0L,
+        blockedAppPackages: Set<String> = emptySet(),
+        breakMinutes: Int = 5,
+        blockNotifications: Boolean = false
     ) {
         _setupState.update {
+            val effectiveBlocked = if (blockedAppPackages.isNotEmpty()) blockedAppPackages else it.blockedAppPackages
             it.copy(
+                selectedMode = SessionMode.TIMER,
                 selectedSubject = subjectName,
                 selectedTopic = topicName,
-                durationMinutes = durationMinutes.coerceAtLeast(5),
-                sessionGoal = if (notes.isNotBlank()) notes else "Focus on $subjectName ($topicName)",
+                durationMinutes = durationMinutes.coerceAtLeast(1),
+                numberOfBreaks = if (breakMinutes > 0) 1 else 0,
+                breakDurationMinutes = breakMinutes.coerceAtLeast(1),
+                blockedAppPackages = effectiveBlocked,
+                isAppBlockingEnabled = effectiveBlocked.isNotEmpty(),
+                blockNotifications = blockNotifications,
+                sessionGoal = if (notes.isNotBlank()) notes else if (startTime.isNotBlank() && endTime.isNotBlank()) "Scheduled Focus Window ($startTime - $endTime)" else "Focus on $subjectName ($topicName)",
                 planId = planId,
+                startTime = startTime,
+                endTime = endTime,
+                scheduledEndTimeMillis = scheduledEndTimeMillis,
                 validationError = null
             )
         }
     }
 
     fun setDuration(minutes: Int) {
-        _setupState.update { it.copy(durationMinutes = minutes, validationError = null) }
+        _setupState.update { it.copy(durationMinutes = minutes, scheduledEndTimeMillis = 0L, validationError = null) }
     }
 
     fun setPomodoroFocusMinutes(minutes: Int) {
@@ -671,8 +692,19 @@ class SessionViewModel(
 
         val effectiveStrictMode = if (state.selectedMode == SessionMode.STOPWATCH) false else state.isStrictModeEnabled
 
+        val nowMillis = System.currentTimeMillis()
+        val effectiveScheduledEndTime = if (state.selectedMode == SessionMode.TIMER && state.scheduledEndTimeMillis > nowMillis) {
+            state.scheduledEndTimeMillis
+        } else {
+            0L
+        }
+
         val plannedDurationMillis = when (state.selectedMode) {
-            SessionMode.TIMER -> state.durationMinutes * 60 * 1000L
+            SessionMode.TIMER -> if (effectiveScheduledEndTime > 0L) {
+                (effectiveScheduledEndTime - nowMillis).coerceAtLeast(1_000L)
+            } else {
+                state.durationMinutes * 60 * 1000L
+            }
             SessionMode.POMODORO -> pomodoroConfig.focusDurationMillis
             SessionMode.STOPWATCH -> 0L
         }
@@ -689,17 +721,20 @@ class SessionViewModel(
             strictModeConfig = state.strictModeConfig.copy(enabled = effectiveStrictMode),
             isStudyChannels = state.isStudyChannelsEnabled,
             isBrowserStudyMode = state.isBrowserStudyModeEnabled,
-            blockedAppPackages = state.blockedAppPackages
+            blockedAppPackages = state.blockedAppPackages,
+            blockNotifications = state.blockNotifications,
+            defaultBreakMinutes = if (state.numberOfBreaks > 0) state.breakDurationMinutes else 0,
+            scheduledEndTimeMillis = effectiveScheduledEndTime
         )
 
         return result.fold(
             onSuccess = { session ->
-                _setupState.update { it.copy(validationError = null) }
+                _setupState.update { it.copy(validationError = null, scheduledEndTimeMillis = 0L) }
                 try {
                     val context = FocusShieldApp.instance
                     if (effectiveStrictMode) {
                         val strictDuration = when (state.selectedMode) {
-                            SessionMode.TIMER -> state.durationMinutes * 60 * 1000L
+                            SessionMode.TIMER -> plannedDurationMillis
                             SessionMode.POMODORO -> pomodoroConfig.focusDurationMillis * pomodoroConfig.totalCycles
                             SessionMode.STOPWATCH -> 0L
                         }
@@ -712,7 +747,7 @@ class SessionViewModel(
                     }
                     sessionManager.saveActiveSessionToDisk(context)
                     com.example.feature.session.service.FocusSessionForegroundService.start(context)
-                    val durationMin = if (session.plannedDurationMillis > 0) (session.plannedDurationMillis / 60000L).toInt() else state.durationMinutes
+                    val durationMin = if (session.plannedDurationMillis > 0) ((session.plannedDurationMillis + 59_999L) / 60000L).toInt() else state.durationMinutes
                     com.example.feature.session.notification.SessionNotificationHelper.notifySessionStarted(
                         context = context,
                         subject = session.subject,

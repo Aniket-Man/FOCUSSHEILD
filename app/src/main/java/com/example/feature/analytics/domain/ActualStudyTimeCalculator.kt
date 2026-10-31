@@ -23,7 +23,9 @@ object ActualStudyTimeCalculator {
     fun calculatePureStudyDuration(session: FocusSession, isCompleted: Boolean = false): Long {
         val pureTime = when (session.mode) {
             SessionMode.TIMER -> {
-                if (session.remainingDurationMillis == 0L && session.plannedDurationMillis > 0L) {
+                if (session.scheduledEndTimeMillis > 0L) {
+                    session.elapsedDurationMillis.coerceIn(0L, session.plannedDurationMillis)
+                } else if (session.remainingDurationMillis == 0L && session.plannedDurationMillis > 0L) {
                     session.plannedDurationMillis
                 } else {
                     session.elapsedDurationMillis.coerceAtMost(session.plannedDurationMillis)

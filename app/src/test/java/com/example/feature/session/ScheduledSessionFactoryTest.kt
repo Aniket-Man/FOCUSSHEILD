@@ -160,4 +160,29 @@ class ScheduledSessionFactoryTest {
         assertTrue(ScheduleValidation.validate(schedule().copy(title = "   "))!!.contains("name"))
         assertNull(ScheduleValidation.normalize(schedule(start = "nope")))
     }
+
+    @Test
+    fun `mid-window start computes remaining duration until exact scheduled end time`() {
+        val tz = java.util.TimeZone.getTimeZone("UTC")
+        val cal = java.util.Calendar.getInstance(tz).apply {
+            set(2026, java.util.Calendar.OCTOBER, 26, 20, 45, 0) // Monday 20:45 UTC
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val nowMillis = cal.timeInMillis
+        val sched = schedule(start = "20:00", end = "22:00").copy(
+            daysOfWeek = "MON",
+            repeatEnabled = true
+        )
+
+        val bounds = ScheduleValidation.activeWindowBoundsMillis(sched, nowMillis, tz)
+        assertNotNull("Expected active bounds at 20:45 inside 20:00-22:00", bounds)
+        assertEquals(75 * 60 * 1000L, bounds!!.remainingMillis(nowMillis))
+
+        val result = ScheduledSessionFactory.draftFor(sched, nowMillis = nowMillis, timeZone = tz)
+        assertTrue(result is ScheduledSessionFactory.Result.Ready)
+        val draft = (result as ScheduledSessionFactory.Result.Ready).draft
+        assertEquals(SessionMode.TIMER, draft.mode)
+        assertEquals(75 * 60 * 1000L, draft.plannedDurationMillis)
+        assertEquals(bounds.endMillis, draft.scheduledEndTimeMillis)
+    }
 }

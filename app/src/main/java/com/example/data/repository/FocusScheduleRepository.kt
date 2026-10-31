@@ -83,7 +83,11 @@ class FocusScheduleRepository(
         // so the alarm state always matches the stored row.
         context?.let { ctx ->
             if (normalized.isEnabled) {
+                com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, normalized.id)
                 FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, normalized)
+                (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
+                    com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
+                }
             } else {
                 FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, normalized.id)
             }
@@ -112,7 +116,11 @@ class FocusScheduleRepository(
         )
         context?.let { ctx ->
             if (normalized.isEnabled) {
+                com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, normalized.id)
                 FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, normalized)
+                (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
+                    com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
+                }
             } else {
                 FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, normalized.id)
             }
@@ -140,7 +148,11 @@ class FocusScheduleRepository(
                 if (isEnabled) {
                     // Re-planning from scratch: if the stored row cannot be parsed, the scheduler
                     // cancels and logs instead of arming a guessed time.
+                    com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, updated.id)
                     FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, updated)
+                    (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
+                        com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
+                    }
                 } else {
                     FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, id)
                 }

@@ -1,78 +1,143 @@
-# Implementation Plan: Fix False "Unapproved Channel" Block in YouTube Full-Screen Mode
+# Schedule Planner Wall-Clock Start & Stop Overhaul
 
-## 1. Root Cause Analysis
+Transform the Schedule Planner from a duration-based study timer preset into a true wall-clock schedule engine where every schedule defines **exact clock times when the focus session starts and when it stops**, while independently tracking actual focused study time inside that window.
 
-When a student watches an approved YouTube study channel and switches to **Full Screen** (via the Full Screen button or rotating the device), FocusShield currently blocks the video as an **"Unapproved Channel"** due to three interacting flaws:
+## User Review & Critical Decisions
 
-1. **Player Control Clicks & Orientation Changes Wipe Out the Approved Channel Latch (`FocusAccessibilityService.kt` & `YouTubeContentBlockEngine.kt`)**
-   - In `FocusAccessibilityService.kt` (lines 544–550), **every** `TYPE_VIEW_CLICKED` and `TYPE_WINDOW_STATE_CHANGED` / `TYPE_WINDOWS_CHANGED` event inside YouTube unconditionally triggers `YouTubePlaybackSandbox.onVideoNavigationOccurred(now)` and `YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)`.
-   - Tapping **"Enter full screen"**, rotating the screen, or tapping any in-player control (Play/Pause, Seek bar, 10s skip, Video Quality/Settings, Captions, Playback Speed, Chapters, or showing/hiding the player overlay) emits `TYPE_VIEW_CLICKED` and/or `TYPE_WINDOW_STATE_CHANGED`.
-   - `onUserNavigationOrClick()` immediately clears `lastApprovedVideoKey = null`, `lastApprovedChannel = null`, and `lastApprovedHandle = null`, exits `YouTubePlaybackSandbox`, and enters a 3-second cooldown where `isLatchedApproved` is forced to `false`.
+> [!IMPORTANT]
+> All core scheduling behavior decisions have been confirmed and incorporated into this plan:
 
-2. **Full-Screen Mode Hides the Portrait Channel Header (`YouTubeNodeExtractor.kt` & `YouTubeContentBlockEngine.kt`)**
-   - Once YouTube is in full-screen landscape mode, the portrait metadata area below the player (`channel_handle`, `subscribe_button`, `channel_name`, `owner_text`) is hidden from the accessibility hierarchy.
-   - Because the approved channel latch was wiped on entering full screen, `YouTubeContentBlockEngine.evaluate()` attempts to re-detect the channel in full screen and fails in two ways:
-     - **Path A — Full-Screen "More Videos" / Endscreen Recommendation Leak:** `YouTubeNodeExtractor` falls back to scanning `rootNode` when the portrait watch container is absent, picking up a channel name or `@handle` from YouTube's full-screen **"More videos" / Up Next** strip, endscreen overlay, or engagement panel (`fullscreen_engagement_panel`, `autonav_preview`, `related_endscreen_results`), immediately returning `BLOCK_UNAPPROVED_CHANNEL`.
-     - **Path B — 5-Second Metadata Grace Timeout:** When full-screen player controls fade out, both `rawChannel` and `rawHandle` are `null`. After 5 seconds (`CHANNEL_METADATA_GRACE_MILLIS`), `YouTubeContentBlockEngine` returns `BLOCK_UNKNOWN_CONTENT`, which `FocusAccessibilityService` (line 672) routes to `handleYouTubeUnapprovedChannelBlocked` with the fallback label `"Unapproved Channel"`.
-
-3. **Blocking or Re-Verifying While in Full Screen (`FocusAccessibilityService.kt`)**
-   - If a brand-new video starts while already in full screen (e.g., via Autoplay or an external deep link) and its channel metadata is hidden by full-screen mode, the engine cannot read the portrait watch header unless YouTube exits full screen back to portrait watch view first.
+- **Confirmed Decision 1 — Exact Scheduled End-Time Cutoff**: A scheduled session (e.g., `8:00 PM – 10:00 PM`) always stops at its exact scheduled End Time (`10:00 PM`). Taking a pause or break during the window does not push the end time past `10:00 PM`, while analytics still record only the actual active study minutes.
+- **Confirmed Decision 2 — Immediate Mid-Window Auto-Start for Remaining Time**: If a user creates, enables, or opens a schedule while the current clock time is already inside its active `[Start Time, End Time)` window (e.g., at `8:20 PM` during an `8:00 PM – 10:00 PM` schedule), the session automatically starts immediately for the exact remaining wall-clock time (`1 hr 40 min`) until End Time.
+- **Confirmed Decision 3 — Pure Start-to-End Clock Window Editor**: Remove the manual `Timer | Stopwatch | Pomodoro` mode tabs from the Add/Edit Schedule screen so schedules are configured purely around a **Start Time → End Time** clock window, repetition rule (`Repeat for Entire Week` vs. `One-Time Schedule`), and focus enforcement settings.
 
 ---
 
-## 2. Proposed Solution
+## 1. Overview & Core Concept
 
-### A. Distinguish Player Control / Full-Screen Actions from Real Video Navigation (`YouTubeNodeExtractor.kt` & `YouTubeContentBlockEngine.kt`)
-- Add `YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event: AccessibilityEvent?, rootNode: AccessibilityNodeInfo?): Boolean` to accurately detect clicks and window transitions that belong to the video player itself rather than navigating to a new video:
-  - **Full-screen & orientation controls:** `"Enter full screen"`, `"Exit full screen"`, `"Full screen"`, `fullscreen_button`, `youtube_controls_fullscreen_button`.
-  - **Playback & settings controls:** Play, Pause, Fast forward, Rewind, Seek bar (`time_bar`), Settings/Gear (`player_overflow_button`), Quality, Captions/Subtitles (`subtitle_button`), Playback speed, Lock screen, Audio track, Player overlay tap (`player_control_screen`, `controls_layout`).
-  - **Window orientation / full-screen layout transitions:** When `TYPE_WINDOW_STATE_CHANGED` or `TYPE_WINDOWS_CHANGED` occurs within YouTube and the player remains in `VIDEO_WATCH` (or transitions between portrait watch and full-screen watch for the same video title).
-- Update `YouTubeContentBlockEngine.onUserNavigationOrClick(event, now)` and `FocusAccessibilityService` so that:
-  - Clicking player controls or toggling full-screen / rotating the device **never** clears `lastApprovedChannel`, `lastApprovedHandle`, `lastApprovedVideoKey`, or exits `YouTubePlaybackSandbox`.
-  - Only clicking an actual video card (detected via `extractClickedVideoCardIdentity`), navigating to Shorts/Home/Search, or detecting a changed video title resets the approved channel latch.
-
-### B. Full-Screen Detection & Approved Latch Preservation (`YouTubeNodeExtractor.kt`, `YouTubeContentBlockEngine.kt`, `YouTubeContentInspectionEngine.kt`)
-- Add `YouTubeNodeExtractor.isFullScreenVideoPlayback(rootNode: AccessibilityNodeInfo?, displayMetrics: DisplayMetrics?): Boolean` to detect when YouTube's player is in full-screen mode:
-  - Checks for landscape display orientation while in `VIDEO_WATCH`, full-screen control nodes (`"Exit full screen"`, `fullscreen_engagement_panel`), or when the player container occupies the full screen width/height and the portrait watch metadata panel (`watch_panel` below player / `subscribe_button`) is absent.
-- When `isFullScreenVideoPlayback` is `true` and the current session already has a verified approved channel (`lastApprovedChannel` / `YouTubePlaybackSandbox.isSandboxActive`):
-  - **Keep the approved status locked** as long as the visible video title in the full-screen player overlay (if visible) has not changed to a different video.
-  - When the full-screen player controls are hidden (so both title and channel nodes are invisible), maintain `ALLOW` under the latched approved channel instead of timing out after 5 seconds into `BLOCK_UNKNOWN_CONTENT`.
-  - Exclude full-screen recommendation/engagement overlays (`fullscreen_engagement_panel`, `quick_actions_container`, `autonav`, `endscreen`, `scrim_overlay`, `more_videos`) in `YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS` and `YouTubeNodeExtractor.isInsideExcludedContainer()` so related video cards in full screen are never mistaken for the active video's channel.
-
-### C. Title-Change & Full-Screen "More Videos" Card Click Detection
-- If the student is in full screen and:
-  1. **Clicks a video card** in the full-screen "More videos" / Up Next shelf or endscreen: `extractClickedVideoCardIdentity(event)` immediately extracts the clicked card's channel and title.
-     - If the clicked card belongs to an **approved** study channel, update the latch to the new title/channel and allow playback seamlessly in full screen.
-     - If the clicked card belongs to an **unapproved** channel, immediately block it.
-  2. **The video title changes** (e.g., via Autoplay or clicking a card whose channel wasn't in the click event) while in full screen and no approved channel header is visible:
-     - Trigger a one-time **Auto-Exit Full Screen for Verification** action (`YouTubeNodeExtractor.exitFullScreenToPortrait(rootNode, service)`), which clicks the `"Exit full screen"` button (or dispatches a single `GLOBAL_ACTION_BACK` that exits full screen into the portrait watch page) and resets the 5-second metadata grace timer so FocusShield can read the portrait channel header (`@handle` / Subscribe button) and either approve or block accurately.
-
-### D. Clean Full-Screen Exit When Blocking an Unapproved Video (`FocusAccessibilityService.kt`)
-- In `handleYouTubeUnapprovedChannelBlocked`, if the student is currently in full-screen mode when a genuinely unapproved video is blocked, ensure stepping back exits full screen and closes the unapproved watch player cleanly rather than merely dropping from full screen into portrait while leaving the unapproved video open.
+- **What It Does**: Re-architects the Schedule Planner so schedules govern **when a session starts and when it stops on the real-world clock**, rather than acting as a fixed study-duration counter that drifts whenever a session starts late or is paused.
+- **Target Audience / Persona**: Students and self-directed learners who plan structured daily or weekly time blocks (e.g., `8:00 PM – 10:00 PM Evening Revision`) and expect the timer to start on time, run through that exact clock window, and stop cleanly at `10:00 PM` before their next activity.
+- **Key Value**:
+  - **Predictable Clock Boundaries**: An `8:00 PM – 10:00 PM` schedule is guaranteed to finish at `10:00 PM`—never drifting to `10:15 PM` or `10:30 PM` due to late starts, breaks, or pauses.
+  - **Zero Missed Mid-Window Schedules**: Creating or toggling on a schedule whose window has already begun starts immediately for the remaining time instead of waiting until tomorrow or next week.
+  - **Accurate Study vs. Window Accounting**: Wall-clock countdown governs when the session stops, while active study elapsed time (excluding breaks and pauses) is recorded to analytics and cloud sync.
 
 ---
 
-## 3. Files to Modify
+## 2. User Experience & Visual Design
 
-1. `app/src/main/java/com/example/feature/youtube/detector/YouTubeDetectionRules.kt`
-   - Expand `EXCLUDED_RECOMMENDATION_VIEW_IDS` with full-screen recommendation/overlay container IDs (`fullscreen_engagement`, `autonav`, `endscreen`, `more_videos`, `related_endscreen`, `quick_actions`) and add player-control resource ID & content-description matchers.
-2. `app/src/main/java/com/example/feature/youtube/engine/YouTubeNodeExtractor.kt`
-   - Add `isPlayerControlOrFullscreenInteraction(event, rootNode)` so full-screen toggles and player control clicks are recognized as safe in-player interactions.
-   - Add `isFullScreenVideoPlayback(rootNode)` and `exitFullScreenIfPossible(rootNode)`.
-   - Tighten `extractChannelFromWatchPlayer` and `extractHandleFromWatchSubtree` so they never scrape full-screen recommendation strips when the portrait watch header is absent.
-3. `app/src/main/java/com/example/feature/youtube/engine/YouTubeContentBlockEngine.kt`
-   - Preserve `lastApprovedChannel`, `lastApprovedHandle`, and `lastApprovedVideoKey` across full-screen transitions, orientation changes, and player control clicks.
-   - Maintain `ALLOW` while in full screen for a latched approved video even when player controls auto-hide, only invalidating when a different video title or video-card click is detected.
-   - Return a dedicated signal (`needsExitFullScreenForVerification`) when a new unverified video starts in full screen with hidden channel metadata.
-4. `app/src/main/java/com/example/feature/youtube/detector/YouTubeContentInspectionEngine.kt`
-   - Keep `YouTubePlaybackSandbox` active across full-screen toggles and player control clicks; only exit the sandbox when an actual video navigation or title change occurs.
-5. `app/src/main/java/com/example/core/accessibility/FocusAccessibilityService.kt`
-   - Filter out player-control/full-screen clicks from triggering `YouTubePlaybackSandbox.onVideoNavigationOccurred()`.
-   - Handle `needsExitFullScreenForVerification` by automatically exiting full screen once to read the portrait watch header before making a block decision.
-   - Update `handleYouTubeUnapprovedChannelBlocked` to properly exit full screen and close the unapproved video if a block occurs while in full screen.
-6. `app/src/test/java/com/example/feature/youtube/YouTubeFullScreenApprovalTest.kt`
-   - Add unit tests verifying:
-     - Approved portrait video -> Enter Full Screen -> controls hidden > 5s -> stays `ALLOW` (no false block).
-     - Approved full-screen video -> tap Play/Pause, Seek, Quality, Exit Full Screen -> stays `ALLOW`.
-     - Full-screen "More videos" shelf visible with unapproved channel cards -> ignored while watching approved video, blocked immediately if an unapproved card is clicked.
-     - Unverified video starting directly in full screen -> triggers one-time full-screen exit for portrait header verification instead of immediate false block.
+- **Key User Flows**:
+  1. **Creating or Editing a Schedule (Start-to-End Clock Window)**:
+     - The user opens the Add/Edit Schedule modal. The former `Timer | Stopwatch | Pomodoro` mode switcher is removed so the interface focuses immediately on the schedule title, **Start Time**, **End Time**, and a live **Window Summary Banner** (e.g., `Starts at 8:00 PM • Stops at 10:00 PM (2h 0m window)`).
+     - Exact minute precision is preserved (`8:45 PM` stays `8:45 PM`), overnight windows (e.g., `11:00 PM – 1:00 AM`) are supported seamlessly, and overlapping windows on the same day are validated before saving.
+     - Users choose between **Repeat for Entire Week** or **One-Time Schedule**, select target day(s), and configure focus enforcement (Auto-Start, Focus Mode, Strict Lock, Break policy, Whitelisted apps, and Study tools).
+  2. **Saving or Enabling Inside an Active Window**:
+     - If the user creates or enables a schedule at `8:30 PM` for an `8:00 PM – 10:00 PM` window with Auto-Start enabled, the planner immediately evaluates the active window and launches the focus session for the remaining `1h 30m` until `10:00 PM`.
+  3. **Live Schedule Cards on the Planner Screen**:
+     - Each schedule card displays its exact clock window (`08:00 PM – 10:00 PM`) alongside a real-time status badge:
+       - **Active Now • Stops at 10:00 PM (Xh Ym left)** when the current clock is inside the window.
+       - **Starts at 08:00 PM • Stops at 10:00 PM** when upcoming today.
+       - **Completed Today** when today's window has already finished.
+     - Tapping the manual start button on a schedule card while inside its window starts the session anchored to the schedule's exact End Time.
+  4. **Running a Scheduled Session & Stopping at End Time**:
+     - While the scheduled session is running, the countdown displays the remaining wall-clock time until the scheduled End Time (`Stop at 10:00 PM`).
+     - If the user pauses the session or takes a break (when allowed), active study time pauses so analytics only count real study effort, while the wall-clock boundary remains anchored to `10:00 PM`.
+     - At `10:00 PM` sharp, the session automatically completes (even if currently paused or in a break), logs the actual focused minutes studied during the window, and triggers the completion notification.
+
+- **Visual Identity & Theme**:
+  - **Aesthetic Direction**: Clean, high-contrast Material 3 surface hierarchy matching the app's existing focus aesthetic and Digital Wellbeing clarity.
+  - **Color Palette & Mood**: Uses semantic Material 3 tokens (`colorScheme.primary` for active window indicators and time pills, `colorScheme.primaryContainer` for the live Start-to-Stop summary banner, `colorScheme.surfaceContainerLow` for schedule cards, and `colorScheme.errorContainer` for overlap validation alerts).
+  - **Typography & Hierarchy**: Large tabular numerals for Start Time and End Time pickers (`headlineMedium` / `titleLarge` bold), crisp metadata subtitles (`bodyMedium`), and compact uppercase status pills (`labelSmall`).
+  - **Interactive Feedback & Motion**: Live updating window duration summary in the schedule editor, immediate visual status transition when a schedule enters its active window, and smooth progress indicators on active schedule cards.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1 — Decoupling Wall-Clock Cutoff (`scheduledEndTimeMillis`) from Active Study Elapsed Time (`elapsedDurationMillis`)**
+  - *Chosen Approach*: Attach an explicit wall-clock `scheduledEndTimeMillis` timestamp to scheduled focus sessions. When `scheduledEndTimeMillis > 0`, the session countdown tracks remaining wall-clock time (`scheduledEndTimeMillis - now`) and strictly completes when `now >= scheduledEndTimeMillis`, while `elapsedDurationMillis` only increments during active `RUNNING` focus ticks (pausing during breaks or pauses).
+  - *Why*: Previously, the timer treated schedules as a fixed duration (`plannedDurationMillis = end - start`) and counted down only while actively studying. Starting 15 minutes late or pausing for 10 minutes caused the session to run past its scheduled stop time, breaking the user's daily timetable. Decoupling wall-clock stop time from active study time guarantees the timer stops on schedule while keeping study statistics 100% accurate.
+  - *Alternatives Considered*: Letting pauses push back the end time (rejected by user preference, as schedules must stop at the exact scheduled end time).
+
+- **Decision 2 — Full Active-Window Detection (`[windowStartMillis, windowEndMillis)`) with Per-Window Deduplication**
+  - *Chosen Approach*: Replace the narrow 1-minute alarm check (`minuteDelta in 0..1`) with a full active-window bounds check (`nowMillis in windowStartMillis until windowEndMillis`), paired with a deterministic per-window deduplication key (`scheduleId + windowStartMillis`) and immediate evaluation whenever a schedule is created, edited, enabled, or when the app opens.
+  - *Why*: Previously, if an alarm fired 2 minutes late due to OS battery optimization, or if a user created/enabled an `8:00 PM – 10:00 PM` schedule at `8:05 PM`, `minuteDelta in 0..1` failed and the schedule was skipped until tomorrow. Checking the full active window and starting for `windowEndMillis - nowMillis` ensures 100% reliability while the deduplication key prevents duplicate restarts within the same window if the user intentionally stops early.
+  - *Alternatives Considered*: Only triggering at the exact start minute (rejected because late alarms or mid-window schedule edits fail to start).
+
+- **Decision 3 — Streamlined Start-to-End Clock Window Editor**
+  - *Chosen Approach*: Remove the `Timer | Stopwatch | Pomodoro` mode selector from the schedule editor and standardize all planner schedules on wall-clock Start-to-End windows, with a dedicated Start → Stop summary banner.
+  - *Why*: Stopwatch (open-ended count-up) and Pomodoro cycle presets conflicted with the mental model of a time-table schedule that starts at `Start Time` and stops at `End Time`.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+### Architecture & Component Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        Schedule Planner UI Layer                           │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │        PlannerScreen             │  │     FocusScheduleDialog        │  │
+│  │ • Today / Weekly Timeline        │  │ • Pure Start → End Time Picker │  │
+│  │ • Live Window Status Badges      │  │ • Live Start/Stop Window Pill  │  │
+│  │ • Manual Start (Remaining Time)  │  │ • Repeat Week vs One-Time      │  │
+│  └───────────────┬──────────────────┘  └───────────────┬────────────────┘  │
+└──────────────────┼─────────────────────────────────────┼───────────────────┘
+                   │                                     │
+                   ▼                                     ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   Schedule Persistence & Alarm Layer                       │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │     FocusScheduleRepository      │  │  ScheduleValidation / Time     │  │
+│  │ • Normalize HH:mm (exact mins)   │─▶│ • activeWindowBoundsMillis()   │  │
+│  │ • Save & Sync Alarm Triggers     │  │ • nextUpcomingWindowBounds()   │  │
+│  │ • Immediate In-Window Evaluation │  │ • Overnight & One-Time Pruning │  │
+│  └───────────────┬──────────────────┘  └───────────────┬────────────────┘  │
+│                  │                                     │                   │
+│                  ▼                                     ▼                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │        FocusScheduleAlarmScheduler & FocusScheduleReceiver           │  │
+│  │ • Exact Start Alarm + End-of-Window Cutoff Check                     │  │
+│  │ • Full Active-Window Detection (now in [windowStart, windowEnd))     │  │
+│  │ • Per-Window Deduplication Key (scheduleId + windowStartMillis)      │  │
+│  └───────────────────────────────┬──────────────────────────────────────┘  │
+└──────────────────────────────────┼─────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     Wall-Clock Focus Session Engine                        │
+│  ┌───────────────────────────────┐     ┌────────────────────────────────┐  │
+│  │    ScheduledSessionFactory    │────▶│      FocusSessionManager       │  │
+│  │ • Computes windowEndMillis    │     │ • Wall-Clock Countdown to End  │  │
+│  │ • Remaining Duration =        │     │ • Separate Active Study Timer  │  │
+│  │   (windowEndMillis - now)     │     │ • Exact End-Time Auto-Stop     │  │
+│  └───────────────────────────────┘     └────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Model & State
+
+- **Active Window Bounds (`WindowBounds`)**:
+  - Represents a concrete calendar occurrence of a schedule with `windowStartMillis: Long` and `windowEndMillis: Long`.
+  - Handles both same-day windows (e.g., `20:00 – 22:00` today) and overnight windows that started yesterday before midnight and end today after midnight (e.g., `23:00 – 01:00`).
+- **Scheduled Session Draft & Active Session State**:
+  - `scheduledEndTimeMillis: Long`: Exact epoch millisecond timestamp when the scheduled window ends (`0L` for unscheduled manual timers).
+  - `plannedDurationMillis: Long`: Set to `(windowEndMillis - startWallClockMillis)` so even if a schedule starts mid-window, its planned duration matches the remaining window length.
+  - `remainingDurationMillis: Long`: When `scheduledEndTimeMillis > 0L`, continuously synced to `(scheduledEndTimeMillis - System.currentTimeMillis()).coerceAtLeast(0L)` on every 1-second tick.
+  - `elapsedDurationMillis: Long`: Increments strictly during `SessionStatus.RUNNING` ticks so pauses and breaks are excluded from recorded study duration.
+
+### Interactive Component & State Mapping
+
+- **Adding / Updating / Enabling a Schedule**:
+  1. User selects Start Time and End Time in the schedule dialog and taps Save, or toggles the enable switch on a schedule card.
+  2. Repository normalizes times (preserving exact minutes), persists the schedule, arms the next exact alarm, and immediately invokes in-process active-window evaluation.
+  3. If `isEnabled && isAutoStartSession` and `nowMillis` is inside `[windowStartMillis, windowEndMillis)`, the receiver verifies that `windowStartMillis` has not already been auto-started for this schedule, constructs a session draft with `scheduledEndTimeMillis = windowEndMillis` and `plannedDurationMillis = windowEndMillis - nowMillis`, and starts the foreground focus session immediately.
+- **Manual Start from a Schedule Card**:
+  1. When the user taps Start on a schedule card while `nowMillis` is inside `[windowStartMillis, windowEndMillis)`, the session starts with `scheduledEndTimeMillis = windowEndMillis` and `plannedDurationMillis = windowEndMillis - nowMillis`.
+  2. If tapped outside the scheduled window (e.g., starting a schedule early), it starts with `scheduledEndTimeMillis = todayUpcomingEndMillis` (if starting early on the same day before `endTime`) or the window's span from `now`.
+- **Wall-Clock Tick, Pause/Break Handling, and End-Time Stop**:
+  1. Every second during an active scheduled session (`scheduledEndTimeMillis > 0L`), the engine checks `val wallRemaining = (scheduledEndTimeMillis - now).coerceAtLeast(0L)`.
+  2. While `status == RUNNING`, `elapsedDurationMillis` advances by 1 second per tick and `remainingDurationMillis` updates to `wallRemaining`.
+  3. While `status == PAUSED` or on a manual break, `elapsedDurationMillis` stays frozen, while a background wall-clock watcher continues checking `now >= scheduledEndTimeMillis`.
+  4. As soon as `now >= scheduledEndTimeMillis` (or upon disk state restoration if `now >= scheduledEndTimeMillis`), the session immediately transitions to `COMPLETED`, records the actual `elapsedDurationMillis` studied, prunes the schedule if `One-Time`, and notifies the user.

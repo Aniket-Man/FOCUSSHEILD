@@ -331,9 +331,19 @@ fun FocusNavGraph(
                             topicName = planItem.topic,
                             durationMinutes = planItem.durationMinutes,
                             planId = planItem.id,
-                            notes = planItem.notes
+                            notes = planItem.notes,
+                            startTime = planItem.startTime,
+                            endTime = planItem.endTime,
+                            scheduledEndTimeMillis = planItem.scheduledEndTimeMillis,
+                            blockedAppPackages = planItem.blockedAppPackages,
+                            breakMinutes = planItem.breakMinutes,
+                            blockNotifications = planItem.blockNotifications
                         )
-                        navController.navigate(Screen.SessionSetup.route)
+                        if (sessionViewModel.startSession()) {
+                            navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                        } else {
+                            navController.navigate(Screen.SessionSetup.route)
+                        }
                     }
                 }
             )
@@ -356,9 +366,19 @@ fun FocusNavGraph(
                             topicName = planItem.topic,
                             durationMinutes = planItem.durationMinutes,
                             planId = planItem.id,
-                            notes = planItem.notes
+                            notes = planItem.notes,
+                            startTime = planItem.startTime,
+                            endTime = planItem.endTime,
+                            scheduledEndTimeMillis = planItem.scheduledEndTimeMillis,
+                            blockedAppPackages = planItem.blockedAppPackages,
+                            breakMinutes = planItem.breakMinutes,
+                            blockNotifications = planItem.blockNotifications
                         )
-                        navController.navigate(Screen.SessionSetup.route)
+                        if (sessionViewModel.startSession()) {
+                            navController.navigate(Screen.ActiveSession.route) { launchSingleTop = true }
+                        } else {
+                            navController.navigate(Screen.SessionSetup.route)
+                        }
                     }
                 },
                 onOpenBlockedApps = { navController.navigate(Screen.BlockedApps.route) }

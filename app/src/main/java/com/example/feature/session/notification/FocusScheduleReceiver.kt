@@ -87,8 +87,13 @@ class FocusScheduleReceiver : BroadcastReceiver() {
             return
         }
 
-        if (!markSlotFiredIfNotAlready(context, schedule.id, schedule.startTime)) {
-            Log.d(TAG, "Schedule '${schedule.title}' (${schedule.id}) already fired for today's ${schedule.startTime} slot; skipping duplicate trigger")
+        val nowMillis = System.currentTimeMillis()
+        val windowBounds = ScheduleValidation.activeWindowBoundsMillis(schedule, nowMillis)
+            ?: ScheduleValidation.resolveWindowBoundsForDate(schedule, nowMillis)
+        val slotIdentity = "${windowBounds?.startMillis ?: 0L}_${schedule.startTime.trim()}_${schedule.endTime.trim()}"
+
+        if (!markSlotFiredIfNotAlready(context, schedule.id, slotIdentity)) {
+            Log.d(TAG, "Schedule '${schedule.title}' (${schedule.id}) already fired for window $slotIdentity; skipping duplicate trigger")
             return
         }
 
@@ -97,7 +102,7 @@ class FocusScheduleReceiver : BroadcastReceiver() {
         // posted or a ForegroundServiceStartNotAllowedException left the schedule with no next
         // alarm at all — a recurring schedule silently became a one-off (issue #28).
         try {
-            runSchedule(app, context, schedule, scheduleId)
+            runSchedule(app, context, schedule, scheduleId, nowMillis)
         } finally {
             if (schedule.repeatEnabled) {
                 try {
@@ -106,13 +111,16 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                     Log.e(TAG, "Could not re-arm repeating schedule '${schedule.title}'", e)
                 }
             } else {
-                // One-time schedule: it has fired, so it is switched off. Re-enabling it (or editing
-                // the date) re-arms it; the explicit disable also keeps the list UI honest.
+                // One-time schedule: cancel its alarm immediately, and once its active window is over,
+                // mark it disabled in Room so it stays locked/active during the window and turns off after.
                 try {
-                    db.focusScheduleDao().setScheduleEnabled(schedule.id, false)
-                    Log.d(TAG, "One-time schedule '${schedule.title}' fired and has been disabled")
+                    FocusScheduleAlarmScheduler.cancelFocusSchedule(context, schedule.id)
+                    if (!ScheduleValidation.isCurrentlyActiveWindow(schedule, System.currentTimeMillis())) {
+                        db.focusScheduleDao().setScheduleEnabled(schedule.id, false)
+                        Log.d(TAG, "One-time schedule '${schedule.title}' window finished and has been disabled")
+                    }
                 } catch (e: SQLException) {
-                    Log.e(TAG, "Could not disable fired one-time schedule '${schedule.title}'", e)
+                    Log.e(TAG, "Could not update fired one-time schedule '${schedule.title}'", e)
                 }
             }
         }
@@ -123,7 +131,8 @@ class FocusScheduleReceiver : BroadcastReceiver() {
         app: FocusShieldApp,
         context: Context,
         schedule: FocusScheduleEntity,
-        scheduleId: String
+        scheduleId: String,
+        nowMillis: Long = System.currentTimeMillis()
     ) {
         // A DST transition moves the UTC offset without any broadcast an app can hear, so every
         // absolute alarm armed before it is now an hour out. Detect it here and re-plan everything
@@ -148,7 +157,7 @@ class FocusScheduleReceiver : BroadcastReceiver() {
             val sessionManager = FocusSessionManager.instance
             val active = sessionManager.activeSession.value
             if (active == null || active.isCompleted || active.isCancelled) {
-                when (val draft = ScheduledSessionFactory.draftFor(schedule)) {
+                when (val draft = ScheduledSessionFactory.draftFor(schedule, nowMillis = nowMillis)) {
                     is ScheduledSessionFactory.Result.Rejected -> {
                         // Deliberately not started. The user configured something the app cannot
                         // honour; guessing (09:00 / TIMER / a 24-hour window) is worse than not
@@ -182,11 +191,23 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                             isAppBlocking = prefs.isAppBlockingDefault,
                             isStrictMode = isStrict,
                             isStudyChannels = prefs.isStudyChannelsDefault,
+                            isBrowserStudyMode = prefs.isManualWebsiteBlockingEnabled,
                             blockedAppPackages = effectiveBlockedPackages,
                             blockNotifications = draft.draft.blockNotifications || prefs.isBlockNotificationsEnabled,
-                            defaultBreakMinutes = draft.draft.breakMinutes
+                            defaultBreakMinutes = draft.draft.breakMinutes,
+                            scheduledEndTimeMillis = draft.draft.scheduledEndTimeMillis
                         )
                         if (started.isSuccess) {
+                            val startedSession = started.getOrNull()
+                            if (isStrict && startedSession != null) {
+                                com.example.feature.session.engine.StrictModeEngine.instance.startStrictMode(
+                                    context = context,
+                                    sessionId = startedSession.id,
+                                    mode = draft.draft.mode,
+                                    durationMillis = startedSession.plannedDurationMillis
+                                )
+                            }
+                            sessionManager.saveActiveSessionToDisk(context)
                             FocusSessionForegroundService.start(context)
                             if (prefs.isFloatingTimerOverlayEnabled || isStrict) {
                                 com.example.feature.timer.FloatingTimerService.start(
@@ -197,7 +218,8 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                             Log.d(
                                 TAG,
                                 "Auto-started ${draft.draft.mode} session for schedule " +
-                                    "'${schedule.title}' (${draft.draft.plannedDurationMillis / 60_000} min)"
+                                    "'${schedule.title}' (remaining=${draft.draft.plannedDurationMillis / 60_000} min, " +
+                                    "endsAt=${draft.draft.scheduledEndTimeMillis})"
                             )
                         } else {
                             Log.e(
@@ -234,63 +256,77 @@ class FocusScheduleReceiver : BroadcastReceiver() {
         private fun markSlotFiredIfNotAlready(
             context: Context,
             scheduleId: String,
-            startTime: String
+            slotIdentity: String
         ): Boolean {
-            val todayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-                .format(java.util.Date())
-            val slotValue = "${todayKey}_${startTime.trim()}"
             val prefs = context.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
             val key = "last_fired_$scheduleId"
-            if (prefs.getString(key, null) == slotValue) {
+            if (prefs.getString(key, null) == slotIdentity) {
                 return false
             }
-            prefs.edit().putString(key, slotValue).apply()
+            prefs.edit().putString(key, slotIdentity).apply()
             return true
         }
 
         /**
-         * In-process schedule watchdog invoked periodically while the app process is alive.
-         * Ensures that even if Android's AlarmManager batches or delays a broadcast on devices
-         * without exact alarm permission, any enabled schedule due at the current minute starts
-         * promptly and idempotently.
+         * Clears the deduplication slot for [scheduleId] when the user explicitly creates, edits,
+         * or re-enables a schedule so an active window can immediately start.
+         */
+        @Synchronized
+        fun clearFiredSlot(context: Context, scheduleId: String) {
+            try {
+                context.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .remove("last_fired_$scheduleId")
+                    .apply()
+            } catch (_: Exception) {
+            }
+        }
+
+        /**
+         * In-process schedule watchdog invoked periodically while the app process is alive and
+         * immediately whenever a schedule is created, edited, or enabled.
+         *
+         *  1. Enforces exact scheduled end-time cutoff on any active scheduled session.
+         *  2. Disables any one-time schedule whose active window has finished.
+         *  3. Immediately triggers any enabled schedule whose `[startTime, endTime)` window
+         *     currently contains `nowMillis` (auto-starting for the exact remaining time until `endTime`).
          */
         suspend fun evaluateDueSchedulesInProcess(app: FocusShieldApp, context: Context) {
             try {
+                val nowMillis = System.currentTimeMillis()
+
+                // 1. Enforce wall-clock end cutoff on any running/paused scheduled session
+                val activeSession = FocusSessionManager.instance.activeSession.value
+                if (activeSession != null &&
+                    !activeSession.isCompleted &&
+                    !activeSession.isCancelled &&
+                    activeSession.scheduledEndTimeMillis > 0L &&
+                    nowMillis >= activeSession.scheduledEndTimeMillis
+                ) {
+                    FocusSessionManager.instance.syncStateFromEngines(nowMillis)
+                }
+
                 val enabledSchedules = app.database.focusScheduleDao().getEnabledSchedules()
                 if (enabledSchedules.isEmpty()) return
 
-                val nowCal = java.util.Calendar.getInstance()
-                val nowMinutes = nowCal.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
-                    nowCal.get(java.util.Calendar.MINUTE)
-                val todayAbbr = java.text.SimpleDateFormat("EEE", java.util.Locale.ENGLISH)
-                    .format(nowCal.time)
-                    .uppercase(java.util.Locale.ENGLISH)
-                val dateFmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-                val todayDateStr = dateFmt.format(nowCal.time)
-
                 val receiver = FocusScheduleReceiver()
                 for (schedule in enabledSchedules) {
-                    val startMins = ScheduleTime.parseToMinutesOrNull(schedule.startTime) ?: continue
-                    // Match if current minute is at startTime (or 1 minute after if tick crossed boundary)
-                    val minuteDelta = nowMinutes - startMins
-                    if (minuteDelta !in 0..1) continue
-
-                    val isDueToday = if (schedule.repeatEnabled) {
-                        val daysUpper = schedule.daysOfWeek.uppercase(java.util.Locale.ENGLISH)
-                        daysUpper.isBlank() ||
-                            daysUpper.contains("DAILY") ||
-                            daysUpper.contains(todayAbbr) ||
-                            (daysUpper.contains("MON - FRI") && todayAbbr in listOf("MON", "TUE", "WED", "THU", "FRI")) ||
-                            (daysUpper.contains("WEEKENDS") && todayAbbr in listOf("SAT", "SUN"))
-                    } else {
-                        if (schedule.scheduledDateMillis > 0L) {
-                            dateFmt.format(java.util.Date(schedule.scheduledDateMillis)) == todayDateStr
-                        } else {
-                            schedule.daysOfWeek.uppercase(java.util.Locale.ENGLISH).contains(todayAbbr)
+                    // 2. If a one-time schedule's window has completely passed, disable it cleanly
+                    if (!schedule.repeatEnabled && schedule.scheduledDateMillis > 0L) {
+                        val oneTimeBounds = ScheduleValidation.resolveWindowBoundsForDate(
+                            schedule = schedule,
+                            referenceDateMillis = schedule.scheduledDateMillis
+                        )
+                        if (oneTimeBounds != null && nowMillis >= oneTimeBounds.endMillis) {
+                            app.database.focusScheduleDao().setScheduleEnabled(schedule.id, false)
+                            FocusScheduleAlarmScheduler.cancelFocusSchedule(context, schedule.id)
+                            continue
                         }
                     }
 
-                    if (isDueToday) {
+                    // 3. If current time is inside this schedule's active [startTime, endTime) window,
+                    // trigger it immediately (deduplicated per window occurrence).
+                    if (ScheduleValidation.activeWindowBoundsMillis(schedule, nowMillis) != null) {
                         receiver.handle(app, context.applicationContext, schedule.id)
                     }
                 }

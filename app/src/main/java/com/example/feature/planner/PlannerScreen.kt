@@ -529,8 +529,25 @@ fun PlannerScreen(
                             scheduleToDelete = schedule
                         },
                         onStartSession = {
-                            val durationMins = com.example.feature.session.notification.ScheduleTime
-                                .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 60
+                            val nowMillis = System.currentTimeMillis()
+                            val activeBounds = com.example.feature.session.notification.ScheduleValidation
+                                .activeWindowBoundsMillis(schedule, nowMillis)
+                            val dateBounds = com.example.feature.session.notification.ScheduleValidation
+                                .resolveWindowBoundsForDate(schedule, selectedDate.time)
+                            val effectiveBounds = activeBounds ?: dateBounds?.takeIf { nowMillis < it.endMillis }
+                            val scheduledEndMillis = effectiveBounds?.endMillis ?: 0L
+                            val durationMins = if (effectiveBounds != null && nowMillis < effectiveBounds.endMillis) {
+                                val effectiveStart = maxOf(nowMillis, effectiveBounds.startMillis)
+                                (((effectiveBounds.endMillis - effectiveStart) + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
+                            } else {
+                                com.example.feature.session.notification.ScheduleTime
+                                    .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 60
+                            }
+                            val blockedPkgs = schedule.blockedAppPackages
+                                .split(',')
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .toSet()
                             onStartPlanSession(
                                 StudyPlanItem(
                                     id = schedule.id,
@@ -542,7 +559,12 @@ fun PlannerScreen(
                                     startTime = schedule.startTime,
                                     endTime = schedule.endTime,
                                     durationMinutes = durationMins,
-                                    targetDate = selectedDate.time
+                                    notes = schedule.description,
+                                    targetDate = selectedDate.time,
+                                    scheduledEndTimeMillis = scheduledEndMillis,
+                                    blockedAppPackages = blockedPkgs,
+                                    breakMinutes = schedule.breakMinutes,
+                                    blockNotifications = schedule.blockNotifications
                                 )
                             )
                         },
@@ -995,14 +1017,17 @@ private fun ScheduleCardItem(
                             fontSize = 16.sp
                         )
                         val blockedCount = schedule.blockedAppPackages.split(',').count { it.isNotBlank() }
-                        val modeLabel = when (schedule.mode.uppercase(Locale.ENGLISH)) {
-                            "POMODORO" -> "Pomodoro"
-                            "STOPWATCH" -> "Stopwatch"
-                            else -> "Timer"
+                        val windowMins = com.example.feature.session.notification.ScheduleTime
+                            .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 0
+                        val windowLabel = when {
+                            windowMins >= 60 && windowMins % 60 > 0 -> "${windowMins / 60}h ${windowMins % 60}m window"
+                            windowMins >= 60 -> "${windowMins / 60}h window"
+                            windowMins > 0 -> "${windowMins}m window"
+                            else -> "Scheduled window"
                         }
                         val subMeta = buildList {
                             if (schedule.subjectName.isNotBlank()) add(schedule.subjectName)
-                            add(modeLabel)
+                            add(windowLabel)
                             if (blockedCount > 0) add("$blockedCount apps blocked")
                         }.joinToString(" • ")
                         Text(
@@ -1027,23 +1052,45 @@ private fun ScheduleCardItem(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            val nowMillis = System.currentTimeMillis()
+            val activeBounds = remember(schedule, nowMillis / 30_000L) {
+                com.example.feature.session.notification.ScheduleValidation
+                    .activeWindowBoundsMillis(schedule, nowMillis)
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "${schedule.startTime} - ${schedule.endTime}",
+                        text = "Starts ${schedule.startTime} • Stops ${schedule.endTime}",
                         color = textPrimary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp
                     )
-                    Text(
-                        text = "${schedule.daysOfWeek.ifEmpty { "Daily" }} • ${schedule.breakMinutes}m break",
-                        color = textSecondary,
-                        fontSize = 12.sp
-                    )
+                    if (activeBounds != null && schedule.isEnabled) {
+                        val remMins = ((activeBounds.remainingMillis(nowMillis) + 59_999L) / 60_000L).coerceAtLeast(1L)
+                        Text(
+                            text = "Active now • ${remMins}m left until ${schedule.endTime}",
+                            color = Color(0xFF22C55E),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        val repeatLabel = if (schedule.repeatEnabled) {
+                            schedule.daysOfWeek.ifEmpty { "Daily" }
+                        } else {
+                            "One-time"
+                        }
+                        val breakSuffix = if (schedule.breakMinutes > 0) " • ${schedule.breakMinutes}m break" else ""
+                        Text(
+                            text = "$repeatLabel$breakSuffix",
+                            color = textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
 
                 Row(

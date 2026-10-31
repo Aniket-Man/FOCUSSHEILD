@@ -383,4 +383,67 @@ class SessionEngineTest {
         )
         assertEquals(30000L, pureStudyTime)
     }
+
+    @Test
+    fun testScheduledWindow_stopsAtExactEndTimeEvenWhenPausedOrOnBreak_andRecordsPureStudyTime() {
+        val testDispatcher = UnconfinedTestDispatcher()
+        val testScope = TestScope(testDispatcher)
+        var currentTime = 10_000_000L
+        val twoHoursMillis = 2 * 60 * 60 * 1000L
+        val scheduledEnd = currentTime + twoHoursMillis
+
+        val manager = FocusSessionManager(
+            coroutineScope = testScope,
+            currentTimeProvider = { currentTime }
+        )
+
+        // Start scheduled session from 8:00 PM to 10:00 PM (2 hours)
+        manager.startSession(
+            mode = SessionMode.TIMER,
+            subject = "Physics",
+            topic = "Scheduled Window",
+            plannedDurationMillis = twoHoursMillis,
+            scheduledEndTimeMillis = scheduledEnd
+        )
+
+        // Study actively for 45 minutes
+        currentTime += 45 * 60 * 1000L
+        manager.syncStateFromEngines(currentTime)
+        assertEquals(45 * 60 * 1000L, manager.activeSession.value?.elapsedDurationMillis)
+        assertEquals(75 * 60 * 1000L, manager.activeSession.value?.remainingDurationMillis)
+
+        // Take a 15-minute manual break; wall-clock remaining until 10:00 PM still counts down
+        manager.startBreak(durationMinutes = 15)
+        currentTime += 15 * 60 * 1000L
+        manager.syncStateFromEngines(currentTime)
+        assertFalse(manager.breakManager.isBreakActive)
+        // Elapsed study time is still 45m, but wall-clock remaining until 10:00 PM is now 60m!
+        assertEquals(45 * 60 * 1000L, manager.activeSession.value?.elapsedDurationMillis)
+        assertEquals(60 * 60 * 1000L, manager.activeSession.value?.remainingDurationMillis)
+
+        // Study actively for another 30 minutes (total 75m studied, 30m left until 10:00 PM)
+        currentTime += 30 * 60 * 1000L
+        manager.syncStateFromEngines(currentTime)
+        assertEquals(75 * 60 * 1000L, manager.activeSession.value?.elapsedDurationMillis)
+        assertEquals(30 * 60 * 1000L, manager.activeSession.value?.remainingDurationMillis)
+
+        // Pause the session and let the wall clock reach 10:00 PM (scheduledEnd)
+        manager.pauseSession()
+        assertEquals(SessionState.PAUSED, manager.sessionState.value)
+        currentTime = scheduledEnd
+        manager.syncStateFromEngines(currentTime)
+
+        // Session MUST automatically complete at 10:00 PM even though it was paused!
+        assertEquals(SessionState.COMPLETED, manager.sessionState.value)
+        val finalSession = manager.activeSession.value!!
+        assertEquals(0L, finalSession.remainingDurationMillis)
+        assertEquals(75 * 60 * 1000L, finalSession.elapsedDurationMillis)
+
+        // Pure study time recorded for analytics must be 75 minutes (actual focused time), not 2 hours
+        val pureStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
+            session = finalSession,
+            isCompleted = true
+        )
+        assertEquals(75 * 60 * 1000L, pureStudyTime)
+    }
 }
