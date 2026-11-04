@@ -15,17 +15,20 @@ import kotlinx.coroutines.tasks.await
  * Coordinates Firebase Authentication for FocusShield.
  * Provides real-time observing of Google Sign-In state via Jetpack CredentialManager.
  */
-class AuthRepository(private val context: Context) {
+open class AuthRepository(
+    private val context: Context,
+    authProvider: () -> FirebaseAuth? = { runCatching { FirebaseAuth.getInstance() }.getOrNull() }
+) {
 
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val auth: FirebaseAuth? = authProvider()
 
-    private val _authState = MutableStateFlow<AuthState>(mapUserToState(auth.currentUser))
-    val authState: StateFlow<AuthState> = _authState.asStateFlow()
+    private val _authState = MutableStateFlow<AuthState>(mapUserToState(auth?.currentUser))
+    open val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-    val isConfigured: Boolean get() = true
+    open val isConfigured: Boolean get() = true
 
     init {
-        auth.addAuthStateListener { firebaseAuth ->
+        auth?.addAuthStateListener { firebaseAuth ->
             _authState.value = mapUserToState(firebaseAuth.currentUser)
         }
     }
@@ -43,24 +46,25 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    fun currentUserId(): String? = auth.currentUser?.uid
-    fun currentUserEmail(): String? = auth.currentUser?.email
-    fun currentDisplayName(): String? = auth.currentUser?.displayName
-    fun currentPhotoUrl(): String? = auth.currentUser?.photoUrl?.toString()
+    open fun currentUserId(): String? = auth?.currentUser?.uid
+    open fun currentUserEmail(): String? = auth?.currentUser?.email
+    open fun currentDisplayName(): String? = auth?.currentUser?.displayName
+    open fun currentPhotoUrl(): String? = auth?.currentUser?.photoUrl?.toString()
 
-    suspend fun restoreOnStart() {
-        _authState.value = mapUserToState(auth.currentUser)
+    open suspend fun restoreOnStart() {
+        _authState.value = mapUserToState(auth?.currentUser)
     }
 
-    suspend fun signInWithCredential(credential: AuthCredential): AuthState {
-        val authResult = auth.signInWithCredential(credential).await()
+    open suspend fun signInWithCredential(credential: AuthCredential): AuthState {
+        val firebaseAuth = auth ?: throw IllegalStateException("FirebaseAuth is not available")
+        val authResult = firebaseAuth.signInWithCredential(credential).await()
         val state = mapUserToState(authResult.user)
         _authState.value = state
         return state
     }
 
-    suspend fun signOut() {
-        auth.signOut()
+    open suspend fun signOut() {
+        auth?.signOut()
         try {
             val credentialManager = CredentialManager.create(context)
             credentialManager.clearCredentialState(ClearCredentialStateRequest())

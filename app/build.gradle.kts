@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.time.Duration
 import java.util.Properties
 
 plugins {
@@ -126,7 +127,12 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      isReturnDefaultValues = true
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
@@ -247,7 +253,13 @@ dependencies {
   "ksp"(libs.hilt.work.compiler)
 }
 
-tasks.withType<Test> { failFast = true }
+tasks.withType<Test> {
+  failFast = true
+  timeout.set(Duration.ofMinutes(2))
+  testLogging {
+    events("passed", "failed", "skipped")
+  }
+}
 
 // Room schema export (FocusShieldDatabase.exportSchema = true): KSP writes the versioned JSON
 // schemas here so future migrations can be validated against them instead of relying on

@@ -1,14 +1,13 @@
 package com.example.data.repository
 
 import com.example.base.FirestoreEmulatorTestBase
-import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
-import java.util.Date
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -30,9 +29,13 @@ class FirestoreSyncRuleTest : FirestoreEmulatorTestBase() {
         "updatedAt" to FieldValue.serverTimestamp()
     )
 
-    docRef.set(payload).await()
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      docRef.set(payload).await()
+    }
 
-    val snapshot = docRef.get().await()
+    val snapshot = withTimeout(DEFAULT_TIMEOUT_MS) {
+      docRef.get().await()
+    }
     assertTrue(snapshot.exists())
     assertEquals(uid, snapshot.getString("userId"))
     assertEquals("Alice", snapshot.getString("displayName"))
@@ -41,10 +44,11 @@ class FirestoreSyncRuleTest : FirestoreEmulatorTestBase() {
   @Test
   fun sessionRecord_ownerCanCreateSession() = runBlocking {
     val uid = signInTestUser("alice@example.com")
+    val sessionId = "session_${UUID.randomUUID()}"
 
-    val sessionDoc = firestore.collection("users").document(uid).collection("sessions").document("session_1")
+    val sessionDoc = firestore.collection("users").document(uid).collection("sessions").document(sessionId)
     val payload = hashMapOf<String, Any>(
-        "id" to "session_1",
+        "id" to sessionId,
         "userId" to uid,
         "mode" to "POMODORO",
         "durationMinutes" to 25,
@@ -52,9 +56,13 @@ class FirestoreSyncRuleTest : FirestoreEmulatorTestBase() {
         "createdAt" to FieldValue.serverTimestamp()
     )
 
-    sessionDoc.set(payload).await()
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      sessionDoc.set(payload).await()
+    }
 
-    val snapshot = sessionDoc.get().await()
+    val snapshot = withTimeout(DEFAULT_TIMEOUT_MS) {
+      sessionDoc.get().await()
+    }
     assertTrue(snapshot.exists())
     assertEquals("POMODORO", snapshot.getString("mode"))
   }
@@ -64,26 +72,64 @@ class FirestoreSyncRuleTest : FirestoreEmulatorTestBase() {
     val aliceUid = signInTestUser("alice@example.com")
 
     val aliceDoc = firestore.collection("users").document(aliceUid)
-    aliceDoc.set(
-        hashMapOf(
-            "userId" to aliceUid,
-            "displayName" to "Alice",
-            "email" to "alice@example.com",
-            "dailyStudyGoalMinutes" to 60,
-            "currentStreak" to 3,
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-    ).await()
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      aliceDoc.set(
+          hashMapOf(
+              "userId" to aliceUid,
+              "displayName" to "Alice",
+              "email" to "alice@example.com",
+              "dailyStudyGoalMinutes" to 60,
+              "currentStreak" to 3,
+              "createdAt" to FieldValue.serverTimestamp(),
+              "updatedAt" to FieldValue.serverTimestamp()
+          )
+      ).await()
+    }
 
     // Sign in as Bob
     signInTestUser("bob@example.com")
 
     try {
-      aliceDoc.get().await()
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        aliceDoc.get().await()
+      }
       fail("Expected FirebaseFirestoreException when Bob reads Alice's doc")
     } catch (e: FirebaseFirestoreException) {
       assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, e.code)
     }
+  }
+
+  @Test
+  fun unauthenticatedUser_cannotReadUserProfile() = runBlocking {
+    val aliceUid = signInTestUser("alice@example.com")
+    val aliceDoc = firestore.collection("users").document(aliceUid)
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      aliceDoc.set(
+          hashMapOf(
+              "userId" to aliceUid,
+              "displayName" to "Alice",
+              "email" to "alice@example.com",
+              "dailyStudyGoalMinutes" to 60,
+              "currentStreak" to 3,
+              "createdAt" to FieldValue.serverTimestamp(),
+              "updatedAt" to FieldValue.serverTimestamp()
+          )
+      ).await()
+    }
+
+    auth.signOut()
+
+    try {
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        aliceDoc.get().await()
+      }
+      fail("Expected FirebaseFirestoreException when unauthenticated caller reads user profile")
+    } catch (e: FirebaseFirestoreException) {
+      assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, e.code)
+    }
+  }
+
+  private companion object {
+    const val DEFAULT_TIMEOUT_MS = 5000L
   }
 }

@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?><!--
    FocusShield backup rules (API 30 and below; ignored on API 31+).
 
-   Same reasoning as data_extraction_rules.xml: the onboarding flag and the
-   app's DataStore must not come back from a backup, or a fresh install lands
-   on Home instead of the onboarding flow.
+   Same reasoning as data_extraction_rules.xml: the onboarding flag, active
+   session state, per-install cloud sync state, and the app's DataStore must
+   not come back from a backup, or a fresh install lands on Home instead of the
+   onboarding flow or inherits stale session/account state.
 
    The Room database is excluded as well: session/limit/blocker state must
    never be restored over a fresh install (cloud sync has its own guarded
@@ -14,6 +15,8 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
+    <exclude domain="sharedpref" path="focus_active_session_prefs.xml" />
+    <exclude domain="sharedpref" path="focus_shield_cloud_state.xml" />
     <exclude domain="file" path="datastore" />
     <exclude domain="database" path="focus_shield_database" />
     <exclude domain="database" path="focus_shield_database-wal" />

@@ -283,23 +283,15 @@ fun TodayPlanSummaryCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Circular Percentage Badge
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(if (isDark) FocusColors.SurfaceSubtle else Color(0xFFF1F5F9)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "$completionPercentage%",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                        color = FocusColors.TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+            // Unboxed Percentage Text
+            Text(
+                text = "$completionPercentage%",
+                style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                    color = FocusColors.TextSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
                 )
-            }
+            )
 
             Spacer(modifier = Modifier.width(14.dp))
 

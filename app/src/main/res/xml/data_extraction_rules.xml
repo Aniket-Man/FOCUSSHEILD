@@ -7,6 +7,12 @@
    `onboarding_completed = true` — and FocusNavGraph then resolved its start
    destination to Home, skipping onboarding entirely.
 
+   Active session state (focus_active_session_prefs.xml) and per-install cloud
+   sync bookkeeping (focus_shield_cloud_state.xml) are also excluded from both
+   cloud backup and device-to-device transfer so sensitive session and account
+   synchronization state never transfers unintentionally between installations
+   or devices.
+
    The Room database is excluded as well: session/limit/blocker state must
    never be restored over a fresh install (cloud sync has its own guarded
    restore path). Main DB plus its WAL/SHM sidecars are all excluded so a
@@ -17,6 +23,8 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
+        <exclude domain="sharedpref" path="focus_active_session_prefs.xml" />
+        <exclude domain="sharedpref" path="focus_shield_cloud_state.xml" />
         <exclude domain="file" path="datastore" />
         <exclude domain="database" path="focus_shield_database" />
         <exclude domain="database" path="focus_shield_database-wal" />
@@ -24,6 +32,8 @@
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="focus_shield_sync_prefs.xml" />
+        <exclude domain="sharedpref" path="focus_active_session_prefs.xml" />
+        <exclude domain="sharedpref" path="focus_shield_cloud_state.xml" />
         <exclude domain="file" path="datastore" />
         <exclude domain="database" path="focus_shield_database" />
         <exclude domain="database" path="focus_shield_database-wal" />

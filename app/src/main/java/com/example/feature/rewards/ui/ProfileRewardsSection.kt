@@ -394,8 +394,8 @@ private fun AchievementsHeader(
                         Text(
                             text = "${(nextProgress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = targetColor,
-                                fontWeight = FontWeight.Bold,
+                                color = FocusColors.TextSecondary,
+                                fontWeight = FontWeight.Medium,
                                 fontSize = 11.sp
                             )
                         )
@@ -1065,8 +1065,8 @@ internal fun BadgeDetailDialog(
                             Text(
                                 text = "${(progressRatio * 100).toInt()}%",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = primaryColor,
-                                    fontWeight = FontWeight.Bold
+                                    color = FocusColors.TextSecondary,
+                                    fontWeight = FontWeight.Medium
                                 )
                             )
                         }

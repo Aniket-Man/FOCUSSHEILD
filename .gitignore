@@ -22,6 +22,7 @@ captures/
 
 # Logs and crash dumps
 *.log
+*-debug.log
 
 # Kotlin compiler session data (transient heartbeat files)
 .kotlin/

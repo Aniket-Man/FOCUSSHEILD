@@ -42,6 +42,26 @@ class FocusAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: FocusAccessibilityService? = null
             private set
+
+        private val SAFE_SETUP_KEYWORDS = arrayOf(
+            "battery", "optimize", "unrestricted", "background", "notification",
+            "accessibility", "special app access", "usage", "appear on top",
+            "display over", "draw over", "manage app permissions", "allow"
+        )
+
+        private val UNINSTALL_KEYWORDS = arrayOf(
+            "uninstall", "do you want to uninstall", "delete app",
+            "clear storage", "clear data", "force stop", "deactivate"
+        )
+
+        private val YOUTUBE_COLLAPSE_IDS = arrayOf(
+            "com.google.android.youtube:id/watch_collapse_button",
+            "com.google.android.youtube:id/collapse_button",
+            "com.google.android.youtube:id/action_bar_back",
+            "com.google.android.youtube:id/up_button"
+        )
+
+        private val YOUTUBE_POST_CLICK_SWEEP_DELAYS = longArrayOf(400L, 950L, 1700L, 2600L)
     }
 
     private val tag = "FocusAccessibility"
@@ -50,6 +70,9 @@ class FocusAccessibilityService : AccessibilityService() {
     // preference/session collectors or delayed work outlive their bind (issue #16).
     private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val shortFormDetectionManager = ShortFormDetectionManager.instance
+    private val ownPackageLowercase: String by lazy(LazyThreadSafetyMode.NONE) {
+        packageName.lowercase()
+    }
 
     private val tamperPackages = setOf(
         "com.google.android.packageinstaller",
@@ -168,6 +191,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private var lastSplitScreenCheckTimestamp: Long = 0L
     private var lastFloatingWindowCheckTimestamp: Long = 0L
     private var lastTimerKeepAliveCheckTimestamp: Long = 0L
+    private var lastStandardBlockerCheckTimestamp: Long = 0L
     private var homeFeedPopupDismissed = false
     private var youtubeBackNavigationPending = false
     private var lastBlockedYouTubeVideoKey: String? = null
@@ -197,9 +221,10 @@ class FocusAccessibilityService : AccessibilityService() {
         if (now - lastTimerKeepAliveCheckTimestamp >= 4_000L) {
             lastTimerKeepAliveCheckTimestamp = now
             try {
-                val sessionMgr = com.example.feature.session.engine.FocusSessionManager.instance
-                val activeSession = sessionMgr.activeSession.value
-                    ?: sessionMgr.restoreActiveSessionFromDisk(this)
+                // Read in-memory activeSession state only (disk restore already runs once in
+                // onServiceConnected); avoids synchronous SharedPreferences reads on the main
+                // accessibility thread every 4 seconds when no session is running.
+                val activeSession = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
                 if (activeSession != null && (activeSession.isRunning || activeSession.isPaused)) {
                     if (!com.example.feature.timer.FloatingTimerService.isOverlayShowing.value &&
                         (currentPreferences.isFloatingTimerOverlayEnabled || activeSession.isStrictModeEnabled)
@@ -215,10 +240,18 @@ class FocusAccessibilityService : AccessibilityService() {
             }
         }
 
+        val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
         val isOwnApp = com.example.feature.applimits.engine.AppLimitPackageFilter
             .isOwnApp(rawPackageName)
 
         if (isOwnApp) {
+            // Fast-path: if FocusShield is already the tracked foreground package and this is a
+            // routine scroll/click/content change inside our own UI, skip IPC rootInActiveWindow
+            // queries entirely.
+            if (lastForegroundPackage == rawPackageName && !isWindowStateChange) {
+                return
+            }
             if (lastForegroundPackage != null &&
                 YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage)
             ) {
@@ -238,10 +271,13 @@ class FocusAccessibilityService : AccessibilityService() {
             // overlay: it can emit events carrying our package while the limited app is still the
             // active window behind it. Treating those as "the user opened FocusShield" would hide
             // the blocker the moment it appeared. The active root tells the two apart.
+            val rootNode = try { rootInActiveWindow } catch (_: Exception) { null }
             val activeWindowPackage = try {
-                rootInActiveWindow?.packageName?.toString()
+                rootNode?.packageName?.toString()
             } catch (_: Exception) {
                 null
+            } finally {
+                try { rootNode?.recycle() } catch (_: Exception) {}
             }
             if (activeWindowPackage != null &&
                 com.example.feature.applimits.engine.AppLimitPackageFilter.isOwnApp(activeWindowPackage)
@@ -255,22 +291,25 @@ class FocusAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Lazily obtain rootInActiveWindow at most once per onAccessibilityEvent call to avoid
+        // repeated cross-process IPC binder calls across foreground tracking, tamper detection,
+        // short-form detection, browser URL inspection, and YouTube evaluation.
+        var cachedEventRootNode: android.view.accessibility.AccessibilityNodeInfo? = null
+        var eventRootNodeResolved = false
+        fun getEventRootNode(): android.view.accessibility.AccessibilityNodeInfo? {
+            if (!eventRootNodeResolved) {
+                eventRootNodeResolved = true
+                cachedEventRootNode = try { rootInActiveWindow } catch (_: Exception) { null }
+            }
+            return cachedEventRootNode
+        }
+
         try {
             val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
             val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
 
-            // Update foreground tracking on window state changes — and, until something has been
-            // tracked at all, on whatever the first event is (issue #49, W2). After a service
-            // (re)bind the first event to arrive can be WINDOW_CONTENT_CHANGED/VIEW_SCROLLED
-            // instead of a window transition; gating only on window-state changes then left
-            // lastForegroundPackage/currentForegroundPackage null until one happened, so limit
-            // evaluation ran blind and isBlockedAppInForeground() could not tell where the user
-            // was. Seeding on the first event is idempotent for the common case (the event's own
-            // package) and the very next window-state change corrects any exotic mismatch.
-            val isWindowStateChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                    eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
             val activeWindowPackage = if (rawPackageName != lastForegroundPackage || eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-                try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+                try { getEventRootNode()?.packageName?.toString() } catch (_: Exception) { null }
             } else {
                 null
             }
@@ -304,17 +343,20 @@ class FocusAccessibilityService : AccessibilityService() {
                     com.example.feature.applimits.engine.AppLimitPackageFilter.shouldTrackForeground(rawPackageName) &&
                     isConfirmedActiveOrUncontradicted
 
+            val isYouTubePkg = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+            val isBrowserPkg = com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
+
             if ((isWindowStateChange && isConfirmedActiveOrUncontradicted) || lastForegroundPackage == null || isTrackedPackageSwitch) {
                 if (lastForegroundPackage != null &&
                     YouTubeDetectionRules.isYouTubePackage(lastForegroundPackage) &&
-                    !YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+                    !isYouTubePkg
                 ) {
                     YouTubeContentBlockEngine.reset()
                     dwellTracker()?.flush("left YouTube")
                 }
                 if (lastForegroundPackage != null &&
                     com.example.core.detector.BrowserUrlDetector.isBrowserPackage(lastForegroundPackage!!) &&
-                    !com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)
+                    !isBrowserPkg
                 ) {
                     dwellTracker()?.flushBrowser("left Browser")
                 }
@@ -348,11 +390,9 @@ class FocusAccessibilityService : AccessibilityService() {
             ) {
                 // Issue #16: settings/uninstaller screens emit content-change bursts; scan the
                 // tree at most every 500ms unless the window itself changed.
-                val isTamperWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                        eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
-                if (isTamperWindowChange || (now - lastTamperCheckTimestamp) >= 500L) {
+                if (isWindowStateChange || (now - lastTamperCheckTimestamp) >= 500L) {
                     lastTamperCheckTimestamp = now
-                    val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
+                    val rootNode = getEventRootNode()
                     try {
                         if (rootNode != null) {
                             val isTamper = isTamperOrUninstallAttempt(rootNode, rawPackageName)
@@ -391,18 +431,21 @@ class FocusAccessibilityService : AccessibilityService() {
                 }
             }
 
+            val protectionState = blockerManager?.getCurrentProtectionState(now)
+
             // 1. FAST SHORT-FORM CONTENT (SHORTS & REELS) BLOCKING FLOW
             // Active if global toggle is ON or if user is in an active Focus Session.
             // YouTube is excluded here while a Study Mode session is active because the
             // full YouTube Content Block Engine below owns YouTube in that case.
-            val isYouTubeStudyModeActive = YouTubeDetectionRules.isYouTubePackage(rawPackageName) &&
-                    (blockerManager?.getCurrentProtectionState(now)?.let {
+            val isYouTubeStudyModeActive = isYouTubePkg &&
+                    (protectionState?.let {
                         (it.sessionState == com.example.feature.session.domain.SessionState.RUNNING ||
                                 it.sessionState == com.example.feature.session.domain.SessionState.PAUSED) &&
                                 it.isYouTubeStudyModeEnabled
                     } == true)
 
-            val isShortFormTracked = !isYouTubeStudyModeActive && isShortFormBlockingEnabledFor(rawPackageName)
+            val isShortFormTracked = !isYouTubeStudyModeActive &&
+                    isShortFormBlockingEnabledFor(rawPackageName, protectionState, isYouTubePkg)
             if (isShortFormTracked) {
                 // Throttle window content inspection to prevent CPU overhead (min 150ms between scans)
                 if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -411,70 +454,67 @@ class FocusAccessibilityService : AccessibilityService() {
                     // Skip throttled tick
                 } else {
                     lastShortFormInspectTimestamp = now
-                    val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
+                    val rootNode = getEventRootNode()
                     try {
-                        val isYT = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
-
-                    // YouTube uses the reel-player-container detection which never fires
-                    // for Shorts shelves embedded in the Home feed; other apps keep the
-                    // generic short-form detector.
-                    val shortFormDetected = if (isYT) {
-                        YouTubeNodeExtractor.detectShorts(rootNode, event)
-                    } else {
-                        shortFormDetectionManager.detectShortFormContent(rawPackageName, event, rootNode)
-                    }
-
-                    if (shortFormDetected) {
-                        val shouldTrigger = if (isYT) {
-                            (now - lastYouTubeBlockTimestamp) >= 2000L
+                        // YouTube uses the reel-player-container detection which never fires
+                        // for Shorts shelves embedded in the Home feed; other apps keep the
+                        // generic short-form detector.
+                        val shortFormDetected = if (isYouTubePkg) {
+                            YouTubeNodeExtractor.detectShorts(rootNode, event)
                         } else {
-                            shortFormDetectionManager.shouldTriggerAction(rawPackageName)
+                            shortFormDetectionManager.detectShortFormContent(rawPackageName, event, rootNode)
                         }
 
-                        if (shouldTrigger) {
-                            Log.i(tag, "[$rawPackageName] Short-form content (Shorts/Reels) detected! Returning to Home.")
-                            val isIG = rawPackageName.contains("instagram")
-                            val isFB = rawPackageName.contains("facebook") || rawPackageName.contains("katana")
-
-                            if (isYT) {
-                                val didBlock = handleYouTubeShortsBlocked()
-                                if (didBlock) {
-                                    com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
-                                    com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
-                                }
+                        if (shortFormDetected) {
+                            val shouldTrigger = if (isYouTubePkg) {
+                                (now - lastYouTubeBlockTimestamp) >= 2000L
                             } else {
-                                val backSuccess = performGlobalAction(GLOBAL_ACTION_BACK)
-                                if (!backSuccess) {
-                                    performGlobalAction(GLOBAL_ACTION_HOME)
-                                }
-                                val appLabel = if (isIG) "Instagram" else if (isFB) "Facebook" else "Shorts"
-                                com.example.core.overlay.FocusDisplayOverlayNotificationManager.showReelsBlockedHud(this, appLabel)
-                                com.example.core.notification.FocusShieldBlockNotificationHelper.notifyReelsBlocked(this, appLabel)
+                                shortFormDetectionManager.shouldTriggerAction(rawPackageName)
                             }
 
-                            // Record blocked attempt for analytics
-                            val displayName = when {
-                                isYT -> "YouTube Shorts"
-                                isIG -> "Instagram Reels"
-                                isFB -> "Facebook Reels"
-                                else -> "Short-form Content"
+                            if (shouldTrigger) {
+                                Log.i(tag, "[$rawPackageName] Short-form content (Shorts/Reels) detected! Returning to Home.")
+                                val isIG = rawPackageName.contains("instagram")
+                                val isFB = rawPackageName.contains("facebook") || rawPackageName.contains("katana")
+
+                                if (isYouTubePkg) {
+                                    val didBlock = handleYouTubeShortsBlocked()
+                                    if (didBlock) {
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showShortsBlockedHud(this)
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyShortsBlocked(this)
+                                    }
+                                } else {
+                                    val backSuccess = performGlobalAction(GLOBAL_ACTION_BACK)
+                                    if (!backSuccess) {
+                                        performGlobalAction(GLOBAL_ACTION_HOME)
+                                    }
+                                    val appLabel = if (isIG) "Instagram" else if (isFB) "Facebook" else "Shorts"
+                                    com.example.core.overlay.FocusDisplayOverlayNotificationManager.showReelsBlockedHud(this, appLabel)
+                                    com.example.core.notification.FocusShieldBlockNotificationHelper.notifyReelsBlocked(this, appLabel)
+                                }
+
+                                // Record blocked attempt for analytics
+                                val displayName = when {
+                                    isYouTubePkg -> "YouTube Shorts"
+                                    isIG -> "Instagram Reels"
+                                    isFB -> "Facebook Reels"
+                                    else -> "Short-form Content"
+                                }
+                                blockerManager?.handleBlockedPackage(
+                                    packageName = rawPackageName,
+                                    fallbackAppName = displayName,
+                                    decision = ProtectionDecision.BLOCK_SHORTS
+                                )
+                                evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
+                                return
                             }
-                            blockerManager?.handleBlockedPackage(
-                                packageName = rawPackageName,
-                                fallbackAppName = displayName,
-                                decision = ProtectionDecision.BLOCK_SHORTS
-                            )
-                            evaluateAppLimitGate(rawPackageName, eventType, now)
-                            return
                         }
-                    }
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                }
             }
-        }
 
             // 1B. BROWSER WEBSITE BLOCKER FLOW (Auto Adult + Custom Distraction List)
-            if (com.example.core.detector.BrowserUrlDetector.isBrowserPackage(rawPackageName)) {
-                val protectionState = blockerManager?.getCurrentProtectionState(now)
+            if (isBrowserPkg) {
                 val isSessionActive = protectionState?.isSessionActive == true
                 val isBrowserStudyMode = (protectionState?.isBrowserStudyModeEnabled != false) || isSessionActive
 
@@ -483,7 +523,7 @@ class FocusAccessibilityService : AccessibilityService() {
                     (now - lastBrowserBlockTimestamp) >= 1200L
                 ) {
                     lastBrowserInspectTimestamp = now
-                    val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
+                    val rootNode = getEventRootNode()
                     val urlInfo = com.example.core.detector.BrowserUrlDetector.extractUrlAndDomain(rawPackageName, rootNode, event)
                     if (urlInfo != null) {
                         val siteEngine = try { com.example.feature.websiteblocker.engine.WebsiteBlockerEngine.instance } catch (e: Exception) { null }
@@ -508,7 +548,7 @@ class FocusAccessibilityService : AccessibilityService() {
                             // 3. Record the event through the repository (single write path → sync)
                             val blockedAttemptRepo =
                                 try { FocusShieldApp.instance.blockedAttemptRepository } catch (e: Exception) { null }
-                            val activeSessionId = blockerManager?.getCurrentProtectionState(now)?.sessionId
+                            val activeSessionId = protectionState?.sessionId
                             val isAdultAuto = siteDecision.engineType == "ADULT_AUTOMATIC"
                             serviceScope.launch {
                                 try {
@@ -528,7 +568,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                     )
                                 } catch (_: Exception) {}
                             }
-                            evaluateAppLimitGate(rawPackageName, eventType, now)
+                            evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                             return
                         } else if (isSessionActive && isBrowserStudyMode) {
                             dwellTracker()?.onAllowedBrowserContent(
@@ -541,15 +581,14 @@ class FocusAccessibilityService : AccessibilityService() {
             }
 
             // 2. YouTube Study Mode Inspection Flow (Focus Session & Channels Rules)
-            if (YouTubeDetectionRules.isYouTubePackage(rawPackageName) && blockerManager != null) {
+            if (isYouTubePkg && blockerManager != null && protectionState != null) {
                 // If recently redirected back from a blocked channel/short, allow a 2.5-second grace period
                 // so the YouTube UI can land on the previous screen without re-triggering blocks
                 if (youtubeBackNavigationPending || (now - lastYouTubeBlockTimestamp) < 2500L) {
-                    evaluateAppLimitGate(rawPackageName, eventType, now)
+                    evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                     return
                 }
 
-                val protectionState = blockerManager.getCurrentProtectionState(now)
                 val isSessionRunningOrPaused =
                     protectionState.sessionState.name == "RUNNING" || protectionState.sessionState.name == "PAUSED"
                 val isBreakActiveNow = protectionState.isBreakActive && now < protectionState.breakEndsAt
@@ -578,9 +617,7 @@ class FocusAccessibilityService : AccessibilityService() {
                         }
                     }
                 } else if (isSessionRunningOrPaused) {
-                    val eventType = event?.eventType
-                    val isYouTubeWindowChange = eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                            eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                    val isYouTubeWindowChange = isWindowStateChange
                     val isClickEvent = eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
                     val isPlayerControlClick = isClickEvent &&
                             YouTubeNodeExtractor.isPlayerControlOrFullscreenInteraction(event)
@@ -616,7 +653,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                     (now - lastYouTubeSandboxCheckTimestamp) >= 500L)
                         ) {
                             lastYouTubeSandboxCheckTimestamp = now
-                            val checkRoot = try { rootInActiveWindow } catch (_: Exception) { null }
+                            val checkRoot = getEventRootNode()
                             sandboxStillValid = YouTubeContentBlockEngine.checkSandboxStillValid(
                                 rootNode = checkRoot,
                                 event = event,
@@ -640,17 +677,17 @@ class FocusAccessibilityService : AccessibilityService() {
                                 channelName = chan,
                                 videoTitle = videoTitle
                             )
-                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
+                            evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                             return
                         }
                     }
 
                     if (!isYouTubeWindowChange && !isClickEvent && (now - lastYouTubeInspectTimestamp) < 250L) {
-                        evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
+                        evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                         return
                     }
                     lastYouTubeInspectTimestamp = now
-                    val rootNode = try { rootInActiveWindow } catch (e: Exception) { null }
+                    val rootNode = getEventRootNode()
                     try {
                         val decision = YouTubeContentBlockEngine.evaluate(
                             rootNode = rootNode,
@@ -663,7 +700,7 @@ class FocusAccessibilityService : AccessibilityService() {
 
                         if (decision.needsExitFullScreenForVerification) {
                             exitYouTubeFullScreenForVerification(rootNode, rawPackageName)
-                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
+                            evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                             return
                         }
 
@@ -758,7 +795,7 @@ class FocusAccessibilityService : AccessibilityService() {
                                 youtubeResult = youtubeResult,
                                 matchedKeyword = decision.matchedKeyword
                             )
-                            evaluateAppLimitGate(rawPackageName, eventType ?: 0, now)
+                            evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
                             return
                         }
                     } catch (_: Exception) {}
@@ -773,8 +810,11 @@ class FocusAccessibilityService : AccessibilityService() {
                 com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                 homeFeedPopupDismissed = false
                 if (blockerManager != null &&
-                    (isWindowStateChange || isTrackedPackageSwitch || eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+                    (isWindowStateChange || isTrackedPackageSwitch ||
+                        (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+                            (now - lastStandardBlockerCheckTimestamp) >= 250L))
                 ) {
+                    lastStandardBlockerCheckTimestamp = now
                     // 3. Standard Focus Session App Blocking flow (Priority 1)
                     val decision = blockerManager.evaluateProtection(rawPackageName, now = now)
                     if (decision == ProtectionDecision.BLOCK) {
@@ -790,9 +830,11 @@ class FocusAccessibilityService : AccessibilityService() {
             }
 
             // 4. Timed App Limit System (Priority 3 - evaluated when no Focus Session is actively blocking the app)
-            evaluateAppLimitGate(rawPackageName, eventType, now)
+            evaluateAppLimitGate(rawPackageName, eventType, now, isYouTubePkg)
         } catch (e: Exception) {
             Log.e(tag, "Error handling accessibility event: ${e.message}")
+        } finally {
+            try { cachedEventRootNode?.recycle() } catch (_: Exception) {}
         }
     }
 
@@ -807,11 +849,14 @@ class FocusAccessibilityService : AccessibilityService() {
      * while the service is enabled. Everything the gate needs is resolved here rather than
      * captured from the caller so both entry points behave identically.
      */
-    private fun evaluateAppLimitGate(rawPackageName: String, eventType: Int, now: Long) {
+    private fun evaluateAppLimitGate(
+        rawPackageName: String,
+        eventType: Int,
+        now: Long,
+        isYouTubePackage: Boolean = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
+    ) {
         val appLimitManager = try { AppLimitManager.instance } catch (e: Exception) { null }
         if (appLimitManager == null) return
-
-        val isYouTubePackage = YouTubeDetectionRules.isYouTubePackage(rawPackageName)
 
         // The blocker for this app is already on screen: nothing to decide, and nothing to
         // launch. Without this the gate re-raised the popup on every event the limited app
@@ -919,7 +964,13 @@ class FocusAccessibilityService : AccessibilityService() {
      */
     private fun evaluateGateFromCurrentWindow() {
         val root = try { rootInActiveWindow } catch (e: Exception) { null }
-        val foregroundPackage = root?.packageName?.toString()
+        val foregroundPackage = try {
+            root?.packageName?.toString()
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { root?.recycle() } catch (_: Exception) {}
+        }
         if (foregroundPackage.isNullOrBlank()) return
 
         val isOwnApp = com.example.feature.applimits.engine.AppLimitPackageFilter
@@ -952,73 +1003,102 @@ class FocusAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun isShortFormBlockingEnabledFor(packageName: String): Boolean {
+    private fun isShortFormBlockingEnabledFor(
+        packageName: String,
+        cachedProtectionState: FocusProtectionState? = null,
+        isYouTubePkg: Boolean = YouTubeDetectionRules.isYouTubePackage(packageName)
+    ): Boolean {
         if (!shortFormDetectionManager.hasDetectorFor(packageName)) return false
 
-        val blockerManager = try { FocusBlockerManager.instance } catch (e: Exception) { null }
-        val protectionState = blockerManager?.getCurrentProtectionState()
-        val isSessionActive = protectionState?.let { it.sessionState.name == "RUNNING" || it.sessionState.name == "PAUSED" } ?: false
+        val protectionState = cachedProtectionState ?: try {
+            FocusBlockerManager.instance.getCurrentProtectionState()
+        } catch (_: Exception) {
+            null
+        }
+        val isSessionActive = protectionState?.let {
+            it.sessionState.name == "RUNNING" || it.sessionState.name == "PAUSED"
+        } ?: false
         val isYouTubeStudyModeActive = isSessionActive && (protectionState?.isYouTubeStudyModeEnabled == true)
 
-        val isYT = YouTubeDetectionRules.isYouTubePackage(packageName)
-        val isIG = packageName.contains("instagram")
-        val isFB = packageName.contains("facebook") || packageName.contains("katana")
-
         return when {
-            isYT -> {
+            isYouTubePkg -> {
                 // While a Study Mode session is active the full YouTube Content Block
                 // Engine (step 2) owns YouTube entirely, including Shorts. Otherwise the
                 // 24/7 Shorts toggle applies without a session.
                 if (isYouTubeStudyModeActive) false
                 else currentPreferences.isYouTubeShortsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked
             }
-            isIG -> currentPreferences.isInstagramReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
-            isFB -> currentPreferences.isFacebookReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
+            packageName.contains("instagram") -> {
+                currentPreferences.isInstagramReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
+            }
+            packageName.contains("facebook") || packageName.contains("katana") -> {
+                currentPreferences.isFacebookReelsBlockingEnabled || currentPreferences.isShortsReelsAlwaysBlocked || isSessionActive
+            }
             else -> false
         }
     }
 
-    private fun isTamperOrUninstallAttempt(rootNode: android.view.accessibility.AccessibilityNodeInfo?, rawPackageName: String): Boolean {
+    private fun isTamperOrUninstallAttempt(
+        rootNode: android.view.accessibility.AccessibilityNodeInfo?,
+        rawPackageName: String
+    ): Boolean {
         if (rootNode == null) return false
         // Never block during onboarding or initial setup
         if (!currentPreferences.hasCompletedOnboarding) return false
         if (!tamperPackages.contains(rawPackageName)) return false
 
-        if (rootNode == null) return false
-        val allTexts = mutableListOf<String>()
+        val sb = StringBuilder(256)
         val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
         queue.add(rootNode)
         var visited = 0
-        while (queue.isNotEmpty() && visited < 100) {
-            val node = queue.removeFirst()
-            visited++
-            node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { allTexts.add(it.lowercase()) }
-            node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { allTexts.add(it.lowercase()) }
-            for (i in 0 until node.childCount) {
-                val child = try { node.getChild(i) } catch (_: Exception) { null }
-                if (child != null) queue.add(child)
+        try {
+            while (queue.isNotEmpty() && visited < 100) {
+                val node = queue.removeFirst()
+                visited++
+                try {
+                    val textStr = node.text?.toString()?.trim()
+                    if (!textStr.isNullOrEmpty()) {
+                        if (sb.isNotEmpty()) sb.append(' ')
+                        sb.append(textStr.lowercase())
+                    }
+                    val descStr = node.contentDescription?.toString()?.trim()
+                    if (!descStr.isNullOrEmpty()) {
+                        if (sb.isNotEmpty()) sb.append(' ')
+                        sb.append(descStr.lowercase())
+                    }
+                    for (i in 0 until node.childCount) {
+                        val child = try { node.getChild(i) } catch (_: Exception) { null }
+                        if (child != null) queue.add(child)
+                    }
+                } finally {
+                    if (node !== rootNode) {
+                        try { node.recycle() } catch (_: Exception) {}
+                    }
+                }
+            }
+        } finally {
+            while (queue.isNotEmpty()) {
+                val leftover = queue.removeFirst()
+                if (leftover !== rootNode) {
+                    try { leftover.recycle() } catch (_: Exception) {}
+                }
             }
         }
-        val combinedText = allTexts.joinToString(" ")
+        val combinedText = sb.toString()
+        if (combinedText.isEmpty()) return false
 
         // Exclude legitimate permission setup, battery optimization, and accessibility setup screens
-        val safeSetupKeywords = listOf(
-            "battery", "optimize", "unrestricted", "background", "notification",
-            "accessibility", "special app access", "usage", "appear on top",
-            "display over", "draw over", "manage app permissions", "allow"
-        )
-        if (safeSetupKeywords.any { combinedText.contains(it) }) {
+        if (SAFE_SETUP_KEYWORDS.any { combinedText.contains(it) }) {
             return false
         }
 
         // Search for references to FocusShield or our package in the settings/uninstaller UI
-        val hasAppMatch = combinedText.contains("focusshield") || combinedText.contains(packageName.lowercase())
+        val hasAppMatch = combinedText.contains("focusshield") || combinedText.contains(ownPackageLowercase)
 
         if (hasAppMatch) {
             // Check specifically for uninstallation or clear data/force stop actions
             if (rawPackageName.contains("packageinstaller") || rawPackageName.contains("settings")) {
-                val uninstallKeywords = listOf("uninstall", "do you want to uninstall", "delete app", "clear storage", "clear data", "force stop", "deactivate")
-                if (uninstallKeywords.any { combinedText.contains(it) }) {
+                if (UNINSTALL_KEYWORDS.any { combinedText.contains(it) }) {
                     return true
                 }
             }
@@ -1068,8 +1148,7 @@ class FocusAccessibilityService : AccessibilityService() {
      */
     private fun scheduleYouTubePostClickVerifications(rawPackageName: String) {
         mainThreadHandler.removeCallbacksAndMessages(youtubePostClickSweepToken)
-        val sweepDelays = longArrayOf(400L, 950L, 1700L, 2600L)
-        for (delayMs in sweepDelays) {
+        for (delayMs in YOUTUBE_POST_CLICK_SWEEP_DELAYS) {
             androidx.core.os.HandlerCompat.postDelayed(
                 mainThreadHandler,
                 {
@@ -1292,33 +1371,35 @@ class FocusAccessibilityService : AccessibilityService() {
 
     private fun collapseYouTubePlayerOrBack(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
         if (rootNode != null) {
-            val collapseIds = listOf(
-                "com.google.android.youtube:id/watch_collapse_button",
-                "com.google.android.youtube:id/collapse_button",
-                "com.google.android.youtube:id/action_bar_back",
-                "com.google.android.youtube:id/up_button"
-            )
             val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
             queue.add(rootNode)
             var visited = 0
-            while (queue.isNotEmpty() && visited < 100) {
-                val node = queue.removeFirst()
-                visited++
-                val resId = node.viewIdResourceName ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val isCollapse = collapseIds.any { resId.contains(it, ignoreCase = true) } ||
-                        desc.equals("Collapse", ignoreCase = true) ||
-                        desc.equals("Navigate up", ignoreCase = true) ||
-                        desc.equals("Close", ignoreCase = true)
-                if (isCollapse) {
-                    if (performClickOnNodeOrParent(node)) {
-                        return
+            try {
+                while (queue.isNotEmpty() && visited < 100) {
+                    val node = queue.removeFirst()
+                    visited++
+                    try {
+                        val resId = node.viewIdResourceName ?: ""
+                        val desc = node.contentDescription?.toString() ?: ""
+                        val isCollapse = YOUTUBE_COLLAPSE_IDS.any { resId.contains(it, ignoreCase = true) } ||
+                                desc.equals("Collapse", ignoreCase = true) ||
+                                desc.equals("Navigate up", ignoreCase = true) ||
+                                desc.equals("Close", ignoreCase = true)
+                        if (isCollapse && performClickOnNodeOrParent(node)) {
+                            return
+                        }
+                        for (i in 0 until node.childCount) {
+                            val child = try { node.getChild(i) } catch (_: Exception) { null }
+                            if (child != null) queue.add(child)
+                        }
+                    } finally {
+                        if (node !== rootNode) {
+                            try { node.recycle() } catch (_: Exception) {}
+                        }
                     }
                 }
-                for (i in 0 until node.childCount) {
-                    val child = try { node.getChild(i) } catch (_: Exception) { null }
-                    if (child != null) queue.add(child)
-                }
+            } finally {
+                recycleRemainingNodes(queue, rootNode)
             }
         }
         performGlobalAction(GLOBAL_ACTION_BACK)
@@ -1331,33 +1412,40 @@ class FocusAccessibilityService : AccessibilityService() {
      */
     private fun clickPauseButtonInNodeTree(rootNode: android.view.accessibility.AccessibilityNodeInfo?) {
         if (rootNode == null) return
+        val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
         try {
-            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
-            queue.add(rootNode)
-            var visited = 0
             while (queue.isNotEmpty() && visited < 80) {
                 val node = queue.removeFirst()
                 visited++
-                val resId = node.viewIdResourceName?.lowercase() ?: ""
-                val desc = node.contentDescription?.toString()?.trim() ?: ""
-                val text = node.text?.toString()?.trim() ?: ""
-                val isExplicitPauseState =
-                    desc.equals("Pause", ignoreCase = true) ||
-                    desc.equals("Pause video", ignoreCase = true) ||
-                    text.equals("Pause", ignoreCase = true) ||
-                    text.equals("Pause video", ignoreCase = true) ||
-                    (resId.contains("pause_button") && !resId.contains("play_pause") && !desc.contains("Play", ignoreCase = true))
-                if (isExplicitPauseState) {
-                    if (performClickOnNodeOrParent(node)) {
+                try {
+                    val resId = node.viewIdResourceName?.lowercase() ?: ""
+                    val desc = node.contentDescription?.toString()?.trim() ?: ""
+                    val text = node.text?.toString()?.trim() ?: ""
+                    val isExplicitPauseState =
+                        desc.equals("Pause", ignoreCase = true) ||
+                        desc.equals("Pause video", ignoreCase = true) ||
+                        text.equals("Pause", ignoreCase = true) ||
+                        text.equals("Pause video", ignoreCase = true) ||
+                        (resId.contains("pause_button") && !resId.contains("play_pause") && !desc.contains("Play", ignoreCase = true))
+                    if (isExplicitPauseState && performClickOnNodeOrParent(node)) {
                         return
                     }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = try { node.getChild(i) } catch (_: Exception) { null }
-                    if (child != null) queue.add(child)
+                    for (i in 0 until node.childCount) {
+                        val child = try { node.getChild(i) } catch (_: Exception) { null }
+                        if (child != null) queue.add(child)
+                    }
+                } finally {
+                    if (node !== rootNode) {
+                        try { node.recycle() } catch (_: Exception) {}
+                    }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            recycleRemainingNodes(queue, rootNode)
+        }
     }
 
     /**
@@ -1369,30 +1457,37 @@ class FocusAccessibilityService : AccessibilityService() {
 
     private fun switchYouTubeToHomeTab(rootNode: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
         if (rootNode == null) return false
+        val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
         try {
-            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
-            queue.add(rootNode)
-            var visited = 0
             while (queue.isNotEmpty() && visited < 80) {
                 val node = queue.removeFirst()
                 visited++
-                val resId = node.viewIdResourceName?.lowercase() ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val text = node.text?.toString() ?: ""
-                val isHome = resId.contains("pivot_home") || resId.contains("tab_home") ||
-                        resId.contains("home_tab") || resId.contains("navigation_home") ||
-                        desc.equals("Home", ignoreCase = true) || text.equals("Home", ignoreCase = true)
-                if (isHome) {
-                    if (performClickOnNodeOrParent(node)) {
+                try {
+                    val resId = node.viewIdResourceName?.lowercase() ?: ""
+                    val desc = node.contentDescription?.toString() ?: ""
+                    val text = node.text?.toString() ?: ""
+                    val isHome = resId.contains("pivot_home") || resId.contains("tab_home") ||
+                            resId.contains("home_tab") || resId.contains("navigation_home") ||
+                            desc.equals("Home", ignoreCase = true) || text.equals("Home", ignoreCase = true)
+                    if (isHome && performClickOnNodeOrParent(node)) {
                         return true
                     }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = try { node.getChild(i) } catch (_: Exception) { null }
-                    if (child != null) queue.add(child)
+                    for (i in 0 until node.childCount) {
+                        val child = try { node.getChild(i) } catch (_: Exception) { null }
+                        if (child != null) queue.add(child)
+                    }
+                } finally {
+                    if (node !== rootNode) {
+                        try { node.recycle() } catch (_: Exception) {}
+                    }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            recycleRemainingNodes(queue, rootNode)
+        }
         return false
     }
 
@@ -1402,31 +1497,39 @@ class FocusAccessibilityService : AccessibilityService() {
      * Home feed popup to move the user from passive feed browsing to intentional search.
      */
     private fun navigateToYouTubeSearch() {
+        val rootNode = try { rootInActiveWindow } catch (e: Exception) { null } ?: return
+        val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        queue.add(rootNode)
+        var visited = 0
         try {
-            val rootNode = try { rootInActiveWindow } catch (e: Exception) { null } ?: return
-            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
-            queue.add(rootNode)
-            var visited = 0
             while (queue.isNotEmpty() && visited < 80) {
                 val node = queue.removeFirst()
                 visited++
-                val resId = node.viewIdResourceName?.lowercase() ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val text = node.text?.toString() ?: ""
-                val isSearch = resId.contains("search") ||
-                        desc.contains("Search", ignoreCase = true) ||
-                        text.contains("Search", ignoreCase = true)
-                if (isSearch) {
-                    if (performClickOnNodeOrParent(node)) {
+                try {
+                    val resId = node.viewIdResourceName?.lowercase() ?: ""
+                    val desc = node.contentDescription?.toString() ?: ""
+                    val text = node.text?.toString() ?: ""
+                    val isSearch = resId.contains("search") ||
+                            desc.contains("Search", ignoreCase = true) ||
+                            text.contains("Search", ignoreCase = true)
+                    if (isSearch && performClickOnNodeOrParent(node)) {
                         return
                     }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = try { node.getChild(i) } catch (_: Exception) { null }
-                    if (child != null) queue.add(child)
+                    for (i in 0 until node.childCount) {
+                        val child = try { node.getChild(i) } catch (_: Exception) { null }
+                        if (child != null) queue.add(child)
+                    }
+                } finally {
+                    if (node !== rootNode) {
+                        try { node.recycle() } catch (_: Exception) {}
+                    }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            recycleRemainingNodes(queue, rootNode)
+            try { rootNode.recycle() } catch (_: Exception) {}
+        }
     }
 
     private fun performClickOnNodeOrParent(node: android.view.accessibility.AccessibilityNodeInfo?): Boolean {
@@ -1436,11 +1539,29 @@ class FocusAccessibilityService : AccessibilityService() {
                 return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
             }
             val parent = node.parent
-            if (parent != null && parent.isClickable) {
-                return parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+            if (parent != null) {
+                try {
+                    if (parent.isClickable) {
+                        return parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                } finally {
+                    try { parent.recycle() } catch (_: Exception) {}
+                }
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    private fun recycleRemainingNodes(
+        queue: ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>,
+        rootNode: android.view.accessibility.AccessibilityNodeInfo?
+    ) {
+        while (queue.isNotEmpty()) {
+            val leftover = queue.removeFirst()
+            if (leftover !== rootNode) {
+                try { leftover.recycle() } catch (_: Exception) {}
+            }
+        }
     }
 
     /**
@@ -1458,27 +1579,36 @@ class FocusAccessibilityService : AccessibilityService() {
 
         // 1. Try closing tab if a close tab button is found
         if (rootNode != null) {
+            val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
             try {
-                val queue = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
-                queue.add(rootNode)
-                var visited = 0
                 while (queue.isNotEmpty() && visited < 60) {
                     val node = queue.removeFirst()
                     visited++
-                    val resId = node.viewIdResourceName?.lowercase() ?: ""
-                    if (resId.contains("close_button") || resId.contains("tab_close_button") ||
-                        resId.contains("toolbar_close") || resId.contains("close_btn")
-                    ) {
-                        if (performClickOnNodeOrParent(node)) {
-                            return
+                    try {
+                        val resId = node.viewIdResourceName?.lowercase() ?: ""
+                        if (resId.contains("close_button") || resId.contains("tab_close_button") ||
+                            resId.contains("toolbar_close") || resId.contains("close_btn")
+                        ) {
+                            if (performClickOnNodeOrParent(node)) {
+                                return
+                            }
+                        }
+                        for (i in 0 until node.childCount) {
+                            val child = try { node.getChild(i) } catch (_: Exception) { null }
+                            if (child != null) queue.add(child)
+                        }
+                    } finally {
+                        if (node !== rootNode) {
+                            try { node.recycle() } catch (_: Exception) {}
                         }
                     }
-                    for (i in 0 until node.childCount) {
-                        val child = try { node.getChild(i) } catch (_: Exception) { null }
-                        if (child != null) queue.add(child)
-                    }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            } finally {
+                recycleRemainingNodes(queue, rootNode)
+            }
         }
 
         // 2. Perform a single Back action to step back to the search page or previous tab
@@ -1545,6 +1675,8 @@ class FocusAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        mainThreadHandler.removeCallbacksAndMessages(youtubePostClickSweepToken)
+        com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
         Log.d(tag, "FocusAccessibilityService interrupted.")
     }
 }

@@ -22,10 +22,12 @@ import java.util.UUID
  * Reads/writes are synchronized on a process-local [Mutex]; `apply()` updates the in-memory map
  * synchronously so a later read in the same process sees the write.
  */
-class CloudInstallState(context: Context) {
+open class CloudInstallState(context: Context) {
 
-    private val prefs = context.applicationContext
-        .getSharedPreferences("focus_shield_cloud_state", Context.MODE_PRIVATE)
+    private val prefs by lazy {
+        context.applicationContext
+            .getSharedPreferences("focus_shield_cloud_state", Context.MODE_PRIVATE)
+    }
     private val mutex = Mutex()
 
     private companion object {
@@ -38,76 +40,56 @@ class CloudInstallState(context: Context) {
         const val WATERMARK_PREFIX = "wm:"
     }
 
-    /**
-     * Stable identifier for *this installation*, generated once on first use and never rotated.
-     *
-     * It identifies an install, not a person: a random UUID, not a hardware, advertising, or
-     * account identifier. Protection events carry it as provenance so that when the same account
-     * runs on several devices, history pulled from the cloud can be attributed to the device that
-     * actually observed it. It deliberately survives [resetTransient] — a cross-account restore
-     * replaces the *data*, not the install.
-     */
-    suspend fun installId(): String = mutex.withLock {
+    open suspend fun installId(): String = mutex.withLock {
         prefs.getString(KEY_INSTALL_ID, null) ?: UUID.randomUUID().toString().also { generated ->
             prefs.edit().putString(KEY_INSTALL_ID, generated).apply()
         }
     }
 
     /** The account whose cloud data this install's local data currently belongs to (null = none). */
-    suspend fun dataOwnerAccountId(): String? = mutex.withLock {
+    open suspend fun dataOwnerAccountId(): String? = mutex.withLock {
         prefs.getString(KEY_OWNER, null)
     }
 
-    suspend fun setDataOwnerAccountId(uid: String?) = mutex.withLock {
-        // commit(), not apply(): the migration flow records ownership *before* uploading the
-        // snapshot, and an async write can still be lost to process death — a re-login would then
-        // treat a never-migrated install as fresh and re-push into an existing cloud account.
+    open suspend fun setDataOwnerAccountId(uid: String?) = mutex.withLock {
         prefs.edit().apply {
             if (uid == null) remove(KEY_OWNER) else putString(KEY_OWNER, uid)
         }.commit()
     }
 
     /** Accounts whose snapshot was already pushed from this install (never push twice). */
-    suspend fun migratedAccounts(): Set<String> = mutex.withLock {
+    open suspend fun migratedAccounts(): Set<String> = mutex.withLock {
         prefs.getStringSet(KEY_MIGRATED, emptySet()) ?: emptySet()
     }
 
-    suspend fun markMigrated(uid: String) = mutex.withLock {
+    open suspend fun markMigrated(uid: String) = mutex.withLock {
         val current = prefs.getStringSet(KEY_MIGRATED, emptySet())?.toMutableSet() ?: mutableSetOf()
         current.add(uid)
-        // commit(), not apply(): the mark must be on disk before the snapshot upload begins, or a
-        // crash mid-upload leaves no record that this account was migrated and the next attempt
-        // would push again (see setDataOwnerAccountId).
         prefs.edit().putStringSet(KEY_MIGRATED, current).commit()
     }
 
-    /**
-     * Every account ever signed into on this install. Used to detect "signing into an account
-     * different from the one that owns this device's data" so the UI can warn before the only
-     * destructive operation in the app (clear local synced data + restore the other account).
-     */
-    suspend fun knownAccounts(): Set<String> = mutex.withLock {
+    open suspend fun knownAccounts(): Set<String> = mutex.withLock {
         prefs.getStringSet(KEY_KNOWN, emptySet()) ?: emptySet()
     }
 
-    suspend fun rememberAccount(uid: String) = mutex.withLock {
+    open suspend fun rememberAccount(uid: String) = mutex.withLock {
         val current = prefs.getStringSet(KEY_KNOWN, emptySet())?.toMutableSet() ?: mutableSetOf()
         current.add(uid)
         prefs.edit().putStringSet(KEY_KNOWN, current).apply()
     }
 
     /** Remove the account list so a reinstall of the same binary starts from a clean slate. */
-    suspend fun forgetAllAccounts() = mutex.withLock {
+    open suspend fun forgetAllAccounts() = mutex.withLock {
         prefs.edit().remove(KEY_KNOWN).apply()
     }
 
     // ---- history pull watermarks (server `synced_at`, opaque ISO text) --------------
 
-    suspend fun historyWatermark(tableKey: String): String? = mutex.withLock {
+    open suspend fun historyWatermark(tableKey: String): String? = mutex.withLock {
         prefs.getString(WATERMARK_PREFIX + tableKey, null)
     }
 
-    suspend fun setHistoryWatermark(tableKey: String, iso: String?) = mutex.withLock {
+    open suspend fun setHistoryWatermark(tableKey: String, iso: String?) = mutex.withLock {
         prefs.edit().apply {
             val key = WATERMARK_PREFIX + tableKey
             if (iso == null) remove(key) else putString(key, iso)
@@ -116,29 +98,23 @@ class CloudInstallState(context: Context) {
 
     // ---- whole-document dirty flags (profiles / user_preferences) -------------------
 
-    suspend fun profileDirty(): Boolean = mutex.withLock {
+    open suspend fun profileDirty(): Boolean = mutex.withLock {
         prefs.getBoolean(KEY_PROFILE_DIRTY, false)
     }
 
-    suspend fun setProfileDirty(dirty: Boolean) = mutex.withLock {
+    open suspend fun setProfileDirty(dirty: Boolean) = mutex.withLock {
         prefs.edit().putBoolean(KEY_PROFILE_DIRTY, dirty).apply()
     }
 
-    suspend fun prefsDirty(): Boolean = mutex.withLock {
+    open suspend fun prefsDirty(): Boolean = mutex.withLock {
         prefs.getBoolean(KEY_PREFS_DIRTY, false)
     }
 
-    suspend fun setPrefsDirty(dirty: Boolean) = mutex.withLock {
+    open suspend fun setPrefsDirty(dirty: Boolean) = mutex.withLock {
         prefs.edit().putBoolean(KEY_PREFS_DIRTY, dirty).apply()
     }
 
-    /**
-     * Reset per-account transient sync bookkeeping. Called after a destructive cross-account
-     * restore, where this device's local tables are replaced by the new account's cloud data.
-     * Watermarks and dirty flags are cleared; the migrated/owner bookkeeping is handled by the
-     * caller once the restore completes.
-     */
-    suspend fun resetTransient() = mutex.withLock {
+    open suspend fun resetTransient() = mutex.withLock {
         val keys = prefs.all.keys.filter { it.startsWith(WATERMARK_PREFIX) }
         prefs.edit().apply {
             putBoolean(KEY_PROFILE_DIRTY, false)

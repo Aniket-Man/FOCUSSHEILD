@@ -208,19 +208,14 @@ class FocusShieldApp : Application(), ImageLoaderFactory {
         SyncTracker.onPendingChanged = { syncGateway.requestSync() }
 
         // Automatically update Scholar Profile picture & display name from Gmail / Google account upon sign-in
+        // only when no cloud/custom profile photo or name is present.
         applicationScope.launch {
             authRepository.authState.collect { authState ->
                 if (authState is AuthState.Authenticated) {
                     val photoUrl = authState.photoUrl
-                    val displayName = authState.displayName
-                    if (!photoUrl.isNullOrBlank()) {
+                    val currentPrefs = preferencesRepository.preferencesFlow.first()
+                    if (!photoUrl.isNullOrBlank() && currentPrefs.userPhotoUri.isNullOrBlank()) {
                         preferencesRepository.updateUserPhotoUri(photoUrl)
-                    }
-                    if (displayName.isNotBlank()) {
-                        val currentName = preferencesRepository.preferencesFlow.first().userName
-                        if (currentName.isBlank() || currentName == "Focus Scholar") {
-                            preferencesRepository.updateUserName(displayName)
-                        }
                     }
                 }
             }

@@ -64,7 +64,7 @@ fun ProgressCard(
                 Text(
                     text = "$progressPercentage% of Daily Goal",
                     style = FocusType.sectionLabel.copy(
-                        color = FocusColors.Primary,
+                        color = FocusColors.TextSecondary,
                         letterSpacing = 0.2.sp
                     )
                 )

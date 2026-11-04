@@ -373,20 +373,14 @@ private fun FocusPercentageBadge(
     color: Color,
     label: String? = null
 ) {
-    Surface(
-        color = color.copy(alpha = 0.14f),
-        shape = CircleShape
-    ) {
-        Text(
-            text = if (label != null) "$percentage% $label" else "$percentage%",
-            style = MaterialTheme.typography.labelMedium.copy(
-                color = color,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 12.sp
-            ),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+    Text(
+        text = if (label != null) "$percentage% $label" else "$percentage%",
+        style = MaterialTheme.typography.labelMedium.copy(
+            color = FocusColors.TextSecondary,
+            fontWeight = FontWeight.Medium,
+            fontSize = 13.sp
         )
-    }
+    )
 }
 
 /**

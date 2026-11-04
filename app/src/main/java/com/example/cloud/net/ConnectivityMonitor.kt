@@ -12,13 +12,14 @@ import kotlinx.coroutines.flow.asStateFlow
  * Tracks current internet connectivity so the sync engine can debounce retries and only attempt
  * work while a real (metered-or-not) internet-capable network is present.
  */
-class ConnectivityMonitor(context: Context) {
+open class ConnectivityMonitor(context: Context) {
 
-    private val connectivityManager =
+    private val connectivityManager by lazy {
         context.applicationContext.getSystemService(ConnectivityManager::class.java)
+    }
 
-    private val _isOnline = MutableStateFlow(isCurrentlyOnline())
-    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+    private val _isOnline by lazy { MutableStateFlow(isCurrentlyOnline()) }
+    open val isOnline: StateFlow<Boolean> by lazy { _isOnline.asStateFlow() }
 
     private var callback: ConnectivityManager.NetworkCallback? = null
 

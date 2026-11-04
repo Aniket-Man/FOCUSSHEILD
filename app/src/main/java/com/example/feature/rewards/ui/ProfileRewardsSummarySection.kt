@@ -552,8 +552,8 @@ private fun UpcomingRewardBadgeCard(
                     Text(
                         text = "${(progressRatio * 100).toInt()}% Unlocked",
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = primaryColor,
-                            fontWeight = FontWeight.Bold,
+                            color = FocusColors.TextSecondary,
+                            fontWeight = FontWeight.Medium,
                             fontSize = 11.sp
                         )
                     )

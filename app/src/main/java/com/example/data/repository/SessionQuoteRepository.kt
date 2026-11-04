@@ -3,6 +3,9 @@ package com.example.data.repository
 import android.util.Log
 import com.example.FocusShieldApp
 import com.example.R
+import com.example.cloud.firestore.OperationType
+import com.example.cloud.firestore.handleFirestoreError
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
@@ -52,42 +55,12 @@ object SessionQuoteRepository {
     }
 
     /**
-     * Ensures the `/session_quotes` collection in Cloud Firestore is populated with all curated
-     * quotes so the database serves as the live source of truth for both the app and the external Admin Website.
+     * Curated quotes in `/session_quotes` are managed via the Firebase Admin SDK / Console
+     * (client writes are denied by security rules). When the remote collection has no active
+     * documents or is unreachable, [fetchRandomQuoteForSummary] falls back to [PRELOADED_QUOTES].
      */
     suspend fun ensurePreloadedInFirestore() = withContext(Dispatchers.IO) {
-        if (hasAttemptedPreloadSeed) return@withContext
-        val db = getFirestoreOrNull() ?: return@withContext
-        try {
-            val snapshot = db.collection(COLLECTION_SESSION_QUOTES).get().await()
-            val existingIds = snapshot.documents.map { it.id }.toSet()
-            val now = System.currentTimeMillis()
-
-            for (quote in PRELOADED_QUOTES) {
-                if (!existingIds.contains(quote.id)) {
-                    val payload = hashMapOf<String, Any>(
-                        "id" to quote.id,
-                        "text" to quote.text,
-                        "author" to quote.author,
-                        "category" to quote.category,
-                        "fontStyle" to quote.fontStyle,
-                        "active" to quote.active,
-                        "typingSpeedMs" to quote.typingSpeedMs,
-                        "createdAt" to now,
-                        "updatedAt" to now
-                    )
-                    runCatching {
-                        db.collection(COLLECTION_SESSION_QUOTES)
-                            .document(quote.id)
-                            .set(payload, SetOptions.merge())
-                            .await()
-                    }
-                }
-            }
-            hasAttemptedPreloadSeed = true
-        } catch (e: Exception) {
-            Log.w(TAG, "Skipping Firestore quote preload seed: ${e.message}")
-        }
+        hasAttemptedPreloadSeed = true
     }
 
     /**
@@ -98,7 +71,7 @@ object SessionQuoteRepository {
         val db = getFirestoreOrNull()
         val activeQuotes = mutableListOf<SessionQuote>()
 
-        if (db != null) {
+        if (db != null && FirebaseAuth.getInstance().currentUser != null) {
             try {
                 ensurePreloadedInFirestore()
                 val snapshot = db.collection(COLLECTION_SESSION_QUOTES).get().await()
@@ -121,6 +94,7 @@ object SessionQuoteRepository {
                     }
                 }
             } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.LIST, COLLECTION_SESSION_QUOTES)
                 Log.w(TAG, "Falling back to local quotes due to network/Firestore error: ${e.message}")
             }
         }

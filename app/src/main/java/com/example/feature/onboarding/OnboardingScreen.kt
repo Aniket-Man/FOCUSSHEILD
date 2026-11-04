@@ -1518,14 +1518,19 @@ private fun OnboardingGoogleSignInPage(
                     val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
                     val authResult = FirebaseAuth.getInstance().signInWithCredential(authCredential).await()
                     currentUser = authResult.user
-                    com.example.FocusShieldApp.instance.authRepository.restoreOnStart()
+                    val app = com.example.FocusShieldApp.instance
+                    app.authRepository.restoreOnStart()
+                    runCatching { app.syncGateway.runCycle() }
                     val photoUrl = authResult.user?.photoUrl?.toString()
                     val displayName = authResult.user?.displayName
-                    if (!photoUrl.isNullOrBlank()) {
-                        com.example.FocusShieldApp.instance.preferencesRepository.updateUserPhotoUri(photoUrl)
+                    val currentPrefs = app.preferencesRepository.snapshot()
+                    if (!photoUrl.isNullOrBlank() && currentPrefs.userPhotoUri.isNullOrBlank()) {
+                        app.preferencesRepository.updateUserPhotoUri(photoUrl)
                     }
-                    if (!displayName.isNullOrBlank()) {
-                        com.example.FocusShieldApp.instance.preferencesRepository.updateUserName(displayName)
+                    if (!displayName.isNullOrBlank() &&
+                        (currentPrefs.userName.isBlank() || currentPrefs.userName == "Focus Scholar")
+                    ) {
+                        app.preferencesRepository.updateUserName(displayName)
                     }
                     isLoading = false
                     onContinue()
@@ -1534,6 +1539,7 @@ private fun OnboardingGoogleSignInPage(
                     errorMessage = "Unexpected credential format"
                 }
             } catch (e: GetCredentialCancellationException) {
+                android.util.Log.w("Auth", "Google Sign-In cancelled or dismissed: ${e.message}", e)
                 isLoading = false
             } catch (e: Exception) {
                 isLoading = false

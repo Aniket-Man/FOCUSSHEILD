@@ -666,39 +666,40 @@ object CloudJson {
      * account-level image is `profiles.avatarPath`), and `blockedNotificationsCount` (a runtime
      * aggregate derived from `blocked_attempts`, not a stored source of truth).
      */
-    fun accountPreferencesJson(p: FocusPreferences): JSONObject = JSONObject()
-        .put("defaultTimerMinutes", p.defaultTimerMinutes)
-        .put("pomodoroFocusMinutes", p.pomodoroFocusMinutes)
-        .put("pomodoroShortBreakMinutes", p.pomodoroShortBreakMinutes)
-        .put("pomodoroLongBreakMinutes", p.pomodoroLongBreakMinutes)
-        .put("pomodoroCycles", p.pomodoroCycles)
-        .put("defaultSubject", p.defaultSubject)
-        .put("defaultTopic", p.defaultTopic)
-        .put("isAppBlockingDefault", p.isAppBlockingDefault)
-        .put("isStrictModeDefault", p.isStrictModeDefault)
-        .put("isStudyChannelsDefault", p.isStudyChannelsDefault)
-        .put("isYouTubeShortsBlockingEnabled", p.isYouTubeShortsBlockingEnabled)
-        .put("isInstagramReelsBlockingEnabled", p.isInstagramReelsBlockingEnabled)
-        .put("isFacebookReelsBlockingEnabled", p.isFacebookReelsBlockingEnabled)
-        .put("isShortsReelsAlwaysBlocked", p.isShortsReelsAlwaysBlocked)
-        .put("dailyGoalMinutes", p.dailyGoalMinutes)
-        .put("minimumStreakThresholdMinutes", p.minimumStreakThresholdMinutes)
-        .put("themeMode", p.themeMode)
-        .put("isAutoAdultWebsiteBlockingEnabled", p.isAutoAdultWebsiteBlockingEnabled)
-        .put("isManualWebsiteBlockingEnabled", p.isManualWebsiteBlockingEnabled)
-        .put("isBlockUninstallEnabled", p.isBlockUninstallEnabled)
-        .put("isBlockSplitScreenEnabled", p.isBlockSplitScreenEnabled)
-        .put("isBlockFloatingWindowEnabled", p.isBlockFloatingWindowEnabled)
-        .put("isBlockNotificationsEnabled", p.isBlockNotificationsEnabled)
-        .put("notificationBlockMode", p.notificationBlockMode)
+    fun accountPreferencesJson(p: FocusPreferences): JSONObject = JSONObject().apply {
+        put("defaultTimerMinutes", p.defaultTimerMinutes)
+        put("pomodoroFocusMinutes", p.pomodoroFocusMinutes)
+        put("pomodoroShortBreakMinutes", p.pomodoroShortBreakMinutes)
+        put("pomodoroLongBreakMinutes", p.pomodoroLongBreakMinutes)
+        put("pomodoroCycles", p.pomodoroCycles)
+        put("defaultSubject", p.defaultSubject)
+        put("defaultTopic", p.defaultTopic)
+        put("isAppBlockingDefault", p.isAppBlockingDefault)
+        put("isStrictModeDefault", p.isStrictModeDefault)
+        put("isStudyChannelsDefault", p.isStudyChannelsDefault)
+        put("isYouTubeShortsBlockingEnabled", p.isYouTubeShortsBlockingEnabled)
+        put("isInstagramReelsBlockingEnabled", p.isInstagramReelsBlockingEnabled)
+        put("isFacebookReelsBlockingEnabled", p.isFacebookReelsBlockingEnabled)
+        put("isShortsReelsAlwaysBlocked", p.isShortsReelsAlwaysBlocked)
+        put("dailyGoalMinutes", p.dailyGoalMinutes)
+        put("minimumStreakThresholdMinutes", p.minimumStreakThresholdMinutes)
+        put("themeMode", p.themeMode)
+        put("isAutoAdultWebsiteBlockingEnabled", p.isAutoAdultWebsiteBlockingEnabled)
+        put("isManualWebsiteBlockingEnabled", p.isManualWebsiteBlockingEnabled)
+        put("isBlockUninstallEnabled", p.isBlockUninstallEnabled)
+        put("isBlockSplitScreenEnabled", p.isBlockSplitScreenEnabled)
+        put("isBlockFloatingWindowEnabled", p.isBlockFloatingWindowEnabled)
+        put("isBlockNotificationsEnabled", p.isBlockNotificationsEnabled)
+        put("notificationBlockMode", p.notificationBlockMode)
         // Which apps to silence is protection *configuration* the user chose, so it follows the
         // account; the count of what was silenced is history and lives in `blocked_attempts`.
-        .put("blockedNotificationPackages", sortedArray(p.blockedNotificationPackages))
-        .put("alwaysBlockedNotificationPackages", sortedArray(p.alwaysBlockedNotificationPackages))
+        put("blockedNotificationPackages", sortedArray(p.blockedNotificationPackages))
+        put("alwaysBlockedNotificationPackages", sortedArray(p.alwaysBlockedNotificationPackages))
         // Claimed achievement rewards. The badge *unlock* is derived from session history, but a
         // claim is a user action with nothing else recording it — without this the rewards screen
         // shows every already-claimed badge as available again after a restore.
-        .put("claimedRewardIds", sortedArray(p.claimedRewardIds))
+        put("claimedRewardIds", sortedArray(p.claimedRewardIds))
+    }
 
     private fun sortedArray(values: Set<String>): JSONArray =
         JSONArray(values.sorted())

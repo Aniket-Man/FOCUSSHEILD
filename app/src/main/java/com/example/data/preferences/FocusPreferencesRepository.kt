@@ -72,15 +72,17 @@ data class FocusPreferences(
     }
 }
 
-class FocusPreferencesRepository(private val context: Context) {
+open class FocusPreferencesRepository(private val context: Context) {
 
-    private val syncPrefs = context.getSharedPreferences("focus_shield_sync_prefs", Context.MODE_PRIVATE)
+    private val syncPrefs by lazy {
+        context.getSharedPreferences("focus_shield_sync_prefs", Context.MODE_PRIVATE)
+    }
 
-    fun isCompletedOnboardingSync(): Boolean {
+    open fun isCompletedOnboardingSync(): Boolean {
         return syncPrefs.getBoolean("onboarding_v1_3_dark_violet_completed", false)
     }
 
-    fun isFloatingTimerOverlayEnabledSync(): Boolean {
+    open fun isFloatingTimerOverlayEnabledSync(): Boolean {
         return syncPrefs.getBoolean("floating_timer_overlay_enabled", true)
     }
 
@@ -125,58 +127,60 @@ class FocusPreferencesRepository(private val context: Context) {
         val KEY_FLOATING_TIMER_OVERLAY_ENABLED = booleanPreferencesKey("floating_timer_overlay_enabled")
     }
 
-    val preferencesFlow: Flow<FocusPreferences> = context.dataStore.data
-        .catch { exception ->
-            if (exception is IOException) {
-                emit(emptyPreferences())
-            } else {
-                throw exception
+    open val preferencesFlow: Flow<FocusPreferences> by lazy {
+        context.dataStore.data
+            .catch { exception ->
+                if (exception is IOException) {
+                    emit(emptyPreferences())
+                } else {
+                    throw exception
+                }
             }
-        }
-        .map { preferences ->
-        FocusPreferences(
-            defaultTimerMinutes = preferences[PreferencesKeys.KEY_DEFAULT_TIMER_MINUTES] ?: 60,
-            pomodoroFocusMinutes = preferences[PreferencesKeys.KEY_POMODORO_FOCUS_MINUTES] ?: 25,
-            pomodoroShortBreakMinutes = preferences[PreferencesKeys.KEY_POMODORO_SHORT_BREAK_MINUTES] ?: 5,
-            pomodoroLongBreakMinutes = preferences[PreferencesKeys.KEY_POMODORO_LONG_BREAK_MINUTES] ?: 15,
-            pomodoroCycles = preferences[PreferencesKeys.KEY_POMODORO_CYCLES] ?: 4,
-            defaultSubject = preferences[PreferencesKeys.KEY_DEFAULT_SUBJECT] ?: "",
-            defaultTopic = preferences[PreferencesKeys.KEY_DEFAULT_TOPIC] ?: "",
-            isAppBlockingDefault = preferences[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] ?: true,
-            isStrictModeDefault = preferences[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] ?: false,
-            isStudyChannelsDefault = preferences[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] ?: true,
-            isYouTubeShortsBlockingEnabled = preferences[PreferencesKeys.KEY_YT_SHORTS_BLOCKING] ?: false,
-            isInstagramReelsBlockingEnabled = preferences[PreferencesKeys.KEY_IG_REELS_BLOCKING] ?: false,
-            isFacebookReelsBlockingEnabled = preferences[PreferencesKeys.KEY_FB_REELS_BLOCKING] ?: false,
-            isShortsReelsAlwaysBlocked = preferences[PreferencesKeys.KEY_SHORTS_ALWAYS_BLOCKED] ?: false,
-            hasCompletedOnboarding = preferences[PreferencesKeys.KEY_ONBOARDING_COMPLETED] ?: false,
-            dailyGoalMinutes = preferences[PreferencesKeys.KEY_DAILY_GOAL_MINUTES] ?: 240,
-            minimumStreakThresholdMinutes = preferences[PreferencesKeys.KEY_MIN_STREAK_THRESHOLD_MINUTES] ?: 20,
-            themeMode = preferences[PreferencesKeys.KEY_THEME_MODE] ?: "SYSTEM",
-            isAutoAdultWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] ?: false,
-            isManualWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] ?: true,
-            isBlockUninstallEnabled = preferences[PreferencesKeys.KEY_BLOCK_UNINSTALL] ?: false,
-            isBlockSplitScreenEnabled = preferences[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] ?: false,
-            isBlockFloatingWindowEnabled = preferences[PreferencesKeys.KEY_BLOCK_FLOATING_WINDOW] ?: false,
-            isBlockNotificationsEnabled = preferences[PreferencesKeys.KEY_BLOCK_NOTIFICATIONS] ?: false,
-            notificationBlockMode = preferences[PreferencesKeys.KEY_NOTIFICATION_BLOCK_MODE] ?: "SESSION_ONLY",
-            blockedNotificationPackages = preferences[PreferencesKeys.KEY_BLOCKED_NOTIFICATION_PACKAGES] ?: emptySet(),
-            alwaysBlockedNotificationPackages = preferences[PreferencesKeys.KEY_ALWAYS_BLOCKED_NOTIFICATION_PACKAGES] ?: emptySet(),
-            blockedNotificationsCount = preferences[PreferencesKeys.KEY_BLOCKED_NOTIFICATIONS_COUNT] ?: 0,
-            claimedRewardIds = preferences[PreferencesKeys.KEY_CLAIMED_REWARD_IDS] ?: emptySet(),
-            userName = preferences[PreferencesKeys.KEY_USER_NAME] ?: "Focus Scholar",
-            userPhotoUri = preferences[PreferencesKeys.KEY_USER_PHOTO_URI],
-            userAvatarPreset = preferences[PreferencesKeys.KEY_USER_AVATAR_PRESET] ?: "SHIELD",
-            userMotto = preferences[PreferencesKeys.KEY_USER_MOTTO] ?: "Deep Work & Daily Mastery",
-            userAcademicGoal = preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] ?: "Exam Rank & Cognitive Stamina",
-            isAutoSaveToCloudEnabled = preferences[PreferencesKeys.KEY_AUTO_SAVE_ENABLED] ?: true,
-            autoSaveIntervalSeconds = (preferences[PreferencesKeys.KEY_AUTO_SAVE_INTERVAL_SECONDS]
-                ?: FocusPreferences.DEFAULT_AUTO_SAVE_INTERVAL_SECONDS).coerceIn(
-                FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS,
-                FocusPreferences.MAX_AUTO_SAVE_INTERVAL_SECONDS
-            ),
-            isFloatingTimerOverlayEnabled = preferences[PreferencesKeys.KEY_FLOATING_TIMER_OVERLAY_ENABLED] ?: true
-        )
+            .map { preferences ->
+                FocusPreferences(
+                    defaultTimerMinutes = preferences[PreferencesKeys.KEY_DEFAULT_TIMER_MINUTES] ?: 60,
+                    pomodoroFocusMinutes = preferences[PreferencesKeys.KEY_POMODORO_FOCUS_MINUTES] ?: 25,
+                    pomodoroShortBreakMinutes = preferences[PreferencesKeys.KEY_POMODORO_SHORT_BREAK_MINUTES] ?: 5,
+                    pomodoroLongBreakMinutes = preferences[PreferencesKeys.KEY_POMODORO_LONG_BREAK_MINUTES] ?: 15,
+                    pomodoroCycles = preferences[PreferencesKeys.KEY_POMODORO_CYCLES] ?: 4,
+                    defaultSubject = preferences[PreferencesKeys.KEY_DEFAULT_SUBJECT] ?: "",
+                    defaultTopic = preferences[PreferencesKeys.KEY_DEFAULT_TOPIC] ?: "",
+                    isAppBlockingDefault = preferences[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] ?: true,
+                    isStrictModeDefault = preferences[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] ?: false,
+                    isStudyChannelsDefault = preferences[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] ?: true,
+                    isYouTubeShortsBlockingEnabled = preferences[PreferencesKeys.KEY_YT_SHORTS_BLOCKING] ?: false,
+                    isInstagramReelsBlockingEnabled = preferences[PreferencesKeys.KEY_IG_REELS_BLOCKING] ?: false,
+                    isFacebookReelsBlockingEnabled = preferences[PreferencesKeys.KEY_FB_REELS_BLOCKING] ?: false,
+                    isShortsReelsAlwaysBlocked = preferences[PreferencesKeys.KEY_SHORTS_ALWAYS_BLOCKED] ?: false,
+                    hasCompletedOnboarding = preferences[PreferencesKeys.KEY_ONBOARDING_COMPLETED] ?: false,
+                    dailyGoalMinutes = preferences[PreferencesKeys.KEY_DAILY_GOAL_MINUTES] ?: 240,
+                    minimumStreakThresholdMinutes = preferences[PreferencesKeys.KEY_MIN_STREAK_THRESHOLD_MINUTES] ?: 20,
+                    themeMode = preferences[PreferencesKeys.KEY_THEME_MODE] ?: "SYSTEM",
+                    isAutoAdultWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] ?: false,
+                    isManualWebsiteBlockingEnabled = preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] ?: true,
+                    isBlockUninstallEnabled = preferences[PreferencesKeys.KEY_BLOCK_UNINSTALL] ?: false,
+                    isBlockSplitScreenEnabled = preferences[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] ?: false,
+                    isBlockFloatingWindowEnabled = preferences[PreferencesKeys.KEY_BLOCK_FLOATING_WINDOW] ?: false,
+                    isBlockNotificationsEnabled = preferences[PreferencesKeys.KEY_BLOCK_NOTIFICATIONS] ?: false,
+                    notificationBlockMode = preferences[PreferencesKeys.KEY_NOTIFICATION_BLOCK_MODE] ?: "SESSION_ONLY",
+                    blockedNotificationPackages = preferences[PreferencesKeys.KEY_BLOCKED_NOTIFICATION_PACKAGES] ?: emptySet(),
+                    alwaysBlockedNotificationPackages = preferences[PreferencesKeys.KEY_ALWAYS_BLOCKED_NOTIFICATION_PACKAGES] ?: emptySet(),
+                    blockedNotificationsCount = preferences[PreferencesKeys.KEY_BLOCKED_NOTIFICATIONS_COUNT] ?: 0,
+                    claimedRewardIds = preferences[PreferencesKeys.KEY_CLAIMED_REWARD_IDS] ?: emptySet(),
+                    userName = preferences[PreferencesKeys.KEY_USER_NAME] ?: "Focus Scholar",
+                    userPhotoUri = preferences[PreferencesKeys.KEY_USER_PHOTO_URI],
+                    userAvatarPreset = preferences[PreferencesKeys.KEY_USER_AVATAR_PRESET] ?: "SHIELD",
+                    userMotto = preferences[PreferencesKeys.KEY_USER_MOTTO] ?: "Deep Work & Daily Mastery",
+                    userAcademicGoal = preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] ?: "Exam Rank & Cognitive Stamina",
+                    isAutoSaveToCloudEnabled = preferences[PreferencesKeys.KEY_AUTO_SAVE_ENABLED] ?: true,
+                    autoSaveIntervalSeconds = (preferences[PreferencesKeys.KEY_AUTO_SAVE_INTERVAL_SECONDS]
+                        ?: FocusPreferences.DEFAULT_AUTO_SAVE_INTERVAL_SECONDS).coerceIn(
+                        FocusPreferences.MIN_AUTO_SAVE_INTERVAL_SECONDS,
+                        FocusPreferences.MAX_AUTO_SAVE_INTERVAL_SECONDS
+                    ),
+                    isFloatingTimerOverlayEnabled = preferences[PreferencesKeys.KEY_FLOATING_TIMER_OVERLAY_ENABLED] ?: true
+                )
+            }
     }
 
     suspend fun updateFloatingTimerOverlayEnabled(enabled: Boolean) {
@@ -225,13 +229,13 @@ class FocusPreferencesRepository(private val context: Context) {
         }
     }
 
-    suspend fun updateDailyGoalMinutes(minutes: Int) {
+    open suspend fun updateDailyGoalMinutes(minutes: Int) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_DAILY_GOAL_MINUTES] = minutes
         }
     }
 
-    suspend fun updateMinimumStreakThresholdMinutes(minutes: Int) {
+    open suspend fun updateMinimumStreakThresholdMinutes(minutes: Int) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_MIN_STREAK_THRESHOLD_MINUTES] = minutes
         }
@@ -417,7 +421,7 @@ class FocusPreferencesRepository(private val context: Context) {
         }
     }
 
-    suspend fun updateUserPhotoUri(photoUri: String?) {
+    open suspend fun updateUserPhotoUri(photoUri: String?) {
         context.dataStore.edit { preferences ->
             if (photoUri != null) {
                 preferences[PreferencesKeys.KEY_USER_PHOTO_URI] = photoUri
@@ -427,19 +431,19 @@ class FocusPreferencesRepository(private val context: Context) {
         }
     }
 
-    suspend fun updateUserAvatarPreset(preset: String) {
+    open suspend fun updateUserAvatarPreset(preset: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_USER_AVATAR_PRESET] = preset
         }
     }
 
-    suspend fun updateUserMotto(motto: String) {
+    open suspend fun updateUserMotto(motto: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_USER_MOTTO] = motto
         }
     }
 
-    suspend fun updateUserAcademicGoal(goal: String) {
+    open suspend fun updateUserAcademicGoal(goal: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_USER_ACADEMIC_GOAL] = goal
         }
@@ -448,33 +452,23 @@ class FocusPreferencesRepository(private val context: Context) {
     // ---- cloud-sync bridge -------------------------------------------------------------
 
     /** One-shot read of the full current preferences (used by the sync engine to build payloads). */
-    suspend fun snapshot(): FocusPreferences = preferencesFlow.first()
+    open suspend fun snapshot(): FocusPreferences = preferencesFlow.first()
 
     /** Cloud avatar object path stored for this account; null when the profile has no image. */
-    suspend fun cloudAvatarPath(): String? = try {
+    open suspend fun cloudAvatarPath(): String? = try {
         context.dataStore.data.first()[PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH]
     } catch (ex: IOException) {
         null
     }
 
-    suspend fun setCloudAvatarPath(path: String?) {
+    open suspend fun setCloudAvatarPath(path: String?) {
         context.dataStore.edit { p ->
             if (path == null) p.remove(PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH)
             else p[PreferencesKeys.KEY_USER_CLOUD_AVATAR_PATH] = path
         }
     }
 
-    /**
-     * Apply a cloud `user_preferences` payload (the flat JSON produced by
-     * [com.example.cloud.sync.CloudJson.accountPreferencesJson]) into local DataStore.
-     *
-     * Only keys that are present are written — an absent key means the server has no opinion, while
-     * a present-but-empty array is a real value (the user cleared every silenced app) and is applied
-     * as such. Device-local state (`hasCompletedOnboarding`, the local photo URI,
-     * `blockedNotificationsCount`) is never touched here, so a cross-device preferences pull cannot
-     * clobber per-device state.
-     */
-    suspend fun applyCloudPreferences(payloadJson: String) {
+    open suspend fun applyCloudPreferences(payloadJson: String) {
         val j = try {
             JSONObject(payloadJson)
         } catch (ex: Exception) {
@@ -524,12 +518,7 @@ class FocusPreferencesRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Apply the cloud `profiles` row's display fields. Writes the account-following profile keys
-     * and the cloud avatar path; the local photo URI (a content:// reference meaningful only on the
-     * device that picked it) is never touched here.
-     */
-    suspend fun applyCloudProfile(
+    open suspend fun applyCloudProfile(
         displayName: String,
         avatarPreset: String,
         motto: String,

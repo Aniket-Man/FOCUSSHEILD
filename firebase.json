@@ -1,7 +1,7 @@
 {
   "firestore": [
     {
-      "database": "ai-studio-android-focusshe-c611e196-b817-462d-b010-baf3f7880d4b",
+      "database": "ai-studio-android-focusshe-04b0fc23-4314-4e83-84e4-055cc0690b7a",
       "rules": "firestore.rules"
     }
   ],

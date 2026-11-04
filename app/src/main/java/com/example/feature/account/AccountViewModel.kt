@@ -76,15 +76,20 @@ class AccountViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val state = authRepository.signInWithCredential(credential)
+                // Run immediate sync cycle first so cloud profile, preferences, and study data import
+                // before any fallback Google display name marks the local profile dirty.
+                syncGateway.runCycle()
                 if (state is AuthState.Authenticated) {
-                    if (!state.photoUrl.isNullOrBlank()) {
+                    val currentPrefs = preferencesRepository.snapshot()
+                    if (!state.photoUrl.isNullOrBlank() && currentPrefs.userPhotoUri.isNullOrBlank()) {
                         preferencesRepository.updateUserPhotoUri(state.photoUrl)
                     }
-                    if (state.displayName.isNotBlank()) {
+                    if (state.displayName.isNotBlank() &&
+                        (currentPrefs.userName.isBlank() || currentPrefs.userName == "Focus Scholar")
+                    ) {
                         preferencesRepository.updateUserName(state.displayName)
                     }
                 }
-                syncGateway.requestSync()
                 onSuccess()
             } catch (t: Throwable) {
                 _info.value = t.localizedMessage ?: "Sign in failed"

@@ -151,24 +151,81 @@ class SyncGateway(
 
     /** Run one sync cycle now (subject to online/auth gating). Never throws. */
     suspend fun runCycle(): SyncCycleOutcome {
-        if (!eligible()) return SyncCycleOutcome.NoSession
+        val initialUid = currentAuthenticatedUid() ?: return SyncCycleOutcome.NoSession
         return runMutex.withLock {
-            if (!connectivityMonitor.isOnline.value) {
-                SyncCycleOutcome.Offline
-            } else {
-                execute { engine.runCycle() }
+            val activeUid = currentAuthenticatedUid()
+            when {
+                activeUid == null -> SyncCycleOutcome.NoSession
+                activeUid != initialUid -> {
+                    val failure = SyncCycleOutcome.Failed("Authenticated account changed before synchronization started")
+                    _lastOutcome.value = failure
+                    failure
+                }
+                !connectivityMonitor.isOnline.value -> {
+                    _lastOutcome.value = SyncCycleOutcome.Offline
+                    SyncCycleOutcome.Offline
+                }
+                else -> execute { engine.runCycle(expectedUid = activeUid) }
             }
         }
     }
 
     /** First-account migration / resume of an interrupted migration. Never throws, never destructive. */
-    suspend fun migrate(): SyncCycleOutcome = runExclusive { engine.migrate() }
+    suspend fun migrate(): SyncCycleOutcome {
+        val initialUid = currentAuthenticatedUid() ?: return SyncCycleOutcome.NoSession
+        return runMutex.withLock {
+            val activeUid = currentAuthenticatedUid()
+            when {
+                activeUid == null -> SyncCycleOutcome.NoSession
+                activeUid != initialUid -> {
+                    val failure = SyncCycleOutcome.Failed("Authenticated account changed before migration started")
+                    _lastOutcome.value = failure
+                    failure
+                }
+                !connectivityMonitor.isOnline.value -> {
+                    _lastOutcome.value = SyncCycleOutcome.Offline
+                    SyncCycleOutcome.Offline
+                }
+                else -> execute { engine.migrate(expectedUid = activeUid) }
+            }
+        }
+    }
 
-    /** Destructive cross-account restore. Call only after the UI has confirmed. Never throws. */
-    suspend fun restore(uid: String): SyncCycleOutcome = runExclusive { engine.restore(uid) }
-
-    private suspend fun runExclusive(block: suspend () -> SyncCycleOutcome): SyncCycleOutcome =
-        runMutex.withLock { execute(block) }
+    /**
+     * Synchronizes data for the explicitly requested [uid] only after verifying that [uid]
+     * matches the currently authenticated Firebase account both before and inside [runMutex].
+     */
+    suspend fun restore(uid: String): SyncCycleOutcome {
+        val requestedUid = uid.trim()
+        if (requestedUid.isEmpty()) {
+            val failure = SyncCycleOutcome.Failed("Requested UID must not be blank")
+            _lastOutcome.value = failure
+            return failure
+        }
+        if (!authRepository.isConfigured) return SyncCycleOutcome.NoSession
+        val initialUid = authRepository.currentUserId()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return SyncCycleOutcome.NoSession
+        if (initialUid != requestedUid) {
+            val failure = SyncCycleOutcome.Failed("Requested UID does not match authenticated account")
+            _lastOutcome.value = failure
+            return failure
+        }
+        return runMutex.withLock {
+            if (!authRepository.isConfigured) return@withLock SyncCycleOutcome.NoSession
+            val activeUid = authRepository.currentUserId()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return@withLock SyncCycleOutcome.NoSession
+            if (activeUid != requestedUid) {
+                val failure = SyncCycleOutcome.Failed("Requested UID does not match authenticated account")
+                _lastOutcome.value = failure
+                failure
+            } else if (!connectivityMonitor.isOnline.value) {
+                _lastOutcome.value = SyncCycleOutcome.Offline
+                SyncCycleOutcome.Offline
+            } else {
+                execute { engine.restore(requestedUid) }
+            }
+        }
+    }
 
     private suspend fun execute(block: suspend () -> SyncCycleOutcome): SyncCycleOutcome {
         _running.value = true
@@ -186,8 +243,12 @@ class SyncGateway(
         }
     }
 
-    private fun eligible(): Boolean =
-        authRepository.isConfigured && authRepository.currentUserId() != null
+    private fun currentAuthenticatedUid(): String? {
+        if (!authRepository.isConfigured) return null
+        return authRepository.currentUserId()?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun eligible(): Boolean = currentAuthenticatedUid() != null
 
     private companion object {
         const val SYNC_DEBOUNCE_MILLIS = 1500L

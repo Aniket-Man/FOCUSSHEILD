@@ -18,26 +18,74 @@
           "format": "email",
           "description": "User's email address."
         },
+        "avatarPreset": {
+          "type": "string",
+          "description": "Selected scholar avatar preset identifier."
+        },
+        "motto": {
+          "type": "string",
+          "description": "User's personal focus motto."
+        },
+        "academicGoal": {
+          "type": "string",
+          "description": "User's academic target or exam goal."
+        },
+        "preferencesJson": {
+          "type": "string",
+          "description": "Serialized JSON of account-synced FocusPreferences."
+        },
         "dailyStudyGoalMinutes": {
           "type": "integer",
           "description": "Target daily study time in minutes."
+        },
+        "minimumStreakThresholdMinutes": {
+          "type": "integer",
+          "description": "Minimum study minutes per day required to maintain streak."
         },
         "currentStreak": {
           "type": "integer",
           "description": "Current consecutive days study streak."
         },
+        "longestStreak": {
+          "type": "integer",
+          "description": "Longest consecutive days study streak."
+        },
+        "totalStudyTimeMillis": {
+          "type": "integer",
+          "description": "Aggregated study duration in milliseconds."
+        },
+        "completedSessionsCount": {
+          "type": "integer",
+          "description": "Total completed focus sessions."
+        },
+        "youtubeStudyTimeMillis": {
+          "type": "integer",
+          "description": "Total YouTube Study Mode duration in milliseconds."
+        },
+        "browserStudyTimeMillis": {
+          "type": "integer",
+          "description": "Total Study Browser duration in milliseconds."
+        },
+        "blockedAttemptsCount": {
+          "type": "integer",
+          "description": "Total distraction block events recorded."
+        },
+        "photoBase64": {
+          "type": "string",
+          "description": "Optional base64-encoded compressed profile photo."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Profile creation timestamp."
+          "description": "Profile creation timestamp (submitted via FieldValue.serverTimestamp())."
         },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "Profile last update timestamp."
+          "description": "Profile last update timestamp (submitted via FieldValue.serverTimestamp())."
         }
       },
-      "required": ["userId", "displayName", "dailyStudyGoalMinutes", "currentStreak", "createdAt", "updatedAt"]
+      "required": ["userId", "displayName"]
     },
     "FocusSession": {
       "title": "FocusSession",
@@ -54,7 +102,11 @@
         },
         "mode": {
           "type": "string",
-          "description": "Session mode (e.g., POMODORO, DEEP_FOCUS, STOPWATCH)."
+          "description": "Session mode (e.g., POMODORO, TIMER, STOPWATCH)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Session title."
         },
         "durationMinutes": {
           "type": "integer",
@@ -82,13 +134,37 @@
           "type": "string",
           "description": "Target goal for this session."
         },
+        "plannedDurationMillis": {
+          "type": "integer",
+          "description": "Planned session duration in milliseconds."
+        },
         "actualDurationMillis": {
           "type": "integer",
           "description": "Verified study duration in milliseconds."
         },
+        "startTime": {
+          "type": "integer",
+          "description": "Session start epoch milliseconds."
+        },
+        "endTime": {
+          "type": "integer",
+          "description": "Session end epoch milliseconds."
+        },
         "completed": {
           "type": "boolean",
           "description": "Whether the session completed its planned duration."
+        },
+        "cancelled": {
+          "type": "boolean",
+          "description": "Whether the session was cancelled early."
+        },
+        "pomodoroCycles": {
+          "type": "integer",
+          "description": "Planned Pomodoro cycles."
+        },
+        "completedPomodoroCycles": {
+          "type": "integer",
+          "description": "Completed Pomodoro cycles."
         }
       },
       "required": ["id", "userId", "mode", "durationMinutes", "completedAt", "createdAt"]
@@ -108,13 +184,29 @@
         },
         "title": {
           "type": "string",
-          "description": "Title of the study task."
+          "description": "Title or subject name of the study task."
         },
         "subject": {
           "type": "string",
-          "description": "Subject or category name."
+          "description": "Topic or category name."
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "Associated subject ID."
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Subject name."
+        },
+        "topicName": {
+          "type": "string",
+          "description": "Topic name."
         },
         "targetMinutes": {
+          "type": "integer",
+          "description": "Planned duration in minutes."
+        },
+        "plannedDurationMinutes": {
           "type": "integer",
           "description": "Planned duration in minutes."
         },
@@ -125,6 +217,46 @@
         "scheduledDate": {
           "type": "string",
           "description": "ISO date string for the scheduled study day."
+        },
+        "dateString": {
+          "type": "string",
+          "description": "ISO date string for the scheduled study day."
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Scheduled start time (HH:mm)."
+        },
+        "endTime": {
+          "type": "string",
+          "description": "Scheduled end time (HH:mm)."
+        },
+        "startMinutes": {
+          "type": "integer",
+          "description": "Scheduled start time in minutes from midnight."
+        },
+        "endMinutes": {
+          "type": "integer",
+          "description": "Scheduled end time in minutes from midnight."
+        },
+        "status": {
+          "type": "string",
+          "description": "Status (PLANNED or COMPLETED)."
+        },
+        "colorHex": {
+          "type": "string",
+          "description": "Accent color hex string."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes for the study plan."
+        },
+        "targetDateMillis": {
+          "type": "integer",
+          "description": "Target date in epoch milliseconds."
+        },
+        "targetDate": {
+          "type": "integer",
+          "description": "Target date in epoch milliseconds."
         },
         "createdAt": {
           "type": "string",
@@ -137,51 +269,7 @@
           "description": "Last update timestamp."
         }
       },
-      "required": ["id", "userId", "title", "targetMinutes", "isCompleted", "scheduledDate", "createdAt", "updatedAt"]
-    },
-    "SessionQuote": {
-      "title": "SessionQuote",
-      "description": "A live-writing motivational/study quote displayed on the Session Summary screen and managed via an external Admin Website.",
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique quote document identifier (e.g., quote_01)."
-        },
-        "text": {
-          "type": "string",
-          "description": "The quote body text that animates live on the Session Summary screen."
-        },
-        "author": {
-          "type": "string",
-          "description": "Author or source attribution for the quote."
-        },
-        "category": {
-          "type": "string",
-          "description": "Optional theme tag (e.g., Deep Work, Discipline, Perseverance)."
-        },
-        "fontStyle": {
-          "type": "string",
-          "description": "Typography style key: 'editorial' (Playfair Display), 'calligraphy' (Cormorant Garamond), or 'classic' (Cinzel)."
-        },
-        "active": {
-          "type": "boolean",
-          "description": "Whether this quote is active in the Session Summary rotation."
-        },
-        "typingSpeedMs": {
-          "type": "integer",
-          "description": "Live-writing speed in milliseconds per character (e.g., 28-40)."
-        },
-        "createdAt": {
-          "type": "integer",
-          "description": "Creation epoch timestamp in milliseconds."
-        },
-        "updatedAt": {
-          "type": "integer",
-          "description": "Last update epoch timestamp in milliseconds."
-        }
-      },
-      "required": ["id", "text", "author", "active", "createdAt", "updatedAt"]
+      "required": ["id", "userId", "isCompleted", "createdAt", "updatedAt"]
     },
     "StudyChannel": {
       "title": "StudyChannel",
@@ -228,6 +316,367 @@
         }
       },
       "required": ["id", "userId", "channelId", "channelName", "isApproved", "createdAt", "updatedAt"]
+    },
+    "FocusSchedule": {
+      "title": "FocusSchedule",
+      "description": "A recurring or scheduled focus window belonging to a user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique schedule identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Schedule title."
+        },
+        "daysOfWeek": {
+          "type": "string",
+          "description": "Comma-separated days of week."
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Window start time (HH:mm)."
+        },
+        "endTime": {
+          "type": "string",
+          "description": "Window end time (HH:mm)."
+        },
+        "isEnabled": {
+          "type": "boolean",
+          "description": "Whether the schedule is enabled."
+        },
+        "isAutoStartSession": {
+          "type": "boolean",
+          "description": "Whether the session starts automatically."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Focus mode for the schedule."
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Subject name for the scheduled window."
+        },
+        "colorHex": {
+          "type": "string",
+          "description": "Color hex code."
+        },
+        "repeatEnabled": {
+          "type": "boolean",
+          "description": "Whether weekly repeat is enabled."
+        },
+        "scheduledDateMillis": {
+          "type": "integer",
+          "description": "One-time date in epoch milliseconds."
+        },
+        "breakMinutes": {
+          "type": "integer",
+          "description": "Break duration in minutes."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional schedule notes."
+        },
+        "blockedAppPackages": {
+          "type": "string",
+          "description": "Comma-separated blocked package names."
+        },
+        "blockNotifications": {
+          "type": "boolean",
+          "description": "Whether notifications are blocked during this schedule."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp."
+        }
+      },
+      "required": ["id", "userId", "title", "startTime", "endTime", "isEnabled", "createdAt", "updatedAt"]
+    },
+    "StudyActivity": {
+      "title": "StudyActivity",
+      "description": "Recorded educational activity from YouTube Study Mode or Study Browser.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique activity identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Associated focus session ID."
+        },
+        "activityType": {
+          "type": "string",
+          "description": "Activity type enum name."
+        },
+        "source": {
+          "type": "string",
+          "description": "Activity source (YOUTUBE, BROWSER, TIMER)."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject name."
+        },
+        "topic": {
+          "type": "string",
+          "description": "Topic name."
+        },
+        "durationMillis": {
+          "type": "integer",
+          "description": "Activity duration in milliseconds."
+        },
+        "startedAt": {
+          "type": "integer",
+          "description": "Start time in epoch milliseconds."
+        },
+        "endedAt": {
+          "type": "integer",
+          "description": "End time in epoch milliseconds."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation time in epoch milliseconds."
+        }
+      },
+      "required": ["id", "userId", "activityType", "source", "durationMillis"]
+    },
+    "BreakRecord": {
+      "title": "BreakRecord",
+      "description": "A break taken during a focus session.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique break identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Associated focus session ID."
+        },
+        "requestedDurationMillis": {
+          "type": "integer",
+          "description": "Requested break duration in milliseconds."
+        },
+        "actualDurationMillis": {
+          "type": "integer",
+          "description": "Actual break duration in milliseconds."
+        },
+        "startTime": {
+          "type": "integer",
+          "description": "Start time in epoch milliseconds."
+        },
+        "endTime": {
+          "type": "integer",
+          "description": "End time in epoch milliseconds."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Whether break completed normally."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation time in epoch milliseconds."
+        }
+      },
+      "required": ["id", "userId", "sessionId", "actualDurationMillis"]
+    },
+    "BlockedAttempt": {
+      "title": "BlockedAttempt",
+      "description": "A distraction block event recorded by FocusShield.",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "description": "Unique block event identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The owner's Firebase Auth UID."
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "Event timestamp in epoch milliseconds."
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Blocked event type."
+        },
+        "source": {
+          "type": "string",
+          "description": "Blocked event source."
+        },
+        "packageName": {
+          "type": "string",
+          "description": "Package name of blocked app."
+        },
+        "appName": {
+          "type": "string",
+          "description": "Display name of blocked app."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation timestamp in epoch milliseconds."
+        }
+      },
+      "required": ["eventId", "userId", "timestamp", "eventType", "source"]
+    },
+    "StudySubject": {
+      "title": "StudySubject",
+      "description": "A user study subject (e.g., Physics, Mathematics).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "colorHex": { "type": "string" },
+        "iconIdentifier": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "StudyTopic": {
+      "title": "StudyTopic",
+      "description": "A topic belonging to a study subject.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "BlockedApp": {
+      "title": "BlockedApp",
+      "description": "An app configured by the user for distraction blocking.",
+      "type": "object",
+      "properties": {
+        "packageName": { "type": "string" },
+        "userId": { "type": "string" },
+        "appName": { "type": "string" },
+        "isEnabled": { "type": "boolean" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["packageName", "userId"]
+    },
+    "BlockedWebsite": {
+      "title": "BlockedWebsite",
+      "description": "A website domain configured by the user for distraction blocking.",
+      "type": "object",
+      "properties": {
+        "domain": { "type": "string" },
+        "userId": { "type": "string" },
+        "isEnabled": { "type": "boolean" },
+        "category": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["domain", "userId"]
+    },
+    "BlockedKeyword": {
+      "title": "BlockedKeyword",
+      "description": "A YouTube allow/block content filter keyword.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "keyword_type": { "type": "string" },
+        "keyword_value": { "type": "string" },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "integer" }
+      },
+      "required": ["userId", "keyword_type", "keyword_value"]
+    },
+    "ScratchCard": {
+      "title": "ScratchCard",
+      "description": "A scratch card reward earned from completing a focus session.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "rewardType": { "type": "string" },
+        "rewardEmoji": { "type": "string" },
+        "rewardTitle": { "type": "string" },
+        "rewardMessage": { "type": "string" },
+        "studyMinutes": { "type": "integer" },
+        "isRevealed": { "type": "boolean" }
+      },
+      "required": ["sessionId", "userId"]
+    },
+    "UserPreferencesDoc": {
+      "title": "UserPreferencesDoc",
+      "description": "Serialized account-following user preferences document.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "preferencesJson": { "type": "string" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["userId", "preferencesJson"]
+    },
+    "SessionQuote": {
+      "title": "SessionQuote",
+      "description": "A live-writing motivational/study quote displayed on the Session Summary screen.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique quote document identifier (e.g., quote_01)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The quote body text that animates live on the Session Summary screen."
+        },
+        "author": {
+          "type": "string",
+          "description": "Author or source attribution for the quote."
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional theme tag (e.g., Deep Work, Discipline, Perseverance)."
+        },
+        "fontStyle": {
+          "type": "string",
+          "description": "Typography style key: 'editorial', 'calligraphy', or 'classic'."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether this quote is active in the Session Summary rotation."
+        },
+        "typingSpeedMs": {
+          "type": "integer",
+          "description": "Live-writing speed in milliseconds per character."
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Creation epoch timestamp in milliseconds."
+        },
+        "updatedAt": {
+          "type": "integer",
+          "description": "Last update epoch timestamp in milliseconds."
+        }
+      },
+      "required": ["id", "text", "author", "active", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -243,6 +692,12 @@
       },
       "description": "Completed focus sessions belonging to the user."
     },
+    "/users/{userId}/session_records/{sessionId}": {
+      "schema": {
+        "$ref": "#/entities/FocusSession"
+      },
+      "description": "Completed focus session records belonging to the user."
+    },
     "/users/{userId}/study_plans/{planId}": {
       "schema": {
         "$ref": "#/entities/StudyPlan"
@@ -255,11 +710,77 @@
       },
       "description": "Educational YouTube study channels synced across the user's devices."
     },
+    "/users/{userId}/focus_schedules/{scheduleId}": {
+      "schema": {
+        "$ref": "#/entities/FocusSchedule"
+      },
+      "description": "Automated focus schedules synced across the user's devices."
+    },
+    "/users/{userId}/study_activities/{activityId}": {
+      "schema": {
+        "$ref": "#/entities/StudyActivity"
+      },
+      "description": "Verified study activities from YouTube Study Mode and Study Browser."
+    },
+    "/users/{userId}/break_records/{breakId}": {
+      "schema": {
+        "$ref": "#/entities/BreakRecord"
+      },
+      "description": "Session break records belonging to the user."
+    },
+    "/users/{userId}/blocked_attempts/{eventId}": {
+      "schema": {
+        "$ref": "#/entities/BlockedAttempt"
+      },
+      "description": "Blocked distraction attempts synced for analytics."
+    },
+    "/users/{userId}/study_subjects/{subjectId}": {
+      "schema": {
+        "$ref": "#/entities/StudySubject"
+      },
+      "description": "Study subjects synced across the user's devices."
+    },
+    "/users/{userId}/study_topics/{topicId}": {
+      "schema": {
+        "$ref": "#/entities/StudyTopic"
+      },
+      "description": "Study topics synced across the user's devices."
+    },
+    "/users/{userId}/blocked_apps/{appId}": {
+      "schema": {
+        "$ref": "#/entities/BlockedApp"
+      },
+      "description": "Blocked apps synced across the user's devices."
+    },
+    "/users/{userId}/blocked_websites/{siteId}": {
+      "schema": {
+        "$ref": "#/entities/BlockedWebsite"
+      },
+      "description": "Blocked websites synced across the user's devices."
+    },
+    "/users/{userId}/blocked_keywords/{keywordId}": {
+      "schema": {
+        "$ref": "#/entities/BlockedKeyword"
+      },
+      "description": "YouTube allow/block keywords synced across the user's devices."
+    },
+    "/users/{userId}/scratch_cards/{cardId}": {
+      "schema": {
+        "$ref": "#/entities/ScratchCard"
+      },
+      "description": "Scratch card rewards synced across the user's devices."
+    },
+    "/users/{userId}/user_preferences/{prefId}": {
+      "schema": {
+        "$ref": "#/entities/UserPreferencesDoc"
+      },
+      "description": "Account-following user preferences synced across the user's devices."
+    },
     "/session_quotes/{quoteId}": {
       "schema": {
         "$ref": "#/entities/SessionQuote"
       },
-      "description": "Global collection of live-writing Session Summary quotes preloaded by the app and editable from the external Admin Website."
+      "description": "Global collection of live-writing Session Summary quotes."
     }
   }
 }
