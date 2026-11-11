@@ -224,12 +224,12 @@ class AppLimitFloatingOverlayManagerTest {
     @Test
     fun `the strict-mode upsell banner is hidden once strict mode is on`() {
         show(isStrict = false)
-        assertTrue(containsText(currentOverlayView(), "Introducing Strict Mode"))
+        assertTrue(containsText(currentOverlayView(), context.getString(R.string.limits_lock_promo_title)))
 
         AppLimitFloatingOverlayManager.hideOverlay()
         shadowOf(Looper.getMainLooper()).idle()
         show(isStrict = true)
-        assertFalse(containsText(currentOverlayView(), "Introducing Strict Mode"))
+        assertFalse(containsText(currentOverlayView(), context.getString(R.string.limits_lock_promo_title)))
     }
 
     @Test
