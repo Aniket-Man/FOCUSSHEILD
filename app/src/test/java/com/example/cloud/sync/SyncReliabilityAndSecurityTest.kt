@@ -587,6 +587,8 @@ class SyncReliabilityAndSecurityTest {
         private var profileDirtyFlag = false
         private var prefsDirtyFlag = false
         private val watermarks = mutableMapOf<String, String>()
+        private val pendingPhotos = mutableMapOf<String, PendingProfilePhoto>()
+        private var nextPhotoToken = 0
 
         override suspend fun installId(): String = "test_install_id"
         override suspend fun dataOwnerAccountId(): String? = ownerId
@@ -617,6 +619,17 @@ class SyncReliabilityAndSecurityTest {
         override suspend fun prefsDirty(): Boolean = prefsDirtyFlag
         override suspend fun setPrefsDirty(dirty: Boolean) {
             prefsDirtyFlag = dirty
+        }
+        override suspend fun setPendingProfilePhoto(uid: String, photoUri: String?) {
+            pendingPhotos[uid] = PendingProfilePhoto(uid, photoUri, "photo_${++nextPhotoToken}")
+        }
+        override suspend fun pendingProfilePhoto(uid: String): PendingProfilePhoto? = pendingPhotos[uid]
+        override suspend fun pendingProfilePhotoUris(): Set<String> =
+            pendingPhotos.values.mapNotNull { it.photoUri }.toSet()
+        override suspend fun clearPendingProfilePhoto(pending: PendingProfilePhoto) {
+            if (pendingPhotos[pending.userId]?.token == pending.token) {
+                pendingPhotos.remove(pending.userId)
+            }
         }
         override suspend fun resetTransient() {
             profileDirtyFlag = false
