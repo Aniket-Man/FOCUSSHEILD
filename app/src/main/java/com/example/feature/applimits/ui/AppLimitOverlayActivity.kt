@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.design.FocusShieldTheme
 import com.example.core.util.MediaPauseHelper
 import com.example.feature.applimits.engine.AppLimitManager

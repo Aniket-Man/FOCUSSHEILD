@@ -71,7 +71,6 @@ import com.example.core.ui.FocusScreenHeader
 import com.example.core.ui.FocusStatusMessage
 import com.example.core.ui.FocusSwitchRow
 import com.example.core.util.ProfilePhotoStorage
-import com.example.core.util.TimeFormatter
 import com.example.feature.account.AccountViewModel
 import com.example.feature.profile.ui.EditProfileBottomSheet
 import com.example.feature.profile.ui.UserProfileAvatar
@@ -205,7 +204,7 @@ fun ProfileScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
                         ProfileMetric(stringResource(R.string.profile_daily_goal), stringResource(R.string.profile_goal_duration,
                             prefs.dailyGoalMinutes / 60, prefs.dailyGoalMinutes % 60))
-                        ProfileMetric(stringResource(R.string.profile_lifetime_focus), TimeFormatter.formatElapsedCompact(state.allTimeStudyTimeMillis))
+                        ProfileMetric(stringResource(R.string.profile_lifetime_focus), state.formattedAllTimeStudyTime)
                         ProfileMetric(stringResource(R.string.profile_badges), stringResource(R.string.profile_badge_count,
                             state.badgeUnlockTimes.size, RewardBadge.ALL_BADGES.size))
                     }
