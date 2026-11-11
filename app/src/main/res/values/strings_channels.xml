@@ -1,0 +1,34 @@
+<resources>
+    <string name="channel_sheet_title">Add channels you study from and block the rest</string>
+    <string name="channel_search_label">Search study channels</string>
+    <string name="channel_search_example" translatable="false">Khan Academy or @PhysicsWallah</string>
+    <string name="channel_list_title">Study channels</string>
+    <string name="channel_list_empty">No study channels yet. Search above or add a suggested channel below.</string>
+    <string name="channel_suggested_title">Suggested channels</string>
+    <string name="channel_results_title">Results for “%1$s”</string>
+    <string name="channel_searching">Searching YouTube channels…</string>
+    <string name="channel_no_results">No channels match “%1$s”. Try another name or an exact @handle.</string>
+    <string name="channel_search_error">Unable to search online. Check your connection and search again. Any available local results are shown below.</string>
+    <string name="channel_repository_error">Unable to open your study channels. Close this sheet and reopen it.</string>
+    <string name="channel_add_action">Add channel</string>
+    <string name="channel_add_named">Add channel: %1$s</string>
+    <string name="channel_adding">Adding…</string>
+    <string name="channel_added_status">Added</string>
+    <string name="channel_added_message">%1$s added to study channels.</string>
+    <string name="channel_add_error">Unable to add this channel. Check whether it is already in your study channels, then try again.</string>
+    <string name="channel_add_unverified">Add entered channel without verification</string>
+    <string name="channel_unverified_hint">If you know the exact @handle or YouTube channel URL, enter it above and add it without an online search.</string>
+    <string name="channel_handle_error">Enter an exact @handle or a YouTube channel URL, then try again.</string>
+    <string name="channel_remove_action">Remove channel: %1$s</string>
+    <string name="channel_remove_title">Remove %1$s?</string>
+    <string name="channel_remove_body">This removes the channel from your approved study list. You can add it again later.</string>
+    <string name="channel_remove_confirm">Remove channel</string>
+    <string name="channel_removed_message">%1$s removed from study channels.</string>
+    <string name="channel_remove_error">Unable to remove this channel. Check your study channels, then try again.</string>
+    <string name="channel_clear_error">Unable to remove all channels. Check your study channels, then try again.</string>
+    <string name="channel_cleared_message">Study channels removed.</string>
+    <plurals name="channel_clear_body">
+        <item quantity="one">This removes %1$d approved study channel. You can add it again later.</item>
+        <item quantity="other">This removes %1$d approved study channels. You can add them again later.</item>
+    </plurals>
+</resources>

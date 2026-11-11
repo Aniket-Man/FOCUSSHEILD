@@ -10,8 +10,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -37,11 +44,54 @@ object FocusCardStyle {
     val CardSpacing: Dp = 14.dp
 
     /** Screen horizontal inset, matched to [FocusSpacing.screenHorizontal]. */
-    val ScreenInset: Dp = 20.dp
+    val ScreenInset: Dp = 16.dp
 
     /** Space a screen must leave at the bottom so its last card clears the floating nav dock. */
     val BottomNavClearance: Dp = 108.dp
+
+    /** Default bottom padding for scrollable content that sits under the floating dock. */
+    val BottomDockPadding: Dp = BottomNavClearance + FocusSpacing.xl
+
+    /** The dock fills narrow screens and stops growing on tablets. */
+    val BottomDockMaxWidth: Dp = 420.dp
+
+    /** Minimum dock height; labels may increase it at larger font scales. */
+    val BottomDockHeight: Dp = 64.dp
+
+    /** Floating bottom dock capsule shape (32dp radius, matching [FocusShapes.extraLarge]). */
+    val BottomDockShape = RoundedCornerShape(32.dp)
+
+    /** Side inset of the dock from the screen edge. */
+    val BottomDockHorizontalInset: Dp = 24.dp
+
+    /** Vertical breathing room around the dock. */
+    val BottomDockVerticalInset: Dp = 10.dp
 }
+
+/** Keeps scrolling content and floating actions above the dock's actual measured bounds. */
+@Stable
+class FocusDockState internal constructor() {
+    private var heightPx by mutableIntStateOf(0)
+
+    fun onSizeChanged(size: IntSize) {
+        heightPx = size.height
+    }
+
+    val clearance: Dp
+        @Composable @ReadOnlyComposable
+        get() = if (heightPx > 0) {
+            with(LocalDensity.current) { heightPx.toDp() }
+        } else {
+            FocusCardStyle.BottomNavClearance
+        }
+
+    val contentPadding: Dp
+        @Composable @ReadOnlyComposable
+        get() = clearance + FocusSpacing.xl
+}
+
+@Composable
+fun rememberFocusDockState(): FocusDockState = remember { FocusDockState() }
 
 /**
  * FocusShield's semantic type scale. Screens should reach for these instead of hand-tuning
@@ -70,6 +120,7 @@ object FocusType {
             fontSize = 26.sp,
             lineHeight = 30.sp,
             letterSpacing = (-0.5).sp,
+            fontFeatureSettings = "tnum",
             color = FocusColors.TextPrimary
         )
 
@@ -81,6 +132,7 @@ object FocusType {
             fontSize = 20.sp,
             lineHeight = 24.sp,
             letterSpacing = (-0.25).sp,
+            fontFeatureSettings = "tnum",
             color = FocusColors.TextPrimary
         )
 

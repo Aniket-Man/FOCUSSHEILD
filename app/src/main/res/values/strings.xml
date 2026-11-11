@@ -14,4 +14,58 @@
     <string name="detailed_widget_description">Session timer launcher, study time, streak, and daily study plan preview.</string>
     <string name="floating_timer_notification_title">FocusShield Floating Timer</string>
     <string name="floating_timer_notification_content">Session active. Tap overlay window to return to app.</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_focus">Focus</string>
+    <string name="nav_planner">Planner</string>
+    <string name="nav_stats">Stats</string>
+    <string name="nav_blocks">Blocks</string>
+
+    <!-- Focus session card -->
+    <string name="focus_session_header_strict">STRICT FOCUS • %1$s</string>
+    <string name="focus_session_header_paused">PAUSED SESSION • %1$s</string>
+    <string name="focus_session_header_active">FOCUS SESSION • %1$s</string>
+    <string name="focus_session_header_ready">READY TO FOCUS</string>
+    <string name="action_start_session">Start Session</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_open_timer">Open Timer</string>
+    <string name="action_pause">Pause</string>
+
+    <!-- Shared destructive confirmations -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_done">Done</string>
+    <string name="action_close">Close</string>
+    <string name="action_save">Save</string>
+    <string name="action_saving">Saving…</string>
+    <string name="action_add">Add</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_dismiss_message">Dismiss message</string>
+    <string name="action_delete_all">Delete all</string>
+    <string name="action_clear_all">Clear all</string>
+    <string name="delete_all_channels_title">Delete all study channels?</string>
+    <string name="delete_all_channels_body">This removes all %1$d approved study channels. You can add them again later.</string>
+    <string name="clear_vault_title">Clear the notification vault?</string>
+    <string name="clear_vault_body">This permanently deletes all %1$d silenced notifications. This cannot be undone.</string>
+
+    <!-- Header -->
+    <string name="brand_wordmark" translatable="false">FOCUSSHIELD</string>
+    <string name="pro_label" translatable="false">PRO</string>
+    <string name="header_home">Home</string>
+    <string name="update_available_status">Update available</string>
+    <string name="header_logo_description">FocusShield app logo</string>
+    <string name="header_switch_to_light">Switch to Light Theme</string>
+    <string name="header_switch_to_dark">Switch to Dark Theme</string>
+    <string name="header_open_profile">Open profile</string>
+    <string name="action_commit_to_focus">Commit to focused study</string>
+    <string name="onboarding_commit_hint">Tap the shield to commit</string>
+    <string name="action_reveal_reward">Reveal reward</string>
+    <string name="scratch_alternative_hint">Scratch the card or choose Reveal reward.</string>
+    <string name="photo_zoom">Photo zoom</string>
+    <string name="photo_move_up">Move photo up</string>
+    <string name="photo_move_down">Move photo down</string>
+    <string name="photo_move_left">Move photo left</string>
+    <string name="photo_move_right">Move photo right</string>
+    <string name="photo_reset">Reset photo</string>
+    <string name="photo_adjust_hint">Pinch to zoom or drag to reposition. You can also use the controls below.</string>
 </resources>

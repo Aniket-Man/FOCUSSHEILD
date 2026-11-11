@@ -1,94 +1,76 @@
 package com.example.feature.settings
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.res.painterResource
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Context
+import android.os.Build
+import android.util.Log
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.BrightnessAuto
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.CloudSync
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.HelpOutline
-import androidx.compose.material.icons.rounded.HourglassBottom
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.Login
-import androidx.compose.material.icons.rounded.Logout
-import androidx.compose.material.icons.rounded.NightlightRound
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.SmartDisplay
-import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
+import com.example.R
+import com.example.cloud.sync.SyncCycleOutcome
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
+import com.example.core.accessibility.AccessibilityTroubleshootingDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.permission.FocusPermissionManager
 import com.example.core.ui.BottomTab
-import com.example.core.ui.FocusBottomNavigation
+import com.example.core.ui.FocusActionRow
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.FocusSwitchRow
+import com.example.feature.timer.FloatingOverlayPermissionDialog
+import com.example.feature.widgets.FocusShieldCompactWidgetReceiver
+import com.example.feature.widgets.FocusShieldDetailedWidgetReceiver
+import java.util.Date
 
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material3.IconButton
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -104,1255 +86,221 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val strictMessage by viewModel.strictLockMessage.collectAsStateWithLifecycle()
+    val operationError by viewModel.operationError.collectAsStateWithLifecycle()
+    val saving by viewModel.isSaving.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
-    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
-    var showFloatingOverlayPermissionDialog by remember { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+    var showOverlayPermission by rememberSaveable { mutableStateOf(false) }
+    var showTroubleshooting by rememberSaveable { mutableStateOf(false) }
+    var confirmSignOut by rememberSaveable { mutableStateOf(false) }
+    var widgetFeedback by rememberSaveable { mutableStateOf<String?>(null) }
+    val prefs = state.preferences
 
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.checkAccessibilityStatus()
-            }
-        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) viewModel.checkAccessibilityStatus() }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun changeProtected(enabled: Boolean, title: Int, description: Int, featureKey: String?, update: (Boolean) -> Unit) {
+        if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+            prompt = AccessibilityFeaturePromptInfo(context.getString(title), context.getString(description),
+                featureKey = featureKey, onGranted = { update(true) })
+        } else update(enabled)
     }
 
     Scaffold(
-        topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("settings_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = "Shield Settings",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 20.sp
-                        )
-                    )
-                    Text(
-                        text = "App blocking, accessibility, and study preferences",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
-            }
-        },
+        topBar = { FocusScreenHeader(stringResource(R.string.settings_title), onNavigateBack,
+            Modifier.statusBarsPadding().testTag("settings_back_button")) },
         containerColor = FocusColors.Background,
         modifier = modifier.navigationBarsPadding().testTag("settings_screen")
-    ) { innerPadding ->
+    ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = FocusSpacing.screenHorizontal),
-            verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.xl)
         ) {
-            // Section 1: Distraction Protection
             item {
-                SettingsSectionHeader(title = "DISTRACTION PROTECTION")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsNavigationRow(
-                        title = "Digital Wellbeing & Phone Storage",
-                        subtitle = "Live screen time ring, per-app activity & device storage",
-                        icon = Icons.Rounded.Schedule,
-                        iconTint = Color(0xFF3B82F6),
-                        onClick = onNavigateToDigitalWellbeing,
-                        testTag = "settings_digital_wellbeing_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "App Limits & Daily Budgets",
-                        subtitle = "Daily usage allowances & timed sessions outside study",
-                        icon = Icons.Rounded.Timer,
-                        iconTint = FocusColors.Primary,
-                        onClick = onNavigateToAppLimits,
-                        testTag = "settings_app_limits_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "Blocked Applications",
-                        subtitle = "${uiState.blockedAppsCount} applications selected to block",
-                        icon = Icons.Rounded.Block,
-                        iconTint = FocusColors.CoralWarning,
-                        onClick = onNavigateToBlockedApps,
-                        testTag = "settings_blocked_apps_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "Strict Mode Rules & Anti-Cheating",
-                        subtitle = "Configure emergency pauses, break rules, and PIN protection",
-                        icon = Icons.Rounded.Security,
-                        iconTint = FocusColors.Primary,
-                        onClick = onNavigateToStrictMode,
-                        testTag = "settings_strict_mode_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "Browser & Website Shield",
-                        subtitle = "Two-engine adult content & custom URL filter across browsers",
-                        icon = Icons.Rounded.Language,
-                        iconTint = FocusColors.Primary,
-                        onClick = onNavigateToWebsiteBlocker,
-                        testTag = "settings_website_blocker_row"
-                    )
-
-                    SettingsNavigationRow(
-                        title = "Approved Study Channels",
-                        subtitle = "YouTube Study Mode allowlist & Shorts blocker",
-                        icon = Icons.Rounded.SmartDisplay,
-                        iconTint = Color(0xFFEF4444),
-                        onClick = onNavigateToStudyChannels,
-                        testTag = "settings_study_channels_row"
-                    )
-
-                    var showAccessibilityTroubleshooting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(
-                                1.dp,
-                                if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess.copy(alpha = 0.4f) else FocusColors.CardBorderSubtle,
-                                FocusShapes.card
-                            )
-                            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
-                            .testTag("settings_accessibility_row")
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess.copy(alpha = 0.12f)
-                                            else FocusColors.CoralWarning.copy(alpha = 0.12f)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
-                                        contentDescription = null,
-                                        tint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(14.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Accessibility Blocker Service",
-                                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = FocusColors.TextPrimary,
-                                            fontSize = 15.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = if (uiState.isAccessibilityEnabled) "Service active & running" else "Required for Shorts & App blocking — Tap toggle to enable",
-                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                            color = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.TextSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    )
-                                }
-
-                                Switch(
-                                    checked = uiState.isAccessibilityEnabled,
-                                    onCheckedChange = { checked ->
-                                        if (checked && !uiState.isAccessibilityEnabled) {
-                                            AccessibilityHelper.openAccessibilitySettings(context)
-                                        } else if (!checked && uiState.isAccessibilityEnabled) {
-                                            AccessibilityHelper.openAccessibilitySettings(context)
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = FocusColors.TextOnDark,
-                                        checkedTrackColor = FocusColors.ToggleGreen,
-                                        uncheckedThumbColor = FocusColors.TextMuted,
-                                        uncheckedTrackColor = FocusColors.SurfaceSubtle
-                                    ),
-                                    modifier = Modifier.testTag("toggle_accessibility_service")
-                                )
-                            }
-
-                            if (!uiState.isAccessibilityEnabled) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
-                                ) {
-                                    TextButton(
-                                        onClick = { showAccessibilityTroubleshooting = true },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.testTag("btn_accessibility_troubleshoot")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.HelpOutline,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = FocusColors.Primary
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Troubleshooting & MIUI/HyperOS Guide",
-                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.Primary,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        )
+                FocusStatusMessage(strictMessage ?: operationError, isError = true,
+                    onDismiss = { viewModel.clearStrictLockMessage(); viewModel.clearOperationError() })
+                FocusStatusMessage(widgetFeedback, onDismiss = { widgetFeedback = null })
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_protection_section)) {
+                    FocusActionRow(stringResource(R.string.settings_wellbeing), onNavigateToDigitalWellbeing,
+                        description = stringResource(R.string.settings_wellbeing_body), modifier = Modifier.testTag("settings_digital_wellbeing_row"))
+                    FocusActionRow(stringResource(R.string.settings_app_limits), onNavigateToAppLimits,
+                        description = stringResource(R.string.settings_app_limits_body), modifier = Modifier.testTag("settings_app_limits_row"))
+                    FocusActionRow(stringResource(R.string.settings_blocked_apps), onNavigateToBlockedApps,
+                        description = pluralStringResource(R.plurals.settings_blocked_apps_count, state.blockedAppsCount, state.blockedAppsCount),
+                        modifier = Modifier.testTag("settings_blocked_apps_row"))
+                    FocusActionRow(stringResource(R.string.settings_strict_mode), onNavigateToStrictMode,
+                        description = stringResource(R.string.settings_strict_mode_body), modifier = Modifier.testTag("settings_strict_mode_row"))
+                    FocusActionRow(stringResource(R.string.settings_websites), onNavigateToWebsiteBlocker,
+                        description = stringResource(R.string.settings_websites_body), modifier = Modifier.testTag("settings_website_blocker_row"))
+                    FocusActionRow(stringResource(R.string.settings_channels), onNavigateToStudyChannels,
+                        description = stringResource(R.string.settings_channels_body), modifier = Modifier.testTag("settings_study_channels_row"))
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_permissions_section)) {
+                    // Android owns this setting. A button is honest; an app-owned switch was not.
+                    FocusActionRow(stringResource(R.string.settings_accessibility), { AccessibilityHelper.openAccessibilitySettings(context) },
+                        value = stringResource(if (state.isAccessibilityEnabled) R.string.settings_service_enabled else R.string.settings_service_disabled),
+                        description = stringResource(R.string.settings_accessibility_body), modifier = Modifier.testTag("toggle_accessibility_service"))
+                    TextButton({ showTroubleshooting = true }, modifier = Modifier.padding(horizontal = FocusSpacing.md).testTag("btn_accessibility_troubleshoot")) {
+                        Text(stringResource(R.string.settings_accessibility_help))
+                    }
+                    FocusActionRow(stringResource(R.string.settings_background), { FocusPermissionManager.requestIgnoreBatteryOptimization(context) },
+                        value = stringResource(if (state.isBatteryOptimizationIgnored) R.string.settings_background_allowed else R.string.settings_background_restricted),
+                        description = stringResource(R.string.settings_background_body), modifier = Modifier.testTag("settings_battery_optimization_row"))
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_short_form_section)) {
+                    FocusSwitchRow(stringResource(R.string.settings_short_form_always), prefs.isShortsReelsAlwaysBlocked,
+                        { changeProtected(it, R.string.settings_short_form_always, R.string.settings_short_form_permission, AccessibilityHelper.FEATURE_SHORTS_ALWAYS, viewModel::updateShortsReelsAlwaysBlocked) },
+                        description = stringResource(R.string.settings_short_form_always_body), enabled = !saving, modifier = Modifier.testTag("toggle_always_block_shorts"))
+                    FocusSwitchRow(stringResource(R.string.settings_youtube_shorts), prefs.isYouTubeShortsBlockingEnabled,
+                        { changeProtected(it, R.string.settings_youtube_shorts, R.string.settings_youtube_shorts_permission, AccessibilityHelper.FEATURE_YT_SHORTS, viewModel::updateYouTubeShortsBlocking) },
+                        description = stringResource(R.string.settings_youtube_shorts_body), enabled = !saving, modifier = Modifier.testTag("toggle_block_yt_shorts"))
+                    FocusSwitchRow(stringResource(R.string.settings_instagram_reels), prefs.isInstagramReelsBlockingEnabled,
+                        { changeProtected(it, R.string.settings_instagram_reels, R.string.settings_instagram_permission, AccessibilityHelper.FEATURE_IG_REELS, viewModel::updateInstagramReelsBlocking) },
+                        description = stringResource(R.string.settings_instagram_body), enabled = !saving, modifier = Modifier.testTag("toggle_block_ig_reels"))
+                    FocusSwitchRow(stringResource(R.string.settings_facebook_reels), prefs.isFacebookReelsBlockingEnabled,
+                        { changeProtected(it, R.string.settings_facebook_reels, R.string.settings_facebook_permission, AccessibilityHelper.FEATURE_FB_REELS, viewModel::updateFacebookReelsBlocking) },
+                        description = stringResource(R.string.settings_facebook_body), enabled = !saving, modifier = Modifier.testTag("toggle_block_fb_reels"))
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_study_section)) {
+                    Column(Modifier.padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                        Text(stringResource(R.string.settings_timer_default), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                        Text(pluralStringResource(R.plurals.settings_timer_minutes, prefs.defaultTimerMinutes, prefs.defaultTimerMinutes),
+                            color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+                        Text(stringResource(R.string.settings_pomodoro_defaults), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.settings_pomodoro_summary, prefs.pomodoroFocusMinutes, prefs.pomodoroShortBreakMinutes, prefs.pomodoroCycles),
+                            color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+                    }
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_widgets_section)) {
+                    FocusSwitchRow(stringResource(R.string.settings_floating_timer), prefs.isFloatingTimerOverlayEnabled && state.isOverlayPermissionGranted,
+                        { if (it && !state.isOverlayPermissionGranted) showOverlayPermission = true else viewModel.updateFloatingTimerOverlay(it) },
+                        description = stringResource(if (state.isOverlayPermissionGranted) R.string.settings_floating_timer_body else R.string.settings_floating_timer_permission),
+                        enabled = !saving, modifier = Modifier.testTag("toggle_floating_timer_overlay"))
+                    if (!state.isOverlayPermissionGranted) TextButton({ showOverlayPermission = true }, Modifier.padding(horizontal = FocusSpacing.md)) {
+                        Text(stringResource(R.string.settings_grant_overlay))
+                    }
+                    Column(Modifier.padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                        Text(stringResource(R.string.settings_pin_widgets), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.settings_widgets_body), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton({ widgetFeedback = requestPinFocusWidget(context, FocusShieldCompactWidgetReceiver::class.java) },
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("pin_compact_widget_button")) { Text(stringResource(R.string.settings_pin_compact)) }
+                        OutlinedButton({ widgetFeedback = requestPinFocusWidget(context, FocusShieldDetailedWidgetReceiver::class.java) },
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("pin_detailed_widget_button")) { Text(stringResource(R.string.settings_pin_detailed)) }
+                    }
+                }
+            }
+            item {
+                SettingsGroup(stringResource(R.string.settings_account_section)) {
+                    FocusActionRow(stringResource(R.string.account_title), onNavigateToAccount,
+                        value = state.signedInEmail ?: stringResource(R.string.settings_signed_out),
+                        description = stringResource(R.string.settings_account_body), modifier = Modifier.testTag("settings_sign_in_row"))
+                    if (state.signedInEmail != null) {
+                        FocusSwitchRow(stringResource(R.string.settings_auto_save), prefs.isAutoSaveToCloudEnabled, viewModel::updateAutoSaveToCloud,
+                            description = stringResource(R.string.settings_auto_save_body), enabled = !saving, modifier = Modifier.testTag("toggle_auto_save_cloud"))
+                        Column(Modifier.padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                            if (prefs.isAutoSaveToCloudEnabled) {
+                                Text(stringResource(R.string.settings_backup_every), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                                FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm), verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                                    listOf(15, 30, 60, 300).forEach { seconds ->
+                                        FilterChip(selected = prefs.autoSaveIntervalSeconds == seconds, onClick = { viewModel.updateAutoSaveIntervalSeconds(seconds) },
+                                            enabled = !saving && !state.isSyncRunning, modifier = Modifier.heightIn(min = 48.dp).testTag("settings_autosave_interval_$seconds"),
+                                            label = { Text(if (seconds < 60) pluralStringResource(R.plurals.settings_interval_seconds, seconds, seconds)
+                                                else pluralStringResource(R.plurals.settings_interval_minutes, seconds / 60, seconds / 60)) })
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    if (showAccessibilityTroubleshooting) {
-                        com.example.core.accessibility.AccessibilityTroubleshootingDialog(
-                            onDismissRequest = { showAccessibilityTroubleshooting = false }
-                        )
-                    }
-
-                    SettingsNavigationRow(
-                        title = "Background Running & Persistence",
-                        subtitle = if (uiState.isBatteryOptimizationIgnored) "Unrestricted background running enabled" else "Battery restriction active — Tap to allow uninterrupted background",
-                        icon = if (uiState.isBatteryOptimizationIgnored) Icons.Rounded.CheckCircle else Icons.Rounded.Security,
-                        iconTint = if (uiState.isBatteryOptimizationIgnored) FocusColors.EmeraldSuccess else FocusColors.Primary,
-                        onClick = {
-                            com.example.core.permission.FocusPermissionManager.requestIgnoreBatteryOptimization(context)
-                        },
-                        testTag = "settings_battery_optimization_row"
-                    )
-                }
-            }
-
-            // Section 1.5: Short-Form Content Blocker (Shorts & Reels - Integrated from Shorts-Blocker)
-            item {
-                SettingsSectionHeader(title = "SHORT-FORM CONTENT BLOCKER (SHORTS & REELS)")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(FocusShapes.card)
-                        .background(FocusColors.Surface)
-                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                        .padding(FocusSpacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Always Blocked vs Session Only Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "24/7 Always-On Blocker",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = if (uiState.preferences.isShortsReelsAlwaysBlocked)
-                                    "Block Shorts & Reels at all times (even outside study sessions)"
-                                else
-                                    "Only block Shorts & Reels during active Focus Sessions",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
-                        }
-                        Switch(
-                            checked = uiState.preferences.isShortsReelsAlwaysBlocked,
-                            onCheckedChange = { checked ->
-                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                        title = "24/7 Shorts & Reels Blocker",
-                                        description = "YouTube Shorts, Instagram Reels, and Facebook Reels at all times",
-                                        featureKey = AccessibilityHelper.FEATURE_SHORTS_ALWAYS,
-                                        onGranted = { viewModel.updateShortsReelsAlwaysBlocked(true) }
-                                    )
-                                } else {
-                                    viewModel.updateShortsReelsAlwaysBlocked(checked)
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = FocusColors.TextMuted,
-                                uncheckedTrackColor = FocusColors.SurfaceSubtle
-                            ),
-                            modifier = Modifier.testTag("toggle_always_block_shorts")
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(FocusColors.CardBorderSubtle)
-                    )
-
-                    // YouTube Shorts Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "YouTube Shorts",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "Instant back navigation when Shorts feed or video player opens",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
-                        }
-                        Switch(
-                            checked = uiState.preferences.isYouTubeShortsBlockingEnabled,
-                            onCheckedChange = { checked ->
-                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                        title = "YouTube Shorts Blocker",
-                                        description = "YouTube Shorts feeds and video players",
-                                        featureKey = AccessibilityHelper.FEATURE_YT_SHORTS,
-                                        onGranted = { viewModel.updateYouTubeShortsBlocking(true) }
-                                    )
-                                } else {
-                                    viewModel.updateYouTubeShortsBlocking(checked)
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = FocusColors.TextMuted,
-                                uncheckedTrackColor = FocusColors.SurfaceSubtle
-                            ),
-                            modifier = Modifier.testTag("toggle_block_yt_shorts")
-                        )
-                    }
-
-                    // Instagram Reels Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Instagram Reels",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "Blocks Reels tab and full-screen clips viewer automatically",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
-                        }
-                        Switch(
-                            checked = uiState.preferences.isInstagramReelsBlockingEnabled,
-                            onCheckedChange = { checked ->
-                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                        title = "Instagram Reels Blocker",
-                                        description = "Instagram Reels tab and clips viewer",
-                                        featureKey = AccessibilityHelper.FEATURE_IG_REELS,
-                                        onGranted = { viewModel.updateInstagramReelsBlocking(true) }
-                                    )
-                                } else {
-                                    viewModel.updateInstagramReelsBlocking(checked)
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = FocusColors.TextMuted,
-                                uncheckedTrackColor = FocusColors.SurfaceSubtle
-                            ),
-                            modifier = Modifier.testTag("toggle_block_ig_reels")
-                        )
-                    }
-
-                    // Facebook Reels Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Facebook Reels",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "Blocks Facebook Reels tray and vertical video players",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
-                        }
-                        Switch(
-                            checked = uiState.preferences.isFacebookReelsBlockingEnabled,
-                            onCheckedChange = { checked ->
-                                if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                    pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                        title = "Facebook Reels Blocker",
-                                        description = "Facebook Reels tray and video players",
-                                        featureKey = AccessibilityHelper.FEATURE_FB_REELS,
-                                        onGranted = { viewModel.updateFacebookReelsBlocking(true) }
-                                    )
-                                } else {
-                                    viewModel.updateFacebookReelsBlocking(checked)
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = FocusColors.TextMuted,
-                                uncheckedTrackColor = FocusColors.SurfaceSubtle
-                            ),
-                            modifier = Modifier.testTag("toggle_block_fb_reels")
-                        )
-                    }
-                }
-            }
-
-            // Section 2: Study Defaults
-            item {
-                SettingsSectionHeader(title = "DEFAULT STUDY PREFERENCES")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(FocusShapes.card)
-                        .background(FocusColors.Surface)
-                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                        .padding(FocusSpacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.HourglassBottom,
-                            contentDescription = null,
-                            tint = FocusColors.Primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Default Timer Duration",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "${uiState.preferences.defaultTimerMinutes} minutes per standard study block",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.Schedule,
-                            contentDescription = null,
-                            tint = FocusColors.AmberOrange,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Pomodoro Default Intervals",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "${uiState.preferences.pomodoroFocusMinutes}m Focus • ${uiState.preferences.pomodoroShortBreakMinutes}m Break • ${uiState.preferences.pomodoroCycles} Cycles",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary
-                                )
-                            )
+                            Text(stringResource(R.string.settings_auto_save_hint), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            SyncStatusLine(state, !saving, viewModel::syncNow)
+                            OutlinedButton({ confirmSignOut = true }, enabled = !saving && !state.isSyncRunning,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("settings_sign_out_button")) { Text(stringResource(R.string.account_sign_out)) }
                         }
                     }
                 }
             }
-
-            // Section 2B: Home Screen Widgets & Floating Countdown Window
             item {
-                SettingsSectionHeader(title = "HOME SCREEN WIDGETS & FLOATING TIMER")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // Floating Countdown Window Toggle Card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(FocusSpacing.base)
-                            .testTag("settings_floating_timer_card")
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(FocusColors.Primary.copy(alpha = 0.12f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Timer,
-                                        contentDescription = null,
-                                        tint = FocusColors.Primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(14.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Floating Countdown Window",
-                                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = FocusColors.TextPrimary,
-                                            fontSize = 15.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = if (!uiState.isOverlayPermissionGranted) {
-                                            "Overlay permission needed to float over other apps"
-                                        } else if (uiState.preferences.isFloatingTimerOverlayEnabled) {
-                                            "Shows draggable countdown window over apps during sessions"
-                                        } else {
-                                            "Disabled — timer stays inside app and notification"
-                                        },
-                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                            color = FocusColors.TextSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    )
-                                }
-
-                                Switch(
-                                    checked = uiState.preferences.isFloatingTimerOverlayEnabled && uiState.isOverlayPermissionGranted,
-                                    onCheckedChange = { enabled ->
-                                        if (enabled && !uiState.isOverlayPermissionGranted) {
-                                            showFloatingOverlayPermissionDialog = true
-                                        } else {
-                                            viewModel.updateFloatingTimerOverlay(enabled)
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = FocusColors.TextOnDark,
-                                        checkedTrackColor = FocusColors.ToggleGreen,
-                                        uncheckedThumbColor = FocusColors.TextMuted,
-                                        uncheckedTrackColor = FocusColors.SurfaceSubtle
-                                    ),
-                                    modifier = Modifier.testTag("toggle_floating_timer_overlay")
-                                )
-                            }
-
-                            if (!uiState.isOverlayPermissionGranted) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                OutlinedButton(
-                                    onClick = { showFloatingOverlayPermissionDialog = true },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("settings_grant_floating_overlay_button")
-                                ) {
-                                    Text(
-                                        text = "Grant Display Over Other Apps Permission",
-                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = FocusColors.Primary
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Home Screen Widgets (Compact 2x2 & Detailed 4x2) Card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(FocusSpacing.base)
-                            .testTag("settings_home_widgets_card")
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = "Add Home Screen Widgets",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = FocusColors.TextPrimary,
-                                    fontSize = 15.sp
-                                )
-                            )
-                            Text(
-                                text = "Pin the Compact (2x2) or Detailed (4x2) widget to launch focus sessions, track your streak, and preview today's study plan from your home screen.",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary,
-                                    fontSize = 12.sp
-                                )
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        requestPinFocusWidget(
-                                            context = context,
-                                            receiverClass = com.example.feature.widgets.FocusShieldCompactWidgetReceiver::class.java,
-                                            widgetLabel = "Compact (2x2)"
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("pin_compact_widget_button")
-                                ) {
-                                    Text(
-                                        text = "Pin 2x2 Compact",
-                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = FocusColors.Primary
-                                        )
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        requestPinFocusWidget(
-                                            context = context,
-                                            receiverClass = com.example.feature.widgets.FocusShieldDetailedWidgetReceiver::class.java,
-                                            widgetLabel = "Detailed (4x2)"
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("pin_detailed_widget_button")
-                                ) {
-                                    Text(
-                                        text = "Pin 4x2 Detailed",
-                                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = FocusColors.Primary
-                                        )
-                                    )
-                                }
-                            }
-                        }
+                SettingsGroup(stringResource(R.string.settings_about_section)) {
+                    Column(Modifier.padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                        Text(stringResource(R.string.settings_app_version, BuildConfig.VERSION_NAME), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.settings_about_body), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-            }
-
-            // Section 3: Account & Cloud Sync
-            item {
-                SettingsSectionHeader(title = "ACCOUNT & CLOUD SYNC")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // --- Who is signed in -------------------------------------------------
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(FocusSpacing.base)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (uiState.signedInEmail != null) FocusColors.Primary
-                                        else FocusColors.SurfaceVariant
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (uiState.signedInEmail != null) {
-                                    Text(
-                                        text = (uiState.signedInEmail?.firstOrNull() ?: '?').uppercase(),
-                                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Rounded.CloudOff,
-                                        contentDescription = null,
-                                        tint = FocusColors.TextMuted,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(14.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = uiState.signedInDisplayName ?: "Signed out",
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary,
-                                        fontSize = 15.sp
-                                    )
-                                )
-                                Text(
-                                    text = uiState.signedInEmail
-                                        ?: "Your data stays on this device until you sign in",
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.TextSecondary,
-                                        fontSize = 12.sp
-                                    )
-                                )
-                            }
-
-                            if (uiState.signedInEmail != null) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = "Signed in",
-                                    tint = FocusColors.EmeraldSuccess,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (uiState.signedInEmail == null) {
-                        SettingsNavigationRow(
-                            title = "Sign in with Google",
-                            subtitle = "Back up study data to Firebase and restore it on any device",
-                            icon = Icons.Rounded.Login,
-                            iconTint = FocusColors.Primary,
-                            onClick = onNavigateToAccount,
-                            testTag = "settings_sign_in_row",
-                            customPainter = painterResource(id = com.example.R.drawable.ic_google_logo)
-                        )
-                    } else {
-                        // --- Auto-save cadence --------------------------------------------
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(FocusShapes.card)
-                                .background(FocusColors.Surface)
-                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                                .padding(FocusSpacing.base)
-                        ) {
-                            Column {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(FocusColors.Primary.copy(alpha = 0.12f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.CloudSync,
-                                            contentDescription = null,
-                                            tint = FocusColors.Primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(14.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Auto-save to Cloud",
-                                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = FocusColors.TextPrimary,
-                                                fontSize = 15.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = if (uiState.preferences.isAutoSaveToCloudEnabled) {
-                                                "Backing up every ${formatInterval(uiState.preferences.autoSaveIntervalSeconds)}"
-                                            } else {
-                                                "Paused — data is kept on this device only"
-                                            },
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                                color = FocusColors.TextSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                    }
-
-                                    Switch(
-                                        checked = uiState.preferences.isAutoSaveToCloudEnabled,
-                                        onCheckedChange = viewModel::updateAutoSaveToCloud,
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = FocusColors.TextOnDark,
-                                            checkedTrackColor = FocusColors.ToggleGreen,
-                                            uncheckedThumbColor = FocusColors.TextMuted,
-                                            uncheckedTrackColor = FocusColors.SurfaceSubtle
-                                        ),
-                                        modifier = Modifier.testTag("toggle_auto_save_cloud")
-                                    )
-                                }
-
-                                AnimatedVisibility(
-                                    visible = uiState.preferences.isAutoSaveToCloudEnabled,
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
-                                ) {
-                                    Column {
-                                        Spacer(modifier = Modifier.height(14.dp))
-
-                                        AutoSaveIntervalSelector(
-                                            selectedSeconds = uiState.preferences.autoSaveIntervalSeconds,
-                                            enabled = !uiState.isSyncRunning,
-                                            onSelect = viewModel::updateAutoSaveIntervalSeconds
-                                        )
-
-                                        Spacer(modifier = Modifier.height(12.dp))
-
-                                        SyncStatusLine(
-                                            isRunning = uiState.isSyncRunning,
-                                            pendingCount = uiState.pendingSyncCount,
-                                            lastSyncAtMillis = uiState.lastSyncAtMillis,
-                                            onSyncNow = viewModel::syncNow
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // --- Sign out ------------------------------------------------------
-                        OutlinedButton(
-                            onClick = viewModel::signOut,
-                            shape = FocusShapes.card,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                FocusColors.BlockedRed.copy(alpha = 0.5f)
-                            ),
-                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                                contentColor = FocusColors.BlockedRed
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .testTag("settings_sign_out_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Logout,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Sign out",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            )
-                        }
-
-                        Text(
-                            text = "Signing out keeps your data on this device and in the cloud. Sign back in any time to pick up where you left off.",
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.TextMuted,
-                                fontSize = 11.5.sp
-                            ),
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            // Section 4: App Information
-            item {
-                SettingsSectionHeader(title = "ABOUT FOCUSSHIELD")
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(FocusShapes.card)
-                        .background(FocusColors.Surface)
-                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                        .padding(FocusSpacing.lg)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(FocusColors.PrimaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Security,
-                                contentDescription = null,
-                                tint = FocusColors.Primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "FocusShield v1.0",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = "Local-First Study & Anti-Distraction Engine for JEE & NEET",
-                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextSecondary,
-                                    fontSize = 12.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(FocusSpacing.base))
             }
         }
     }
-
-    // Dynamic Accessibility Permission Prompt Dialog
-    pendingAccessibilityPrompt?.let { promptInfo ->
-        AccessibilityPermissionRequiredDialog(
-            featureTitle = promptInfo.title,
-            featureDescription = promptInfo.description,
-            featureKey = promptInfo.featureKey,
-            onDismissRequest = { pendingAccessibilityPrompt = null },
-            onPermissionGranted = {
-                promptInfo.onGranted()
-                pendingAccessibilityPrompt = null
-            }
-        )
-    }
-
-    if (showFloatingOverlayPermissionDialog) {
-        com.example.feature.timer.FloatingOverlayPermissionDialog(
-            onDismiss = { showFloatingOverlayPermissionDialog = false },
-            onPermissionGranted = {
-                showFloatingOverlayPermissionDialog = false
-                viewModel.checkAccessibilityStatus()
-                viewModel.updateFloatingTimerOverlay(true)
-            }
-        )
-    }
-}
-
-private fun requestPinFocusWidget(
-    context: android.content.Context,
-    receiverClass: Class<*>,
-    widgetLabel: String
-) {
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-        val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(context)
-        val provider = android.content.ComponentName(context, receiverClass)
-        if (appWidgetManager.isRequestPinAppWidgetSupported) {
-            val pinned = appWidgetManager.requestPinAppWidget(provider, null, null)
-            if (pinned) return
-        }
-    }
-    android.widget.Toast.makeText(
-        context,
-        "Long-press your home screen → Widgets → FocusShield ($widgetLabel)",
-        android.widget.Toast.LENGTH_LONG
-    ).show()
-}
-
-/** Cadences offered in Settings. The loop clamps to the same bounds, so these stay in range. */
-private val AUTO_SAVE_INTERVALS_SECONDS = listOf(15, 30, 60, 300)
-
-/** "30 seconds" / "1 minute" / "5 minutes" — never a bare number, so the unit is always explicit. */
-private fun formatInterval(seconds: Int): String = when {
-    seconds < 60 -> "$seconds seconds"
-    seconds % 60 == 0 -> "${seconds / 60} minute${if (seconds / 60 == 1) "" else "s"}"
-    else -> "${seconds / 60}m ${seconds % 60}s"
-}
-
-@Composable
-private fun AutoSaveIntervalSelector(
-    selectedSeconds: Int,
-    enabled: Boolean,
-    onSelect: (Int) -> Unit
-) {
-    Column {
-        Text(
-            text = "BACK UP EVERY",
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
-                color = FocusColors.TextMuted,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.9.sp,
-                fontSize = 10.sp
-            )
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AUTO_SAVE_INTERVALS_SECONDS.forEach { seconds ->
-                val selected = seconds == selectedSeconds
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (selected) FocusColors.Primary.copy(alpha = 0.16f)
-                            else FocusColors.SurfaceVariant
-                        )
-                        .border(
-                            1.dp,
-                            if (selected) FocusColors.Primary.copy(alpha = 0.6f)
-                            else FocusColors.CardBorderSubtle,
-                            RoundedCornerShape(10.dp)
-                        )
-                        .clickable(enabled = enabled) { onSelect(seconds) }
-                        .padding(vertical = 9.dp)
-                        .testTag("settings_autosave_interval_$seconds"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (seconds < 60) "${seconds}s" else "${seconds / 60}m",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
-                            color = if (selected) FocusColors.Primary else FocusColors.TextSecondary,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp
-                        )
-                    )
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "Only pushes when something actually changed, so an idle shield costs nothing. Background backups are capped by Android at every 15 minutes.",
-            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                color = FocusColors.TextMuted,
-                fontSize = 11.sp
-            )
-        )
-    }
-}
-
-/**
- * One line describing the health of the cloud copy: in-flight, work waiting, or how long ago the
- * last successful push landed. Says "never" rather than claiming a sync that never happened.
- */
-@Composable
-private fun SyncStatusLine(
-    isRunning: Boolean,
-    pendingCount: Int,
-    lastSyncAtMillis: Long,
-    onSyncNow: () -> Unit
-) {
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    // A one-shot timestamp would leave "just now" frozen until the next sync; a cheap ticker keeps
-    // the age honest without any sync-side ticking.
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            kotlinx.coroutines.delay(10_000)
-        }
-    }
-    val elapsedSeconds = if (lastSyncAtMillis <= 0L) Long.MAX_VALUE
-    else ((now - lastSyncAtMillis).coerceAtLeast(0L)) / 1000L
-
-    val (statusText, statusColor) = when {
-        isRunning -> "Backing up to Firebase…" to FocusColors.Primary
-        pendingCount > 0 -> "$pendingCount change${if (pendingCount == 1) "" else "s"} waiting to upload" to FocusColors.AmberOrange
-        lastSyncAtMillis <= 0L -> "Not backed up yet" to FocusColors.TextMuted
-        elapsedSeconds < 60 -> "Backed up just now" to FocusColors.EmeraldSuccess
-        elapsedSeconds < 3600 -> "Backed up ${elapsedSeconds / 60}m ago" to FocusColors.EmeraldSuccess
-        elapsedSeconds < 86400 -> "Backed up ${elapsedSeconds / 3600}h ago" to FocusColors.TextSecondary
-        else -> "Backed up ${elapsedSeconds / 86400}d ago" to FocusColors.TextSecondary
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(statusColor)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = statusText,
-            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                color = statusColor,
-                fontSize = 12.sp
-            ),
-            modifier = Modifier.weight(1f)
-        )
-        TextButton(
-            onClick = onSyncNow,
-            enabled = !isRunning && pendingCount > 0,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            modifier = Modifier.testTag("settings_sync_now_button")
-        ) {
-            Text(
-                text = "Sync now",
-                style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
-                    color = if (isRunning || pendingCount == 0) FocusColors.TextMuted else FocusColors.Primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
-            color = FocusColors.TextMuted,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-            fontSize = 11.sp
-        )
+    prompt?.let { info -> AccessibilityPermissionRequiredDialog(info.title, info.description,
+        featureKey = info.featureKey, onDismissRequest = { prompt = null }, onPermissionGranted = { info.onGranted(); prompt = null }) }
+    if (showOverlayPermission) FloatingOverlayPermissionDialog(onDismiss = { showOverlayPermission = false }, onPermissionGranted = {
+        showOverlayPermission = false; viewModel.checkAccessibilityStatus(); viewModel.updateFloatingTimerOverlay(true)
+    })
+    if (showTroubleshooting) AccessibilityTroubleshootingDialog(onDismissRequest = { showTroubleshooting = false })
+    if (confirmSignOut) AlertDialog(
+        onDismissRequest = { confirmSignOut = false },
+        title = { Text(stringResource(R.string.account_sign_out_title)) },
+        text = { Text(stringResource(R.string.account_sign_out_hint)) },
+        confirmButton = { TextButton({ confirmSignOut = false; viewModel.signOut() }, enabled = !saving && !state.isSyncRunning) { Text(stringResource(R.string.account_sign_out)) } },
+        dismissButton = { TextButton({ confirmSignOut = false }) { Text(stringResource(R.string.action_cancel)) } }
     )
 }
 
 @Composable
-private fun SettingsNavigationRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    onClick: () -> Unit,
-    testTag: String = "",
-    customPainter: Painter? = null
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .clickable(onClick = onClick)
-            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
-            .testTag(testTag)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (customPainter != null) Color.White else iconTint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (customPainter != null) {
-                    Image(
-                        painter = customPainter,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                } else {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = iconTint,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 15.sp
-                    )
-                )
-                Text(
-                    text = subtitle,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 12.sp
-                    )
-                )
-            }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                contentDescription = null,
-                tint = FocusColors.TextMuted,
-                modifier = Modifier.size(20.dp)
-            )
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+        Text(title, color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        Surface(color = FocusColors.Surface, shape = FocusShapes.card, border = BorderStroke(1.dp, FocusColors.CardBorderSubtle)) {
+            Column(Modifier.fillMaxWidth()) { content() }
         }
     }
+}
+
+@Composable
+private fun SyncStatusLine(state: SettingsUiState, enabled: Boolean, onSync: () -> Unit) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val lastSync = remember(state.lastSyncAtMillis, configuration) {
+        if (state.lastSyncAtMillis > 0) {
+            val date = Date(state.lastSyncAtMillis)
+            android.text.format.DateFormat.getDateFormat(context).format(date) + " · " + android.text.format.DateFormat.getTimeFormat(context).format(date)
+        } else null
+    }
+    val status = when {
+        state.isSyncRunning -> stringResource(R.string.account_syncing)
+        state.lastSyncOutcome is SyncCycleOutcome.Failed -> stringResource(R.string.account_sync_error)
+        state.lastSyncOutcome == SyncCycleOutcome.Offline -> stringResource(R.string.account_sync_offline)
+        state.pendingSyncCount > 0 -> pluralStringResource(R.plurals.settings_pending_changes, state.pendingSyncCount, state.pendingSyncCount)
+        lastSync == null -> stringResource(R.string.settings_not_backed_up)
+        else -> stringResource(R.string.settings_last_sync, lastSync)
+    }
+    Text(status, color = if (state.lastSyncOutcome is SyncCycleOutcome.Failed) FocusColors.BlockedText else FocusColors.TextSecondary,
+        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+    TextButton(onSync, enabled = enabled && !state.isSyncRunning, modifier = Modifier.testTag("settings_sync_now_button")) {
+        Text(stringResource(R.string.account_sync_now))
+    }
+}
+
+private fun requestPinFocusWidget(context: Context, receiverClass: Class<*>): String {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = AppWidgetManager.getInstance(context)
+            if (manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(ComponentName(context, receiverClass), null, null)) {
+                return context.getString(R.string.settings_widget_request_sent)
+            }
+        }
+    } catch (exception: Exception) { Log.w("SettingsScreen", "Unable to request widget pin", exception) }
+    return context.getString(R.string.settings_widget_manual_hint)
 }

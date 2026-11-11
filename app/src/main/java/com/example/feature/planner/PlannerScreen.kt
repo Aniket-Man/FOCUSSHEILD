@@ -12,16 +12,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +50,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -55,9 +62,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -68,9 +78,29 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.core.design.FocusCardStyle
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusSpacing
 import com.example.core.design.LocalFocusColors
 import com.example.core.ui.BottomTab
 import com.example.core.ui.FocusBottomNavigation
+import com.example.core.ui.FocusStatusMessage
+import com.example.data.repository.FocusScheduleRepository
+import com.example.R
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.example.core.design.LocalFocusMotion
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusSwitchRow
+import com.example.core.ui.localizedSessionTag
+import com.example.feature.session.notification.ScheduleTime
+import com.example.feature.session.notification.ScheduleValidation
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.model.StudyPlanItem
 import com.example.feature.home.HomeViewModel
@@ -90,13 +120,13 @@ private data class SuggestedPreset(
     val id: String,
     val emoji: String,
     val title: String,
-    val timeRange: String,
     val startTime: String,
     val endTime: String,
     val repeatDays: String,
     val subject: String
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlannerScreen(
     viewModel: HomeViewModel,
@@ -109,22 +139,16 @@ fun PlannerScreen(
     val focusSchedules by viewModel.focusSchedules.collectAsStateWithLifecycle()
     val blockedApps by viewModel.blockedApps.collectAsStateWithLifecycle()
 
-    // A schedule the repository refused (e.g. it overlaps an existing one) must not disappear
-    // silently — the dialog has already closed by then (issue #28).
+    // Schedule errors stay until dismissed. The editor awaits its own write before closing.
     val scheduleSaveError by viewModel.scheduleSaveError.collectAsStateWithLifecycle()
     val plannerContext = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(scheduleSaveError) {
-        scheduleSaveError?.let { reason ->
-            android.widget.Toast.makeText(
-                plannerContext,
-                reason,
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            viewModel.consumeScheduleSaveError()
-        }
-    }
+    val scope = rememberCoroutineScope()
+    var presetError by rememberSaveable { mutableStateOf<String?>(null) }
+    var addingPresetId by remember { mutableStateOf<String?>(null) }
 
     val palette = LocalFocusColors.current
+    val motion = LocalFocusMotion.current
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
     val isDark = palette.isDark
 
     // Adaptive color tokens unified with FocusShield Daylight & Late-Night Study themes
@@ -139,14 +163,16 @@ fun PlannerScreen(
     val selectedDayBorder = palette.primary
     val selectedDayText = palette.primary
     val floatingBtnBg = palette.primary
-    val floatingBtnText = Color.White
+    val floatingBtnText = MaterialTheme.colorScheme.onPrimary
 
-    var selectedDate by remember { mutableStateOf(Date()) }
-    var isSuggestedExpanded by remember { mutableStateOf(true) }
-    var showHelpDialog by remember { mutableStateOf(false) }
-    var showAddEditScheduleDialog by remember { mutableStateOf(false) }
-    var editingSchedule by remember { mutableStateOf<FocusScheduleEntity?>(null) }
-    var scheduleToDelete by remember { mutableStateOf<FocusScheduleEntity?>(null) }
+    var selectedDateMillis by rememberSaveable { mutableStateOf(System.currentTimeMillis()) }
+    val selectedDate = remember(selectedDateMillis) { Date(selectedDateMillis) }
+    var isSuggestedExpanded by rememberSaveable { mutableStateOf(true) }
+    var showHelpDialog by rememberSaveable { mutableStateOf(false) }
+    var showAddEditScheduleDialog by rememberSaveable { mutableStateOf(false) }
+    var editingSchedule by rememberSaveable(stateSaver = FocusScheduleSnapshotSaver) { mutableStateOf<FocusScheduleEntity?>(null) }
+    var scheduleToDelete by rememberSaveable(stateSaver = FocusScheduleSnapshotSaver) { mutableStateOf<FocusScheduleEntity?>(null) }
+    var newScheduleId by rememberSaveable { mutableStateOf(java.util.UUID.randomUUID().toString()) }
 
     val plannerPrefs = remember(plannerContext) {
         plannerContext.getSharedPreferences("planner_dismissed_presets", android.content.Context.MODE_PRIVATE)
@@ -164,36 +190,33 @@ fun PlannerScreen(
                 id = "morning_study",
                 emoji = "🌅",
                 title = "Morning Study",
-                timeRange = "08:00 AM - 10:00 AM",
                 startTime = "08:00",
                 endTime = "10:00",
-                repeatDays = "Mon - Fri",
+                repeatDays = "MON,TUE,WED,THU,FRI",
                 subject = "Morning Focus"
             ),
             SuggestedPreset(
                 id = "afternoon_study",
                 emoji = "☀️",
                 title = "Afternoon Study",
-                timeRange = "02:00 PM - 04:00 PM",
                 startTime = "14:00",
                 endTime = "16:00",
-                repeatDays = "Mon - Fri",
+                repeatDays = "MON,TUE,WED,THU,FRI",
                 subject = "General Study"
             ),
             SuggestedPreset(
                 id = "night_study",
                 emoji = "🌙",
                 title = "Night Study",
-                timeRange = "09:00 PM - 11:00 PM",
                 startTime = "21:00",
                 endTime = "23:00",
-                repeatDays = "Mon - Sun",
+                repeatDays = "MON,TUE,WED,THU,FRI,SAT,SUN",
                 subject = "Deep Focus & Homework"
             )
         )
     }
 
-    val weekDays = remember(selectedDate) {
+    val weekDays = remember(selectedDate, locale) {
         val cal = Calendar.getInstance().apply {
             time = selectedDate
             firstDayOfWeek = Calendar.MONDAY
@@ -211,8 +234,8 @@ fun PlannerScreen(
             set(Calendar.MILLISECOND, 0)
         }
 
-        val dayFormat = SimpleDateFormat("EEE", Locale.ENGLISH)
-        val numFormat = SimpleDateFormat("d", Locale.getDefault())
+        val dayFormat = SimpleDateFormat("EEE", locale)
+        val numFormat = SimpleDateFormat("d", locale)
 
         val list = mutableListOf<CalendarDay>()
         for (i in 0 until 7) {
@@ -232,13 +255,17 @@ fun PlannerScreen(
         list
     }
 
-    val monthYearFormatted = remember(selectedDate) {
-        val month = SimpleDateFormat("MMMM", Locale.ENGLISH).format(selectedDate)
-        val year = SimpleDateFormat("yyyy", Locale.ENGLISH).format(selectedDate)
-        Pair(month, year)
+    val monthYearFormatted = remember(selectedDate, locale) {
+        SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(locale, "yMMMM"), locale).format(selectedDate)
     }
 
+    val dockState = com.example.core.design.rememberFocusDockState()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var addScheduleHeightPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+
     // Filter schedules relevant to selected day
+    // The day abbreviation is a stable data key stored in English (MON, TUE, ...),
+    // so it must not follow the display locale.
     val selectedDayOfWeekAbbr = remember(selectedDate) {
         SimpleDateFormat("EEE", Locale.ENGLISH).format(selectedDate).uppercase(Locale.ENGLISH)
     }
@@ -252,10 +279,9 @@ fun PlannerScreen(
             if (!entity.repeatEnabled && entity.scheduledDateMillis > 0L) {
                 dateFmt.format(Date(entity.scheduledDateMillis)) == selectedDateKey
             } else {
-                val days = entity.daysOfWeek.uppercase(Locale.ENGLISH)
-                days.contains(selectedDayOfWeekAbbr) || days.contains("DAILY") || days.isEmpty() ||
-                        (days.contains("MON - FRI") && (selectedDayOfWeekAbbr in listOf("MON", "TUE", "WED", "THU", "FRI"))) ||
-                        (days.contains("WEEKENDS") && (selectedDayOfWeekAbbr in listOf("SAT", "SUN")))
+                val days = ScheduleTime.parseDaysOfWeekOrNull(entity.daysOfWeek)
+                // Invalid rows remain reachable for editing, never described as a guessed daily routine.
+                days == null || Calendar.getInstance().apply { time = selectedDate }.get(Calendar.DAY_OF_WEEK) in days
             }
         }
     }
@@ -271,62 +297,35 @@ fun PlannerScreen(
                 .fillMaxSize()
                 .statusBarsPadding(),
             contentPadding = PaddingValues(
-                bottom = FocusCardStyle.BottomNavClearance + 80.dp
+                bottom = dockState.contentPadding + with(density) { addScheduleHeightPx.toDp() } + FocusSpacing.md
             ),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
+            item {
+                FocusStatusMessage(
+                    presetError ?: scheduleSaveError,
+                    isError = true,
+                    onDismiss = { presetError = null; viewModel.consumeScheduleSaveError() },
+                    modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal)
+                )
+            }
             // 1. Month & Year Header + Help Button
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(horizontal = FocusSpacing.screenHorizontal, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = monthYearFormatted.first,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                color = textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 24.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = monthYearFormatted.second,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                color = textSecondary,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 24.sp
-                            )
-                        )
-                    }
-
-                    // Help Pill Button
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(pillBg)
-                            .border(1.dp, pillBorder, RoundedCornerShape(20.dp))
-                            .clickable { showHelpDialog = true }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                            .testTag("help_button"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Text(monthYearFormatted, color = textPrimary, style = MaterialTheme.typography.headlineLarge,
+                        modifier = Modifier.weight(1f).semantics { heading() })
+                    IconButton(onClick = { showHelpDialog = true }, modifier = Modifier.testTag("help_button")) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.Chat,
-                            contentDescription = "Help",
+                            contentDescription = stringResource(R.string.planner_help),
                             tint = textPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "Help",
-                            color = textPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -334,12 +333,12 @@ fun PlannerScreen(
 
             // 2. Weekly Calendar Strip (Monday - Sunday)
             item {
-                Row(
+                FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = FocusSpacing.screenHorizontal).selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)
                 ) {
                     val selCal = Calendar.getInstance().apply { time = selectedDate }
 
@@ -348,37 +347,22 @@ fun PlannerScreen(
                         val isSelected = selCal.get(Calendar.YEAR) == dayCal.get(Calendar.YEAR) &&
                                 selCal.get(Calendar.DAY_OF_YEAR) == dayCal.get(Calendar.DAY_OF_YEAR)
 
-                        val dayContainerModifier = if (isSelected) {
-                            Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(selectedDayBg)
-                                .border(1.dp, selectedDayBorder, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                        } else {
-                            Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { selectedDate = day.fullDate }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
-                        }
-
-                        Column(
-                            modifier = dayContainerModifier,
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = day.dayOfWeek,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (isSelected) selectedDayText else textSecondary
-                            )
-                            Text(
-                                text = day.dayOfMonth,
-                                fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) selectedDayText else textPrimary
-                            )
-                        }
+                        val fullDate = java.text.DateFormat.getDateInstance(java.text.DateFormat.FULL, locale).format(day.fullDate)
+                        val todayState = stringResource(R.string.planner_today_state)
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedDateMillis = day.fullDate.time },
+                            modifier = Modifier.heightIn(min = 48.dp).semantics {
+                                contentDescription = fullDate
+                                if (day.isToday) stateDescription = todayState
+                            },
+                            label = {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                                    Text(day.dayOfWeek, style = MaterialTheme.typography.labelMedium)
+                                    Text(day.dayOfMonth, style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"))
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -406,17 +390,15 @@ fun PlannerScreen(
                             modifier = Modifier.padding(16.dp)
                         ) {
                             Text(
-                                text = "Focus",
+                                text = stringResource(R.string.planner_focus_metric),
                                 color = textSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
+                                style = MaterialTheme.typography.labelLarge
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = uiState.todayStudyTime.ifEmpty { "0m" },
                                 color = textPrimary,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
+                                style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum")
                             )
                         }
                     }
@@ -436,17 +418,15 @@ fun PlannerScreen(
                             modifier = Modifier.padding(16.dp)
                         ) {
                             Text(
-                                text = "Usage",
+                                text = stringResource(R.string.planner_usage_metric),
                                 color = textSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
+                                style = MaterialTheme.typography.labelLarge
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = uiState.totalScreenTime.ifEmpty { "5h 32m" },
+                                text = if (uiState.hasUsagePermission) uiState.totalScreenTime else stringResource(R.string.planner_usage_unavailable),
                                 color = textPrimary,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
+                                style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum")
                             )
                         }
                     }
@@ -459,7 +439,7 @@ fun PlannerScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 24.dp),
+                             .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.xl),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
@@ -481,19 +461,18 @@ fun PlannerScreen(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Text(
-                            text = "No schedules today",
+                            text = stringResource(R.string.planner_no_schedules),
                             color = textPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge,
                             textAlign = TextAlign.Center
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "Add focus blocks to plan your studies and take control",
+                            text = stringResource(R.string.planner_no_schedules_body),
                             color = textSecondary,
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
@@ -502,11 +481,10 @@ fun PlannerScreen(
             } else {
                 item {
                     Text(
-                        text = "Active Schedules (${activeDaySchedules.size})",
+                        text = pluralStringResource(R.plurals.planner_schedule_count, activeDaySchedules.size, activeDaySchedules.size),
                         color = textSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.xs).semantics { heading() }
                     )
                 }
 
@@ -528,7 +506,11 @@ fun PlannerScreen(
                         onDelete = {
                             scheduleToDelete = schedule
                         },
-                        onStartSession = {
+                        onStartSession = startSchedule@{
+                            if (ScheduleValidation.validate(schedule) != null) {
+                                presetError = plannerContext.getString(R.string.planner_invalid_schedule)
+                                return@startSchedule
+                            }
                             val nowMillis = System.currentTimeMillis()
                             val activeBounds = com.example.feature.session.notification.ScheduleValidation
                                 .activeWindowBoundsMillis(schedule, nowMillis)
@@ -541,7 +523,7 @@ fun PlannerScreen(
                                 (((effectiveBounds.endMillis - effectiveStart) + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
                             } else {
                                 com.example.feature.session.notification.ScheduleTime
-                                    .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 60
+                                     .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: return@startSchedule
                             }
                             val blockedPkgs = schedule.blockedAppPackages
                                 .split(',')
@@ -554,7 +536,7 @@ fun PlannerScreen(
                                     subject = schedule.subjectName.ifEmpty { schedule.title },
                                     topic = schedule.title,
                                     targetTime = schedule.startTime,
-                                    accentColor = Color(0xFF4F46E5),
+                                     accentColor = palette.primary,
                                     isCompleted = false,
                                     startTime = schedule.startTime,
                                     endTime = schedule.endTime,
@@ -585,21 +567,23 @@ fun PlannerScreen(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { isSuggestedExpanded = !isSuggestedExpanded }
+                             .clickable(role = Role.Button) { isSuggestedExpanded = !isSuggestedExpanded }
+                             .heightIn(min = 48.dp)
+                             .semantics { stateDescription = plannerContext.getString(if (isSuggestedExpanded) R.string.schedule_expanded_state else R.string.schedule_collapsed_state) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "Suggested schedules",
+                            text = stringResource(R.string.planner_suggestions),
                             color = textSecondary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = if (isSuggestedExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = if (isSuggestedExpanded) "Collapse" else "Expand",
+                            contentDescription = null,
                             tint = textSecondary,
                             modifier = Modifier.size(18.dp)
                         )
@@ -609,8 +593,8 @@ fun PlannerScreen(
 
                     AnimatedVisibility(
                         visible = isSuggestedExpanded,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
+                        enter = if (motion.reduceMotion) fadeIn() else fadeIn() + expandVertically(),
+                        exit = if (motion.reduceMotion) fadeOut() else fadeOut() + shrinkVertically()
                     ) {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -623,11 +607,15 @@ fun PlannerScreen(
                                     cardBorder = cardBorder,
                                     textPrimary = textPrimary,
                                     textSecondary = textSecondary,
+                                    enabled = addingPresetId == null,
+                                    adding = addingPresetId == preset.id,
                                     onDismiss = {
                                         dismissedSuggestions.add(preset.id)
                                         plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
                                     },
                                     onAdd = {
+                                        if (addingPresetId == null) {
+                                        addingPresetId = preset.id
                                         val defaultPkgs = setOf(
                                             "com.google.android.youtube",
                                             "com.android.chrome",
@@ -635,9 +623,11 @@ fun PlannerScreen(
                                             "com.brave.browser",
                                             "com.instagram.android"
                                         ) + blockedApps.map { it.packageName }
-                                        viewModel.addFocusSchedule(
+                                        scope.launch {
+                                            try {
+                                        val result = viewModel.addFocusSchedule(
                                             title = preset.title,
-                                            daysOfWeek = "MON,TUE,WED,THU,FRI",
+                                            daysOfWeek = preset.repeatDays,
                                             startTime = preset.startTime,
                                             endTime = preset.endTime,
                                             isAutoStartSession = true,
@@ -650,8 +640,23 @@ fun PlannerScreen(
                                             blockedAppPackages = defaultPkgs,
                                             blockNotifications = true
                                         )
-                                        dismissedSuggestions.add(preset.id)
-                                        plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
+                                        when (result) {
+                                            is FocusScheduleRepository.SaveResult.Saved -> {
+                                                dismissedSuggestions.add(preset.id)
+                                                plannerPrefs.edit().putStringSet("dismissed_ids", dismissedSuggestions.toSet()).apply()
+                                            }
+                                            is FocusScheduleRepository.SaveResult.Rejected -> presetError = result.reason
+                                        }
+                                            } catch (cancelled: CancellationException) {
+                                                throw cancelled
+                                            } catch (exception: Exception) {
+                                                android.util.Log.e("Planner", "Unable to add suggested schedule", exception)
+                                                presetError = plannerContext.getString(R.string.planner_preset_error)
+                                            } finally {
+                                                addingPresetId = null
+                                            }
+                                        }
+                                        }
                                     }
                                 )
                             }
@@ -665,6 +670,7 @@ fun PlannerScreen(
         Button(
             onClick = {
                 editingSchedule = null
+                newScheduleId = java.util.UUID.randomUUID().toString()
                 showAddEditScheduleDialog = true
             },
             shape = RoundedCornerShape(32.dp),
@@ -674,8 +680,10 @@ fun PlannerScreen(
             ),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
             modifier = Modifier
-                .padding(bottom = FocusCardStyle.BottomNavClearance)
                 .align(Alignment.BottomCenter)
+                .padding(horizontal = FocusSpacing.screenHorizontal)
+                .padding(bottom = dockState.clearance + FocusSpacing.md)
+                .onSizeChanged { addScheduleHeightPx = it.height }
                 .testTag("add_schedule_button")
         ) {
             Icon(
@@ -686,10 +694,9 @@ fun PlannerScreen(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "Add Schedule",
+                text = stringResource(R.string.planner_add_schedule),
                 color = floatingBtnText,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
+                style = MaterialTheme.typography.labelLarge
             )
         }
 
@@ -697,7 +704,9 @@ fun PlannerScreen(
         FocusBottomNavigation(
             selectedTab = BottomTab.PLANNER,
             onTabSelected = onTabSelected,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged(dockState::onSizeChanged)
         )
 
         // 8. Full-Screen Add / Edit Schedule Editor Overlay
@@ -708,12 +717,14 @@ fun PlannerScreen(
                 availableBlockedApps = blockedApps,
                 selectedDateMillis = selectedDate.time,
                 onOpenBlockedApps = onOpenBlockedApps,
+                onDefaultsSaveFailed = { presetError = plannerContext.getString(R.string.schedule_defaults_save_error) },
+                onFollowUpSaveFailed = { presetError = plannerContext.getString(R.string.schedule_follow_up_save_error) },
                 onDismiss = {
                     showAddEditScheduleDialog = false
                     editingSchedule = null
                 },
-                onSave = { title, days, start, end, autoStart, mode, subject, repeat, dateMillis, breakMins, desc, pkgs, blockNotifs ->
-                    if (editingSchedule != null) {
+                onSave = { title, days, start, end, autoStart, mode, subject, repeat, dateMillis, breakMins, desc, pkgs, blockNotifs, saveDefaults ->
+                    val result = if (editingSchedule != null) {
                         viewModel.updateFocusSchedule(
                             editingSchedule!!.copy(
                                 title = title,
@@ -729,7 +740,8 @@ fun PlannerScreen(
                                 description = desc,
                                 blockedAppPackages = pkgs.joinToString(","),
                                 blockNotifications = blockNotifs
-                            )
+                            ),
+                            saveDefaults = saveDefaults
                         )
                     } else {
                         viewModel.addFocusSchedule(
@@ -745,11 +757,12 @@ fun PlannerScreen(
                             breakMinutes = breakMins,
                             description = desc,
                             blockedAppPackages = pkgs,
-                            blockNotifications = blockNotifs
+                            blockNotifications = blockNotifs,
+                            id = newScheduleId,
+                            saveDefaults = saveDefaults
                         )
                     }
-                    showAddEditScheduleDialog = false
-                    editingSchedule = null
+                    result
                 }
             )
         }
@@ -768,31 +781,31 @@ fun PlannerScreen(
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("FocusShield Planner", fontWeight = FontWeight.Bold, color = textPrimary)
+                    Text(stringResource(R.string.planner_help_title), color = textPrimary, modifier = Modifier.weight(1f))
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
                     Text(
-                        "• Tap any day in the top calendar strip to view or customize focus routines for that date.",
+                        stringResource(R.string.planner_help_calendar),
                         color = textSecondary,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "• Use 'Add Schedule' to configure automated distraction blocking during your designated study hours.",
+                        stringResource(R.string.planner_help_add),
                         color = textSecondary,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "• Quick suggestions let you add Morning, Afternoon, or Night study blocks with a single tap.",
+                        stringResource(R.string.planner_help_suggestions),
                         color = textSecondary,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showHelpDialog = false }) {
-                    Text("Got it", color = FocusColors.Primary, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.action_close))
                 }
             },
             containerColor = cardBg
@@ -800,34 +813,13 @@ fun PlannerScreen(
     }
 
     // Delete Confirmation Dialog
-    if (scheduleToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { scheduleToDelete = null },
-            title = {
-                Text("Delete Schedule?", fontWeight = FontWeight.Bold, color = textPrimary)
-            },
-            text = {
-                Text(
-                    "Are you sure you want to remove \"${scheduleToDelete?.title}\" from your automated planner?",
-                    color = textSecondary
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scheduleToDelete?.let { viewModel.deleteFocusSchedule(it.id) }
-                        scheduleToDelete = null
-                    }
-                ) {
-                    Text("Delete", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { scheduleToDelete = null }) {
-                    Text("Cancel", color = textSecondary)
-                }
-            },
-            containerColor = cardBg
+    scheduleToDelete?.let { schedule ->
+        FocusDestructiveDialog(
+            title = stringResource(R.string.planner_delete_title, schedule.title),
+            message = stringResource(R.string.planner_delete_body),
+            confirmLabel = stringResource(R.string.planner_delete_confirm),
+            onDismiss = { scheduleToDelete = null },
+            onConfirm = { viewModel.deleteFocusSchedule(schedule.id) }
         )
     }
 }
@@ -842,19 +834,24 @@ private fun SuggestedScheduleCard(
     textSecondary: Color,
     onDismiss: () -> Unit,
     onAdd: () -> Unit,
+    enabled: Boolean = true,
+    adding: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalFocusColors.current
-    val addBtnBg = palette.primaryContainer
-    val addBtnText = palette.primary
-    val closeBtnBg = palette.surfaceVariant
+    val title = stringResource(when (preset.id) {
+        "morning_study" -> R.string.planner_morning_title
+        "afternoon_study" -> R.string.planner_afternoon_title
+        else -> R.string.planner_night_title
+    })
+    val addLabel = stringResource(R.string.planner_add_suggestion, title)
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             // The whole suggestion is the action, not just the small "+ Add" pill: tapping the
             // suggested time range now applies that timing instead of doing nothing.
-            .clickable { onAdd() }
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = addLabel, onClick = onAdd)
             .testTag("suggested_schedule_${preset.id}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
@@ -862,94 +859,31 @@ private fun SuggestedScheduleCard(
         ),
         border = BorderStroke(1.dp, cardBorder)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Dismiss ✕ Button
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(closeBtnBg)
-                    .clickable { onDismiss() }
-                    .testTag("dismiss_suggestion_${preset.id}"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Close,
-                    contentDescription = "Dismiss",
-                    tint = textSecondary,
-                    modifier = Modifier.size(14.dp)
-                )
+        Column(modifier = Modifier.fillMaxWidth().padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                Text(preset.emoji, style = MaterialTheme.typography.headlineLarge)
+                Text(title, color = textPrimary, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss, enabled = enabled, modifier = Modifier.testTag("dismiss_suggestion_${preset.id}")) {
+                    Icon(Icons.Rounded.Close, stringResource(R.string.planner_dismiss_suggestion, title), tint = textSecondary)
+                }
             }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Emoji / Icon
-            Text(
-                text = preset.emoji,
-                fontSize = 26.sp
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Content Column
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = preset.title,
-                    color = textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = preset.timeRange,
-                    color = textSecondary,
-                    fontSize = 13.sp
-                )
-                Text(
-                    text = preset.repeatDays,
-                    color = textSecondary,
-                    fontSize = 12.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // "+ Add" Pill Button
-            Button(
-                onClick = onAdd,
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = addBtnBg,
-                    contentColor = addBtnText
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                modifier = Modifier.testTag("add_suggested_${preset.id}")
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = null,
-                    tint = addBtnText,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Add",
-                    color = addBtnText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
+            Text(stringResource(R.string.planner_time_range, scheduleTimeDisplay(preset.startTime), scheduleTimeDisplay(preset.endTime)),
+                color = textSecondary, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+            Text(stringResource(if (preset.repeatDays.endsWith("SAT,SUN")) R.string.planner_daily else R.string.planner_weekdays),
+                color = textSecondary, style = MaterialTheme.typography.bodySmall)
+            // The card owns the single Add action; this fill is its visible action cue, not a duplicate focus stop.
+            Row(modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primaryContainer)
+                .heightIn(min = 48.dp).padding(FocusSpacing.md).testTag("add_suggested_${preset.id}"),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                Icon(Icons.Rounded.Add, contentDescription = null, tint = palette.onPrimaryContainer)
+                Text(if (adding) stringResource(R.string.planner_adding_suggestion) else addLabel,
+                    color = palette.onPrimaryContainer, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScheduleCardItem(
     schedule: FocusScheduleEntity,
@@ -966,7 +900,6 @@ private fun ScheduleCardItem(
 ) {
     val palette = LocalFocusColors.current
     val iconBg = palette.primaryContainer
-    val iconTint = palette.primary
     val scheduleEmoji = remember(schedule.startTime) {
         getEmojiForTime(schedule.startTime)
     }
@@ -984,73 +917,45 @@ private fun ScheduleCardItem(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(FocusSpacing.base),
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(iconBg),
+                            .background(iconBg).padding(FocusSpacing.md),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = scheduleEmoji,
-                            fontSize = 18.sp
+                            style = MaterialTheme.typography.headlineSmall
                         )
                     }
 
-                    Column {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
                         Text(
                             text = schedule.title,
                             color = textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.semantics { heading() }
                         )
                         val blockedCount = schedule.blockedAppPackages.split(',').count { it.isNotBlank() }
-                        val windowMins = com.example.feature.session.notification.ScheduleTime
-                            .durationMinutesOrNull(schedule.startTime, schedule.endTime) ?: 0
-                        val windowLabel = when {
-                            windowMins >= 60 && windowMins % 60 > 0 -> "${windowMins / 60}h ${windowMins % 60}m window"
-                            windowMins >= 60 -> "${windowMins / 60}h window"
-                            windowMins > 0 -> "${windowMins}m window"
-                            else -> "Scheduled window"
-                        }
-                        val subMeta = buildList {
-                            if (schedule.subjectName.isNotBlank()) add(schedule.subjectName)
-                            add(windowLabel)
-                            if (blockedCount > 0) add("$blockedCount apps blocked")
-                        }.joinToString(" • ")
-                        Text(
-                            text = subMeta,
-                            color = textSecondary,
-                            fontSize = 12.sp
-                        )
+                        if (schedule.subjectName.isNotBlank()) Text(localizedSessionTag(schedule.subjectName), color = textSecondary, style = MaterialTheme.typography.bodySmall)
+                        val windowMins = ScheduleTime.durationMinutesOrNull(schedule.startTime, schedule.endTime)
+                        if (windowMins != null) Text(pluralStringResource(R.plurals.schedule_window_minutes, windowMins, windowMins), color = textSecondary,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"))
+                        if (blockedCount > 0) Text(pluralStringResource(R.plurals.planner_blocked_apps, blockedCount, blockedCount), color = textSecondary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
 
-                Switch(
-                    checked = schedule.isEnabled,
-                    onCheckedChange = onToggle,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = FocusColors.ToggleGreen,
-                        uncheckedThumbColor = textSecondary,
-                        uncheckedTrackColor = palette.surfaceVariant
-                    )
-                )
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
+            FocusSwitchRow(title = stringResource(R.string.planner_enable_schedule, schedule.title), checked = schedule.isEnabled, onCheckedChange = onToggle)
 
             val nowMillis = System.currentTimeMillis()
             val activeBounds = remember(schedule, nowMillis / 30_000L) {
@@ -1058,81 +963,70 @@ private fun ScheduleCardItem(
                     .activeWindowBoundsMillis(schedule, nowMillis)
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+            Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
                     Text(
-                        text = "Starts ${schedule.startTime} • Stops ${schedule.endTime}",
+                        text = stringResource(R.string.schedule_window_summary, scheduleTimeDisplay(schedule.startTime), scheduleTimeDisplay(schedule.endTime)),
                         color = textPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum")
                     )
                     if (activeBounds != null && schedule.isEnabled) {
                         val remMins = ((activeBounds.remainingMillis(nowMillis) + 59_999L) / 60_000L).coerceAtLeast(1L)
                         Text(
-                            text = "Active now • ${remMins}m left until ${schedule.endTime}",
-                            color = Color(0xFF22C55E),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
+                            text = stringResource(R.string.planner_active_remaining, remMins, scheduleTimeDisplay(schedule.endTime)),
+                            color = palette.emeraldText,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")
                         )
                     } else {
                         val repeatLabel = if (schedule.repeatEnabled) {
-                            schedule.daysOfWeek.ifEmpty { "Daily" }
+                            scheduleDaysDisplay(schedule.daysOfWeek)
                         } else {
-                            "One-time"
+                            stringResource(R.string.planner_one_time)
                         }
-                        val breakSuffix = if (schedule.breakMinutes > 0) " • ${schedule.breakMinutes}m break" else ""
                         Text(
-                            text = "$repeatLabel$breakSuffix",
+                            text = repeatLabel,
                             color = textSecondary,
-                            fontSize = 12.sp
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            }
+            if (schedule.breakMinutes > 0) Text(pluralStringResource(R.plurals.schedule_break_minutes, schedule.breakMinutes, schedule.breakMinutes),
+                color = textSecondary, style = MaterialTheme.typography.bodySmall)
+            val invalidSchedule = ScheduleValidation.validate(schedule) != null
+            if (invalidSchedule) Text(stringResource(R.string.planner_invalid_schedule), color = palette.blockedText, style = MaterialTheme.typography.bodyMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
                     IconButton(
                         onClick = onStartSession,
-                        modifier = Modifier.size(36.dp)
+                        enabled = !invalidSchedule
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = "Start Session",
-                            tint = Color(0xFF22C55E),
+                            contentDescription = stringResource(R.string.planner_start_schedule, schedule.title),
+                            tint = palette.emeraldText,
                             modifier = Modifier.size(22.dp)
                         )
                     }
 
                     IconButton(
-                        onClick = onEdit,
-                        modifier = Modifier.size(36.dp)
+                        onClick = onEdit
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Edit,
-                            contentDescription = "Edit",
+                            contentDescription = stringResource(R.string.planner_edit_schedule, schedule.title),
                             tint = textSecondary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
 
                     IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(36.dp)
+                        onClick = onDelete
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Delete,
-                            contentDescription = "Delete",
-                            tint = Color(0xFFEF4444),
+                            contentDescription = stringResource(R.string.planner_delete_schedule, schedule.title),
+                            tint = palette.blockedText,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                }
             }
         }
     }

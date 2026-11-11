@@ -11,6 +11,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -29,22 +30,38 @@ private val LightColorScheme = lightColorScheme(
     onPrimary = FocusColors.LightPalette.textOnDark,
     primaryContainer = FocusColors.LightPalette.primaryContainer,
     onPrimaryContainer = FocusColors.LightPalette.onPrimaryContainer,
+    inversePrimary = FocusColors.LightPalette.primaryDark,
     secondary = FocusColors.LightPalette.emeraldSuccess,
-    onSecondary = FocusColors.LightPalette.textOnDark,
+    onSecondary = FocusColors.LightPalette.textPrimary, // 5.33:1 on green-600
     secondaryContainer = FocusColors.LightPalette.emeraldLight,
-    onSecondaryContainer = FocusColors.LightPalette.emeraldSuccess,
-    tertiary = FocusColors.LightPalette.amberOrange,
+    onSecondaryContainer = FocusColors.LightPalette.emeraldText,
+    tertiary = FocusColors.LightPalette.amberText,
     onTertiary = FocusColors.LightPalette.textOnDark,
     tertiaryContainer = FocusColors.LightPalette.amberLight,
-    onTertiaryContainer = FocusColors.LightPalette.amberOrange,
+    onTertiaryContainer = FocusColors.LightPalette.amberText,
     background = FocusColors.LightPalette.background,
     onBackground = FocusColors.LightPalette.textPrimary,
     surface = FocusColors.LightPalette.surface,
     onSurface = FocusColors.LightPalette.textPrimary,
     surfaceVariant = FocusColors.LightPalette.surfaceVariant,
     onSurfaceVariant = FocusColors.LightPalette.textSecondary,
-    outline = FocusColors.LightPalette.cardBorder,
-    outlineVariant = FocusColors.LightPalette.cardBorderSubtle
+    surfaceTint = FocusColors.LightPalette.primary,
+    inverseSurface = FocusColors.LightPalette.textPrimary,
+    inverseOnSurface = FocusColors.LightPalette.background,
+    error = FocusColors.LightPalette.blockedText,
+    onError = FocusColors.LightPalette.textOnDark,
+    errorContainer = FocusColors.LightPalette.blockedLight,
+    onErrorContainer = FocusColors.LightPalette.blockedText,
+    outline = FocusColors.LightPalette.controlBorder,
+    outlineVariant = FocusColors.LightPalette.cardBorderSubtle,
+    scrim = Color.Black,
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFE6DAF5),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFBF7FF),
+    surfaceContainer = FocusColors.LightPalette.surfaceVariant,
+    surfaceContainerHigh = Color(0xFFF1E7FD),
+    surfaceContainerHighest = FocusColors.LightPalette.surfaceSubtle
 )
 
 private val DarkColorScheme = darkColorScheme(
@@ -52,22 +69,38 @@ private val DarkColorScheme = darkColorScheme(
     onPrimary = FocusColors.DarkPalette.background,
     primaryContainer = FocusColors.DarkPalette.primaryContainer,
     onPrimaryContainer = FocusColors.DarkPalette.onPrimaryContainer,
+    inversePrimary = FocusColors.DarkPalette.primaryDark,
     secondary = FocusColors.DarkPalette.emeraldSuccess,
-    onSecondary = FocusColors.DarkPalette.background,
+    onSecondary = Color(0xFF06240F), // 7.27:1 on green-500
     secondaryContainer = FocusColors.DarkPalette.emeraldLight,
-    onSecondaryContainer = FocusColors.DarkPalette.emeraldSuccess,
+    onSecondaryContainer = FocusColors.DarkPalette.emeraldText,
     tertiary = FocusColors.DarkPalette.amberOrange,
-    onTertiary = FocusColors.DarkPalette.background,
+    onTertiary = FocusColors.DarkPalette.background, // 10.52:1 on amber-400
     tertiaryContainer = FocusColors.DarkPalette.amberLight,
-    onTertiaryContainer = FocusColors.DarkPalette.amberOrange,
+    onTertiaryContainer = FocusColors.DarkPalette.amberText,
     background = FocusColors.DarkPalette.background,
     onBackground = FocusColors.DarkPalette.textPrimary,
     surface = FocusColors.DarkPalette.surface,
     onSurface = FocusColors.DarkPalette.textPrimary,
     surfaceVariant = FocusColors.DarkPalette.surfaceVariant,
     onSurfaceVariant = FocusColors.DarkPalette.textSecondary,
-    outline = FocusColors.DarkPalette.cardBorder,
-    outlineVariant = FocusColors.DarkPalette.cardBorderSubtle
+    surfaceTint = FocusColors.DarkPalette.primary,
+    inverseSurface = FocusColors.LightPalette.background,
+    inverseOnSurface = FocusColors.DarkPalette.background,
+    error = FocusColors.DarkPalette.blockedText,
+    onError = FocusColors.DarkPalette.background,
+    errorContainer = FocusColors.DarkPalette.blockedLight,
+    onErrorContainer = FocusColors.DarkPalette.blockedText,
+    outline = FocusColors.DarkPalette.controlBorder,
+    outlineVariant = FocusColors.DarkPalette.cardBorderSubtle,
+    scrim = Color.Black,
+    surfaceBright = FocusColors.DarkPalette.surfaceSubtle,
+    surfaceDim = Color(0xFF1A1025),
+    surfaceContainerLowest = Color(0xFF150C1F),
+    surfaceContainerLow = Color(0xFF251834),
+    surfaceContainer = FocusColors.DarkPalette.surface,
+    surfaceContainerHigh = FocusColors.DarkPalette.surfaceVariant,
+    surfaceContainerHighest = FocusColors.DarkPalette.surfaceSubtle
 )
 
 @Composable
@@ -77,6 +110,7 @@ fun FocusShieldTheme(
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     val palette = if (darkTheme) FocusColors.DarkPalette else FocusColors.LightPalette
+    val motionPolicy = rememberFocusMotionPolicy()
     val view = LocalView.current
 
     if (!view.isInEditMode) {
@@ -98,7 +132,8 @@ fun FocusShieldTheme(
     }
 
     CompositionLocalProvider(
-        LocalFocusColors provides palette
+        LocalFocusColors provides palette,
+        LocalFocusMotion provides motionPolicy
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

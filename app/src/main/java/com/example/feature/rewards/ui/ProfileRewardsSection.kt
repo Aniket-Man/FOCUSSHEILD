@@ -7,11 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.EmojiEvents
@@ -48,12 +53,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusContrast
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.feature.rewards.domain.BadgeTier
@@ -292,7 +299,7 @@ private fun AchievementsHeader(
                     text = "$unlockedCount of $totalCount",
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall.copy(
-                        color = FocusColors.CoralWarning,
+                        color = FocusColors.CoralText,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     ),
@@ -340,9 +347,10 @@ private fun AchievementsHeader(
 
                     if (nextBadge != null) {
                         val targetColor = Color(nextBadge.primaryColorHex)
+                        val targetContainer = FocusContrast.tintedSurface(targetColor, FocusColors.Surface)
                         Surface(
                             shape = FocusShapes.pill,
-                            color = targetColor.copy(alpha = 0.12f),
+                            color = targetContainer,
                             border = BorderStroke(1.dp, targetColor.copy(alpha = 0.35f))
                         ) {
                             Row(
@@ -352,14 +360,14 @@ private fun AchievementsHeader(
                                 Icon(
                                     imageVector = Icons.Rounded.WorkspacePremium,
                                     contentDescription = null,
-                                    tint = targetColor,
+                                    tint = FocusContrast.readableAccent(targetColor, targetContainer),
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "${nextBadge.requiredHoursFloat.toInt()}h next",
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        color = targetColor,
+                                        color = FocusContrast.readableAccent(targetColor, targetContainer),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     ),
@@ -407,7 +415,7 @@ private fun AchievementsHeader(
                             .fillMaxWidth()
                             .height(7.dp)
                             .clip(FocusShapes.pill),
-                        color = targetColor,
+                        color = FocusContrast.readableAccent(targetColor, FocusColors.SurfaceSubtle, 3f),
                         trackColor = FocusColors.SurfaceSubtle
                     )
                 } else {
@@ -422,7 +430,7 @@ private fun AchievementsHeader(
                         Text(
                             text = "Every badge mastered 🏆",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.EmeraldSuccess,
+                                color = FocusColors.EmeraldText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -441,13 +449,14 @@ private fun ClaimableCallout(
     accentColor: Color,
     onClick: () -> Unit
 ) {
+    val container = FocusContrast.tintedSurface(accentColor, FocusColors.Surface, 0.10f)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(FocusShapes.medium)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .border(1.dp, accentColor.copy(alpha = 0.45f), FocusShapes.medium),
-        color = accentColor.copy(alpha = 0.10f)
+        color = container
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -475,7 +484,7 @@ private fun ClaimableCallout(
             Text(
                 text = "›",
                 style = MaterialTheme.typography.titleMedium.copy(
-                    color = accentColor,
+                    color = FocusContrast.readableAccent(accentColor, container),
                     fontWeight = FontWeight.Bold
                 )
             )
@@ -596,6 +605,7 @@ private fun BadgeCollectionRow(
  * The badge itself: container, emblem, identity, requirement or progress, and the reward it pays
  * out. Named `RewardBadgeCard` because `RewardBadge` is the domain model this renders.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RewardBadgeCard(
     badge: RewardBadge,
@@ -608,12 +618,18 @@ fun RewardBadgeCard(
     val primaryColor = Color(badge.primaryColorHex)
     val accentColor = Color(badge.accentColorHex)
     val isEarned = state != BadgeVisualState.LOCKED
+    val accentText = FocusContrast.readableAccent(primaryColor, FocusColors.Surface)
+    val tierContainer = if (isEarned) {
+        FocusContrast.tintedSurface(primaryColor, FocusColors.Surface, 0.2f)
+    } else {
+        FocusColors.SurfaceSubtle
+    }
 
     Card(
         modifier = modifier
             .width(232.dp)
             .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onOpen)
+            .clickable(role = Role.Button, onClick = onOpen)
             .border(
                 width = if (state == BadgeVisualState.NEWLY_UNLOCKED) 2.dp else 1.dp,
                 color = when (state) {
@@ -630,10 +646,10 @@ fun RewardBadgeCard(
         )
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(124.dp)
+                    .heightIn(min = 124.dp)
                     .background(
                         when (state) {
                             BadgeVisualState.LOCKED -> Brush.verticalGradient(
@@ -655,36 +671,36 @@ fun RewardBadgeCard(
                             )
                         }
                     ),
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                 BadgeStateChip(
                     state = state,
-                    color = primaryColor,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(10.dp)
+                    color = primaryColor
                 )
 
                 Surface(
                     shape = FocusShapes.pill,
-                    color = if (isEarned) primaryColor.copy(alpha = 0.2f) else FocusColors.SurfaceSubtle,
+                    color = tierContainer,
                     border = BorderStroke(
                         1.dp,
                         if (isEarned) primaryColor.copy(alpha = 0.4f) else FocusColors.CardBorderSubtle
-                    ),
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(10.dp)
+                    )
                 ) {
                     Text(
                         text = badge.tier.name,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isEarned) primaryColor else FocusColors.TextMuted
+                            color = if (isEarned) FocusContrast.readableAccent(primaryColor, tierContainer) else FocusColors.TextMuted
                         )
                     )
+                }
                 }
 
                 BadgeEmblemArt(
@@ -693,6 +709,7 @@ fun RewardBadgeCard(
                     size = 72.dp,
                     pulse = state == BadgeVisualState.NEWLY_UNLOCKED
                 )
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
             Column(
@@ -716,7 +733,7 @@ fun RewardBadgeCard(
                 Text(
                     text = badge.subtitle,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = if (isEarned) primaryColor else FocusColors.TextSecondary,
+                        color = if (isEarned) accentText else FocusColors.TextSecondary,
                         fontWeight = FontWeight.Medium,
                         fontSize = 11.sp
                     ),
@@ -756,7 +773,7 @@ fun RewardBadgeCard(
                         Text(
                             text = "Reward claimed",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.EmeraldSuccess,
+                                color = FocusColors.EmeraldText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             )
@@ -767,11 +784,11 @@ fun RewardBadgeCard(
                         onClick = onClaim,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(34.dp),
+                            .heightIn(min = 48.dp),
                         shape = FocusShapes.pill,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = primaryColor,
-                            contentColor = Color.White
+                            contentColor = FocusContrast.foregroundFor(primaryColor)
                         ),
                         contentPadding = PaddingValues(horizontal = 12.dp)
                     ) {
@@ -780,8 +797,7 @@ fun RewardBadgeCard(
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
-                            ),
-                            maxLines = 1
+                            )
                         )
                     }
 
@@ -823,7 +839,7 @@ fun RewardBadgeCard(
                                 .fillMaxWidth()
                                 .height(5.dp)
                                 .clip(FocusShapes.pill),
-                            color = primaryColor,
+                            color = FocusContrast.readableAccent(primaryColor, FocusColors.SurfaceSubtle, 3f),
                             trackColor = FocusColors.SurfaceSubtle
                         )
                     }
@@ -844,9 +860,10 @@ private fun BadgeStateChip(
         BadgeVisualState.NEWLY_UNLOCKED -> "NEW" to color
         BadgeVisualState.CLAIMED -> "CLAIMED" to FocusColors.EmeraldSuccess
     }
+    val container = FocusContrast.tintedSurface(chipColor, FocusColors.Surface, 0.18f)
     Surface(
         shape = FocusShapes.pill,
-        color = chipColor.copy(alpha = 0.18f),
+        color = container,
         border = BorderStroke(1.dp, chipColor.copy(alpha = 0.5f)),
         modifier = modifier
     ) {
@@ -854,9 +871,9 @@ private fun BadgeStateChip(
             text = text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 9.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = chipColor
+                color = FocusContrast.readableAccent(chipColor, container)
             )
         )
     }
@@ -882,6 +899,8 @@ internal fun BadgeDetailDialog(
         else -> BadgeVisualState.NEWLY_UNLOCKED
     }
     val primaryColor = Color(badge.primaryColorHex)
+    val accentText = FocusContrast.readableAccent(primaryColor, FocusColors.Surface)
+    val rewardContainer = FocusContrast.tintedSurface(primaryColor, FocusColors.Surface, 0.08f)
     val progressRatio = badge.getProgressRatio(totalLifetimeStudyMillis)
 
     AlertDialog(
@@ -893,7 +912,7 @@ internal fun BadgeDetailDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BadgeEmblemArt(badge = badge, isUnlocked = state != BadgeVisualState.LOCKED, size = 40.dp)
                 Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = badge.title,
                         style = MaterialTheme.typography.titleMedium.copy(
@@ -904,7 +923,7 @@ internal fun BadgeDetailDialog(
                     Text(
                         text = badge.tier.label,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = primaryColor,
+                            color = accentText,
                             fontWeight = FontWeight.Bold
                         )
                     )
@@ -912,7 +931,7 @@ internal fun BadgeDetailDialog(
             }
         },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -943,7 +962,7 @@ internal fun BadgeDetailDialog(
                         .fillMaxWidth()
                         .clip(FocusShapes.small)
                         .border(1.dp, primaryColor.copy(alpha = 0.35f), FocusShapes.small),
-                    color = primaryColor.copy(alpha = 0.08f)
+                    color = rewardContainer
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -951,7 +970,7 @@ internal fun BadgeDetailDialog(
                     ) {
                         Text(text = badge.reward.emoji, fontSize = 22.sp)
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = badge.reward.title,
                                 style = MaterialTheme.typography.labelMedium.copy(
@@ -969,9 +988,9 @@ internal fun BadgeDetailDialog(
                             Text(
                                 text = badge.reward.type,
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = primaryColor,
+                                    color = FocusContrast.readableAccent(primaryColor, rewardContainer),
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 9.sp,
+                                    fontSize = 11.sp,
                                     letterSpacing = 0.6.sp
                                 )
                             )
@@ -1003,7 +1022,7 @@ internal fun BadgeDetailDialog(
                     BadgeVisualState.CLAIMED -> Column {
                         DetailStatusRow(
                             text = "Reward claimed",
-                            color = FocusColors.EmeraldSuccess,
+                            color = FocusColors.EmeraldText,
                             icon = Icons.Rounded.CheckCircle
                         )
                         unlockedAtMillis?.let {
@@ -1021,7 +1040,7 @@ internal fun BadgeDetailDialog(
                     BadgeVisualState.NEWLY_UNLOCKED -> Column {
                         DetailStatusRow(
                             text = "Earned — reward ready",
-                            color = primaryColor,
+                            color = accentText,
                             icon = Icons.Rounded.CheckCircle
                         )
                         unlockedAtMillis?.let {
@@ -1039,11 +1058,11 @@ internal fun BadgeDetailDialog(
                             onClick = onClaim,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(42.dp),
+                                .heightIn(min = 48.dp),
                             shape = FocusShapes.pill,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = primaryColor,
-                                contentColor = Color.White
+                                contentColor = FocusContrast.foregroundFor(primaryColor)
                             )
                         ) {
                             Text(
@@ -1077,7 +1096,7 @@ internal fun BadgeDetailDialog(
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(FocusShapes.pill),
-                            color = primaryColor,
+                            color = FocusContrast.readableAccent(primaryColor, FocusColors.SurfaceSubtle, 3f),
                             trackColor = FocusColors.SurfaceSubtle
                         )
                     }
@@ -1102,9 +1121,11 @@ private fun DetailStatusRow(
     color: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector
 ) {
+    val container = FocusContrast.tintedSurface(color, FocusColors.Surface, 0.15f)
+    val foreground = FocusContrast.readableAccent(color, container)
     Surface(
         shape = FocusShapes.pill,
-        color = color.copy(alpha = 0.15f),
+        color = container,
         border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
     ) {
         Row(
@@ -1114,14 +1135,14 @@ private fun DetailStatusRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = color,
+                tint = foreground,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    color = color,
+                    color = foreground,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
                 )

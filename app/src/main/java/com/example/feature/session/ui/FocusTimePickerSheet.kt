@@ -7,6 +7,8 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,12 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,11 +46,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.core.design.FocusColors
 import kotlinx.coroutines.launch
 
@@ -58,6 +61,7 @@ import kotlinx.coroutines.launch
  * Robust, freeze-proof Focus Time Picker Sheet with scroll wheels, quick duration presets,
  * and reliable Back/Cancel navigation.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FocusTimePickerSheet(
     selectedMinutes: Int,
@@ -107,13 +111,13 @@ fun FocusTimePickerSheet(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.action_back),
                         tint = FocusColors.TextPrimary
                     )
                 }
 
                 Text(
-                    text = "Select Focus Time",
+                    text = stringResource(R.string.session_picker_title),
                     style = MaterialTheme.typography.titleMedium.copy(
                         color = FocusColors.TextPrimary,
                         fontWeight = FontWeight.Bold,
@@ -127,7 +131,7 @@ fun FocusTimePickerSheet(
                 modifier = Modifier.testTag("time_picker_cancel_button")
             ) {
                 Text(
-                    text = "Cancel",
+                    text = stringResource(R.string.action_cancel),
                     style = MaterialTheme.typography.labelLarge.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.SemiBold
@@ -138,38 +142,39 @@ fun FocusTimePickerSheet(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Quick Preset Chips (15m, 25m, 45m, 60m, 90m, 120m)
+        // Quick Preset Chips (15m, 25m, 45m, 1h, 90m, 2h)
         val presets = listOf(15, 25, 45, 60, 90, 120)
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             presets.forEach { presetMins ->
                 val isSelected = totalMins == presetMins
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isSelected) FocusColors.Primary else FocusColors.SurfaceVariant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable {
-                            hours = presetMins / 60
-                            minutes = presetMins % 60
-                        }
-                ) {
-                    Box(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        hours = presetMins / 60
+                        minutes = presetMins % 60
+                    },
+                    label = {
                         Text(
-                            text = if (presetMins >= 60 && presetMins % 60 == 0) "${presetMins / 60}h" else "${presetMins}m",
+                            text = if (presetMins >= 60 && presetMins % 60 == 0) {
+                                pluralStringResource(
+                                    R.plurals.session_picker_hours,
+                                    presetMins / 60,
+                                    presetMins / 60
+                                )
+                            } else {
+                                stringResource(R.string.session_setup_minutes_short, presetMins)
+                            },
                             style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSelected) Color.White else FocusColors.TextSecondary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 12.sp
                             )
                         )
                     }
-                }
+                )
             }
         }
 
@@ -187,7 +192,7 @@ fun FocusTimePickerSheet(
             WheelNumberPicker(
                 items = (0..23).toList(),
                 initialValue = hours,
-                label = "HOURS",
+                label = stringResource(R.string.session_picker_hours_label),
                 onValueChange = { hours = it },
                 modifier = Modifier.weight(1f)
             )
@@ -206,7 +211,7 @@ fun FocusTimePickerSheet(
             WheelNumberPicker(
                 items = (0..59).toList(),
                 initialValue = minutes,
-                label = "MINUTES",
+                label = stringResource(R.string.session_picker_minutes_label),
                 onValueChange = { minutes = it },
                 modifier = Modifier.weight(1f)
             )
@@ -215,10 +220,28 @@ fun FocusTimePickerSheet(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Calculated Time Summary Badge
-        val formattedSummary = buildString {
-            if (hours > 0) append("$hours hr${if (hours > 1) "s" else ""} ")
-            append("$minutes min${if (minutes != 1) "s" else ""}")
-        }
+        val summaryHours = totalMins / 60
+        val summaryMinutes = totalMins % 60
+        val formattedSummary = listOfNotNull(
+            if (summaryHours > 0) {
+                pluralStringResource(
+                    R.plurals.session_picker_hours,
+                    summaryHours,
+                    summaryHours
+                )
+            } else {
+                null
+            },
+            if (summaryMinutes > 0 || summaryHours == 0) {
+                pluralStringResource(
+                    R.plurals.session_picker_minutes,
+                    summaryMinutes,
+                    summaryMinutes
+                )
+            } else {
+                null
+            }
+        ).joinToString(" ")
 
         Surface(
             shape = RoundedCornerShape(16.dp),
@@ -238,7 +261,7 @@ fun FocusTimePickerSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Total Focus Time: $formattedSummary",
+                    text = stringResource(R.string.session_picker_total, formattedSummary),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = FocusColors.Primary,
                         fontWeight = FontWeight.SemiBold,
@@ -266,7 +289,7 @@ fun FocusTimePickerSheet(
                     .height(50.dp)
             ) {
                 Text(
-                    text = "Back",
+                    text = stringResource(R.string.action_back),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp
@@ -282,7 +305,7 @@ fun FocusTimePickerSheet(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = FocusColors.Primary,
-                    contentColor = Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 modifier = Modifier
                     .weight(1.6f)
@@ -290,7 +313,7 @@ fun FocusTimePickerSheet(
                     .testTag("apply_focus_time_button")
             ) {
                 Text(
-                    text = "Apply Focus Time",
+                    text = stringResource(R.string.session_picker_apply),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
@@ -310,7 +333,7 @@ private fun WheelNumberPicker(
     modifier: Modifier = Modifier
 ) {
     val itemHeight = 44.dp
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val density = LocalDensity.current
     val itemHeightPx = with(density) { itemHeight.toPx() }
     val coroutineScope = rememberCoroutineScope()
     val targetIndex = items.indexOf(initialValue).coerceAtLeast(0)
@@ -399,7 +422,7 @@ private fun WheelNumberPicker(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = String.format(java.util.Locale.US, "%02d", itemValue),
+                            text = String.format(java.util.Locale.getDefault(), "%02d", itemValue),
                             style = MaterialTheme.typography.titleLarge.copy(
                                 color = if (isSelected) FocusColors.TextPrimary else FocusColors.TextMuted,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,

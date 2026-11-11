@@ -1,0 +1,45 @@
+<resources>
+    <string name="website_sheet_title">Block distracting websites across your browser</string>
+    <string name="website_permission_title">Accessibility access required</string>
+    <string name="website_permission_body">Allow FocusShield to read browser address bars and block restricted websites.</string>
+    <string name="website_permission_grant">Grant accessibility access</string>
+    <string name="website_permission_active">Browser address bar detection is active</string>
+    <string name="website_permission_open_error">Unable to open accessibility settings. Open Android Settings, choose Accessibility, then enable FocusShield.</string>
+    <string name="website_adult_label">Block adult websites (18+)</string>
+    <string name="website_adult_on">Adult website and family-DNS filters are on. Accessibility access is required to block pages in supported browsers.</string>
+    <string name="website_adult_off">Turn on to automatically block adult websites in supported browsers.</string>
+    <string name="website_manual_label">Block saved websites</string>
+    <string name="website_manual_body">Block enabled websites in the list below. Accessibility access is required.</string>
+    <string name="website_url_label">Website to block</string>
+    <string name="website_url_example" translatable="false">reddit.com</string>
+    <string name="website_url_hint">Enter a domain or a full URL. Only the domain will be saved.</string>
+    <string name="website_url_invalid">Enter a website domain such as reddit.com or https://example.com.</string>
+    <string name="website_add_action">Add website</string>
+    <string name="website_adding">Adding website…</string>
+    <string name="website_added">%1$s added to the blocked list.</string>
+    <string name="website_already_added">%1$s is already in the blocked list. Change its switch below to enable blocking.</string>
+    <string name="website_save_error">Unable to save this website. Check the blocked list, then try again.</string>
+    <string name="website_change_error">Unable to change website blocking. Check the current switch state, then try again.</string>
+    <string name="website_remove_error">Unable to remove this website. Check the blocked list, then try again.</string>
+    <string name="website_removed">%1$s removed from the blocked list.</string>
+    <string name="website_strict_adult_error">Adult website blocking is locked during strict mode. Wait until the session or strict app-limit lock ends to turn it off.</string>
+    <string name="website_strict_manual_error">Website blocking is locked during strict mode. Wait until the session or strict app-limit lock ends to turn it off.</string>
+    <string name="website_strict_remove_error">%1$s cannot be removed during strict mode. Wait until the session or strict app-limit lock ends, then try again.</string>
+    <string name="website_strict_disable_error">%1$s cannot be paused during strict mode. Wait until the session or strict app-limit lock ends, then try again.</string>
+    <string name="website_quick_add">Quick add</string>
+    <string name="website_quick_add_action">Add %1$s</string>
+    <string name="website_quick_added">%1$s added</string>
+    <string name="website_list_title">Blocked websites</string>
+    <string name="website_list_empty_title">No saved websites yet</string>
+    <string name="website_list_empty_body">Enter a website above or use Quick add to start your blocked list.</string>
+    <string name="website_blocking_active">Blocking active</string>
+    <string name="website_blocking_paused">Blocking paused</string>
+    <string name="website_delete_action">Remove %1$s from the blocked list</string>
+    <string name="website_delete_title">Remove %1$s?</string>
+    <string name="website_delete_body">This removes the website from your blocked list. You can add it again later.</string>
+    <string name="website_remove_action">Remove website</string>
+    <plurals name="website_count">
+        <item quantity="one">%1$d website</item>
+        <item quantity="other">%1$d websites</item>
+    </plurals>
+</resources>

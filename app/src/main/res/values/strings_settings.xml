@@ -1,0 +1,73 @@
+<resources>
+    <string name="settings_title">Shield settings</string>
+    <string name="settings_protection_section">Distraction protection</string>
+    <string name="settings_wellbeing">Digital wellbeing and storage</string>
+    <string name="settings_wellbeing_body">View screen time, app activity and device storage.</string>
+    <string name="settings_app_limits">App limits</string>
+    <string name="settings_app_limits_body">Set daily usage allowances and timed access outside study sessions.</string>
+    <string name="settings_blocked_apps">Blocked apps</string>
+    <string name="settings_strict_mode">Strict mode</string>
+    <string name="settings_strict_mode_body">Review session protections, uninstall protection and multi-window rules.</string>
+    <string name="settings_websites">Website blocker</string>
+    <string name="settings_websites_body">Choose adult-content protection and custom blocked websites.</string>
+    <string name="settings_channels">Study channels</string>
+    <string name="settings_channels_body">Manage approved YouTube channels for study mode.</string>
+    <string name="settings_permissions_section">Android permissions</string>
+    <string name="settings_accessibility">Accessibility blocker service</string>
+    <string name="settings_accessibility_body">Open Android accessibility settings to turn the FocusShield service on or off.</string>
+    <string name="settings_service_enabled">Service enabled</string>
+    <string name="settings_service_disabled">Service disabled</string>
+    <string name="settings_accessibility_help">Read the accessibility setup guide</string>
+    <string name="settings_background">Background running</string>
+    <string name="settings_background_allowed">Unrestricted</string>
+    <string name="settings_background_restricted">Battery restricted</string>
+    <string name="settings_background_body">Review battery restrictions so sessions and reminders can keep running.</string>
+    <string name="settings_short_form_section">Shorts and Reels</string>
+    <string name="settings_short_form_always">Block selected Shorts and Reels at all times</string>
+    <string name="settings_short_form_always_body">When off, the blockers selected below apply only during active focus sessions.</string>
+    <string name="settings_short_form_permission">YouTube Shorts, Instagram Reels and Facebook Reels outside focus sessions</string>
+    <string name="settings_youtube_shorts">Block YouTube Shorts</string>
+    <string name="settings_youtube_shorts_body">Leave the Shorts feed or player when it opens.</string>
+    <string name="settings_youtube_shorts_permission">YouTube Shorts feeds and video players</string>
+    <string name="settings_instagram_reels">Block Instagram Reels</string>
+    <string name="settings_instagram_body">Leave the Reels tab and full-screen clips.</string>
+    <string name="settings_instagram_permission">Instagram Reels and clips</string>
+    <string name="settings_facebook_reels">Block Facebook Reels</string>
+    <string name="settings_facebook_body">Leave the Reels tray and vertical video player.</string>
+    <string name="settings_facebook_permission">Facebook Reels and video players</string>
+    <string name="settings_study_section">Study defaults</string>
+    <string name="settings_timer_default">Default timer duration</string>
+    <string name="settings_pomodoro_defaults">Pomodoro defaults</string>
+    <string name="settings_pomodoro_summary">%1$d min focus · %2$d min short break · %3$d cycles</string>
+    <string name="settings_widgets_section">Home widgets and floating timer</string>
+    <string name="settings_floating_timer">Show floating timer during sessions</string>
+    <string name="settings_floating_timer_body">Use a movable timer over other apps. The full timer stays available in FocusShield and its notification.</string>
+    <string name="settings_floating_timer_permission">Allow display over other apps to use the floating timer.</string>
+    <string name="settings_grant_overlay">Allow display over other apps</string>
+    <string name="settings_pin_widgets">Add home-screen widgets</string>
+    <string name="settings_widgets_body">Launch focus sessions and check your study time and streak from the home screen.</string>
+    <string name="settings_pin_compact">Pin compact widget (2×2)</string>
+    <string name="settings_pin_detailed">Pin detailed widget (4×2)</string>
+    <string name="settings_widget_request_sent">Complete the widget request shown by Android. If it does not appear, open the home-screen widget picker and choose FocusShield.</string>
+    <string name="settings_widget_manual_hint">Open your home-screen widget picker and choose FocusShield to add a widget. On most launchers, long-press an empty area and select Widgets.</string>
+    <string name="settings_account_section">Account and cloud sync</string>
+    <string name="settings_signed_out">Signed out</string>
+    <string name="settings_account_body">Manage Google sign-in, cloud backup and account status.</string>
+    <string name="settings_auto_save">Periodically back up study data</string>
+    <string name="settings_auto_save_body">Run periodic cloud backups while online. Manual sync remains available when this is off.</string>
+    <string name="settings_backup_every">Back up every</string>
+    <string name="settings_auto_save_hint">The interval applies while FocusShield is running and there are changes to upload. Android may delay background backups.</string>
+    <string name="settings_not_backed_up">No cloud backup has completed yet. Use Sync now while connected to the internet.</string>
+    <string name="settings_last_sync">Last completed sync: %1$s</string>
+    <string name="settings_about_section">About FocusShield</string>
+    <string name="settings_app_version">FocusShield %1$s</string>
+    <string name="settings_about_body">Local-first study sessions and distraction protection.</string>
+    <string name="settings_save_error">Unable to save this setting. Check its current state, then try again.</string>
+    <string name="settings_strict_lock_error">Strict mode is active. Wait until the protected session ends, then change this setting.</string>
+    <string name="settings_device_admin_error">Uninstall protection changed, but Android device-admin access could not be removed. Open Android device-admin settings to review FocusShield access.</string>
+    <plurals name="settings_blocked_apps_count"><item quantity="one">%1$d app selected to block</item><item quantity="other">%1$d apps selected to block</item></plurals>
+    <plurals name="settings_timer_minutes"><item quantity="one">%1$d minute per study block</item><item quantity="other">%1$d minutes per study block</item></plurals>
+    <plurals name="settings_interval_seconds"><item quantity="one">%1$d second</item><item quantity="other">%1$d seconds</item></plurals>
+    <plurals name="settings_interval_minutes"><item quantity="one">%1$d minute</item><item quantity="other">%1$d minutes</item></plurals>
+    <plurals name="settings_pending_changes"><item quantity="one">%1$d change waiting to upload. Use Sync now while online.</item><item quantity="other">%1$d changes waiting to upload. Use Sync now while online.</item></plurals>
+</resources>

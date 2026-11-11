@@ -8,12 +8,16 @@ import android.graphics.drawable.Drawable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.data.repository.BlockedAppRepository
+import com.example.data.repository.BlockedAppWriteResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -48,6 +52,14 @@ class BlockedAppsViewModel(
     private val _rawInstalledApps = MutableStateFlow<List<InstalledAppItem>>(emptyList())
     private val _isLoading = MutableStateFlow(true)
     private val _isAccessibilityEnabled = MutableStateFlow(false)
+    private val _savingPackages = MutableStateFlow<Set<String>>(emptySet())
+    val savingPackages: StateFlow<Set<String>> = _savingPackages.asStateFlow()
+    private val _operationError = MutableStateFlow<String?>(null)
+    val operationError: StateFlow<String?> = _operationError.asStateFlow()
+
+    fun clearOperationError() {
+        _operationError.value = null
+    }
 
     val uiState: StateFlow<BlockedAppsUiState> = combine(
         _rawInstalledApps,
@@ -108,19 +120,60 @@ class BlockedAppsViewModel(
     }
 
     fun toggleAppBlocked(packageName: String, appName: String, isBlocked: Boolean) {
+        if (_savingPackages.value.contains(packageName)) return
         viewModelScope.launch {
-            blockedAppRepository.setAppBlocked(packageName, appName, isBlocked)
+            _savingPackages.update { it + packageName }
+            try {
+                when (val result = blockedAppRepository.setAppBlockedResult(packageName, appName, isBlocked)) {
+                    is BlockedAppWriteResult.Applied -> {
+                        result.followUpFailure?.let { failure ->
+                            android.util.Log.w(
+                                "BlockedAppsViewModel",
+                                "Block saved locally but cloud tracking failed",
+                                failure
+                            )
+                            _operationError.value = getApplication<Application>()
+                                .getString(R.string.blocked_apps_follow_up_error)
+                        }
+                    }
+                    is BlockedAppWriteResult.Failed -> {
+                        android.util.Log.e(
+                            "BlockedAppsViewModel",
+                            "Unable to save blocked app",
+                            result.exception
+                        )
+                        _operationError.value = getApplication<Application>()
+                            .getString(R.string.blocked_apps_save_error)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("BlockedAppsViewModel", "Unable to save blocked app", exception)
+                _operationError.value = getApplication<Application>()
+                    .getString(R.string.blocked_apps_save_error)
+            } finally {
+                _savingPackages.update { it - packageName }
+            }
         }
     }
 
     private fun loadInstalledApps() {
         viewModelScope.launch {
             _isLoading.value = true
-            val apps = withContext(Dispatchers.IO) {
-                queryInstalledLaunchableApps()
+            try {
+                _rawInstalledApps.value = withContext(Dispatchers.IO) {
+                    queryInstalledLaunchableApps()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("BlockedAppsViewModel", "Unable to scan installed apps", exception)
+                _operationError.value = getApplication<Application>()
+                    .getString(R.string.blocked_apps_load_error)
+            } finally {
+                _isLoading.value = false
             }
-            _rawInstalledApps.value = apps
-            _isLoading.value = false
         }
     }
 

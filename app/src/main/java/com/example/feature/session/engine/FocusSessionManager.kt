@@ -641,6 +641,8 @@ class FocusSessionManager(
     fun skipPomodoroPhase() {
         val current = _activeSession.value ?: return
         if (current.mode != SessionMode.POMODORO) return
+        // Skipping a focus phase would be an early-exit bypass of a strict session.
+        if (current.isStrictModeEnabled && current.pomodoroPhase == PomodoroPhase.FOCUS) return
 
         val now = currentTimeProvider()
         val prevPhase = pomodoroEngine.currentPhase

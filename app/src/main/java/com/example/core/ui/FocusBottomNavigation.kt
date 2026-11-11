@@ -1,21 +1,23 @@
 package com.example.core.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
@@ -28,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,20 +38,25 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.annotation.StringRes
+import com.example.R
+import com.example.core.design.FocusCardStyle
 import com.example.core.design.FocusColors
 
 enum class BottomTab(
-    val title: String,
+    @StringRes val titleRes: Int,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
-    FOCUS("Focus", FocusBrandMark, FocusBrandMark),
-    PLANNER("Planner", Icons.Rounded.CalendarMonth, Icons.Outlined.CalendarToday),
-    STATS("Stats", Icons.Rounded.Leaderboard, Icons.Outlined.Leaderboard),
-    BLOCKS("Blocks", Icons.Rounded.Block, Icons.Outlined.Block)
+    FOCUS(R.string.nav_focus, FocusBrandMark, FocusBrandMark),
+    PLANNER(R.string.nav_planner, Icons.Rounded.CalendarMonth, Icons.Outlined.CalendarToday),
+    STATS(R.string.nav_stats, Icons.Rounded.Leaderboard, Icons.Outlined.Leaderboard),
+    BLOCKS(R.string.nav_blocks, Icons.Rounded.Block, Icons.Outlined.Block)
 }
 
 /**
@@ -90,48 +96,61 @@ fun FocusBottomNavigation(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 10.dp)
+            .padding(
+                horizontal = FocusCardStyle.BottomDockHorizontalInset,
+                vertical = FocusCardStyle.BottomDockVerticalInset
+            )
             .testTag("focus_bottom_navigation"),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
-                .width(280.dp)
-                .height(64.dp)
+                .widthIn(max = FocusCardStyle.BottomDockMaxWidth)
+                .fillMaxWidth()
+                .heightIn(min = FocusCardStyle.BottomDockHeight)
                 .shadow(
                     elevation = 12.dp,
-                    shape = RoundedCornerShape(32.dp),
+                    shape = FocusCardStyle.BottomDockShape,
                     ambientColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.12f),
                     spotColor = Color.Black.copy(alpha = if (isDark) 0.45f else 0.18f)
                 )
-                .clip(RoundedCornerShape(32.dp))
+                .clip(FocusCardStyle.BottomDockShape)
                 .background(glassBg)
                 .border(
                     width = 1.dp,
                     brush = glassBorderBrush,
-                    shape = RoundedCornerShape(32.dp)
+                    shape = FocusCardStyle.BottomDockShape
                 )
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min)
+                    .heightIn(min = FocusCardStyle.BottomDockHeight)
+                    .selectableGroup(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BottomTab.entries.forEach { tab ->
                     val isSelected = tab == selectedTab
-                    val iconColor by animateColorAsState(
-                        targetValue = if (isSelected) FocusColors.Primary else FocusColors.TextSecondary,
-                        animationSpec = tween(180),
-                        label = "tab_icon_color"
-                    )
+                    val title = stringResource(tab.titleRes)
+                    // Selection and theme changes are immediate, with a persistent selected fill.
+                    val iconColor = if (isSelected) FocusColors.Primary else FocusColors.TextSecondary
 
                     Box(
                         modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .heightIn(min = 48.dp)
                             .clip(RoundedCornerShape(20.dp))
-                            .clickable { onTabSelected(tab) }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .background(if (isSelected) FocusColors.Primary.copy(alpha = 0.12f) else Color.Transparent)
+                            .selectable(
+                                selected = isSelected,
+                                role = Role.Tab,
+                                onClick = { onTabSelected(tab) }
+                            )
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
                             .testTag("bottom_tab_${tab.name.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -141,17 +160,17 @@ fun FocusBottomNavigation(
                         ) {
                             Icon(
                                 imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                contentDescription = tab.title,
+                                contentDescription = null,
                                 tint = iconColor,
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = tab.title,
+                                text = title,
+                                textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = iconColor,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 10.sp
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
                             )
                         }

@@ -102,11 +102,13 @@ class AppLimitStrictModeEngine private constructor(
     }
 
     /**
-     * True when either a Strict Mode Focus Session is running OR any Strict Mode App Limit is active.
+     * True while a strict Focus Session is running or paused.
+     *
+     * A locked app limit protects that limit's own edit/delete/bypass actions; it does not lock
+     * unrelated website, notification or session defaults. Keeping the two scopes separate
+     * avoids one app limit freezing global protection settings.
      */
-    suspend fun isStrictProtectionLocked(): Boolean {
-        return isStrictFocusSessionActive() || hasAnyStrictLimit()
-    }
+    fun isStrictProtectionLocked(): Boolean = isStrictFocusSessionActive()
 
     /**
      * Evaluates whether to show a pre-limit reminder notification (e.g., 1 minute remaining).

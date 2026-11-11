@@ -10,10 +10,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,6 +30,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
@@ -48,9 +52,11 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,10 +69,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import com.example.R
 import com.example.core.design.FocusColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -88,6 +96,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,6 +113,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.core.design.LocalFocusColors
+import com.example.core.design.FocusSpacing
+import com.example.core.ui.FocusSearchField
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusStatusMessage
 import com.example.feature.notificationblocker.domain.NotificationBlockMode
 import com.example.feature.notificationblocker.domain.SilencedNotificationRecord
 import com.example.feature.notificationblocker.ui.InstalledAppItem
@@ -146,24 +162,16 @@ fun NotificationBlockerSheet(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val strictLockMessage by viewModel.strictLockMessage.collectAsStateWithLifecycle()
-    val sheetContext = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(strictLockMessage) {
-        strictLockMessage?.let { msg ->
-            android.widget.Toast.makeText(sheetContext, msg, android.widget.Toast.LENGTH_LONG).show()
-            viewModel.clearStrictLockMessage()
-        }
-    }
-
     val isDark = LocalFocusColors.current.isDark
-    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val dragHandleColor = if (isDark) Color(0xFF4E4E52) else Color(0xFFCBD5E1)
-    val doneBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val doneBtnText = if (isDark) Color.Black else Color(0xFFFFFFFF)
+    val sheetBg = FocusColors.OverlayBackground
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
+    val dragHandleColor = FocusColors.OverlayBorder
+    val doneBtnBg = FocusColors.OverlayTextPrimary
+    val doneBtnText = FocusColors.OverlayBackground
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQuery by remember { mutableStateOf("") }
@@ -242,19 +250,30 @@ fun NotificationBlockerSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 // Header Title matching YouTube channels popup styling
                 item {
                     Text(
-                        text = "Silence distracting app notifications\nduring your study",
+                        text = stringResource(R.string.notification_sheet_title),
                         color = textPrimary,
                         fontSize = 22.sp,
                         lineHeight = 28.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 18.dp)
+                        modifier = Modifier.padding(bottom = 18.dp).semantics { heading() }
                     )
+                }
+
+                if (strictLockMessage != null) {
+                    item {
+                        FocusStatusMessage(
+                            message = strictLockMessage,
+                            isError = true,
+                            onDismiss = viewModel::clearStrictLockMessage,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
                 }
 
                 // Permission Warning Banner with Stone-colored Grant button
@@ -295,65 +314,13 @@ fun NotificationBlockerSheet(
                 if (selectedTab == 0) {
                     // Search bar matching YouTube popup
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9))
-                                .border(1.dp, if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Search,
-                                    contentDescription = "Search",
-                                    tint = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Box(
-                                    modifier = Modifier.weight(1f),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    if (searchQuery.isEmpty()) {
-                                        Text(
-                                            text = "Search apps to silence (e.g. WhatsApp, Insta)",
-                                            color = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8),
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                    BasicTextField(
-                                        value = searchQuery,
-                                        onValueChange = { searchQuery = it },
-                                        singleLine = true,
-                                        textStyle = TextStyle(
-                                            color = textPrimary,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Normal
-                                        ),
-                                        cursorBrush = SolidColor(textPrimary),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("notification_app_search_field")
-                                    )
-                                }
-                                if (searchQuery.isNotEmpty()) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Clear",
-                                        tint = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
-                                        modifier = Modifier
-                                            .size(18.dp)
-                                            .clickable { searchQuery = "" }
-                                    )
-                                }
-                            }
-                        }
+                        FocusSearchField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = stringResource(R.string.notification_search_label),
+                            placeholder = stringResource(R.string.notification_search_example),
+                            modifier = Modifier.testTag("notification_app_search_field")
+                        )
                         Spacer(modifier = Modifier.height(14.dp))
                     }
 
@@ -367,7 +334,7 @@ fun NotificationBlockerSheet(
                         ) {
                             item {
                                 QuickPresetChip(
-                                    label = "Silence All (${uiState.installedApps.size})",
+                                    label = pluralStringResource(R.plurals.notification_silence_all, uiState.installedApps.size, uiState.installedApps.size),
                                     icon = Icons.Rounded.Shield,
                                     isDark = isDark,
                                     onClick = {
@@ -378,7 +345,7 @@ fun NotificationBlockerSheet(
                             }
                             item {
                                 QuickPresetChip(
-                                    label = "Social & Messaging",
+                                    label = stringResource(R.string.notification_preset_social),
                                     icon = Icons.Rounded.Apps,
                                     isDark = isDark,
                                     onClick = {
@@ -392,7 +359,7 @@ fun NotificationBlockerSheet(
                             }
                             item {
                                 QuickPresetChip(
-                                    label = "Entertainment & Games",
+                                    label = stringResource(R.string.notification_preset_entertainment),
                                     icon = Icons.Rounded.NotificationsOff,
                                     isDark = isDark,
                                     onClick = {
@@ -407,10 +374,9 @@ fun NotificationBlockerSheet(
                             if (uiState.blockedPackages.isNotEmpty()) {
                                 item {
                                     QuickPresetChip(
-                                        label = "Clear All",
+                                        label = stringResource(R.string.notification_allow_all),
                                         icon = Icons.Rounded.Close,
                                         isDark = isDark,
-                                        isDestructive = true,
                                         onClick = { viewModel.setAllAppsBlocked(emptySet()) }
                                     )
                                 }
@@ -428,13 +394,13 @@ fun NotificationBlockerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (searchQuery.isNotBlank()) "Search Results" else "Installed Apps",
+                                text = stringResource(if (searchQuery.isNotBlank()) R.string.notification_search_results else R.string.notification_installed_apps),
                                 color = textPrimary,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "${uiState.blockedPackages.size} silenced",
+                                text = pluralStringResource(R.plurals.notification_silenced_count, uiState.blockedPackages.size, uiState.blockedPackages.size),
                                 color = textSecondary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
@@ -452,13 +418,13 @@ fun NotificationBlockerSheet(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     CircularProgressIndicator(
-                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        color = FocusColors.Primary,
                                         modifier = Modifier.size(28.dp),
                                         strokeWidth = 2.5.dp
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "Scanning installed device apps...",
+                                        text = stringResource(R.string.notification_scanning),
                                         color = textSecondary,
                                         fontSize = 13.sp
                                     )
@@ -474,7 +440,7 @@ fun NotificationBlockerSheet(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (searchQuery.isNotEmpty()) "No apps matching \"$searchQuery\"" else "No installed apps found",
+                                    text = if (searchQuery.isNotEmpty()) stringResource(R.string.notification_no_search_results, searchQuery) else stringResource(R.string.notification_no_apps),
                                     color = textSecondary,
                                     fontSize = 14.sp
                                 )
@@ -535,7 +501,8 @@ fun NotificationBlockerSheet(
                 color = sheetBg,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
+                    .padding(horizontal = FocusSpacing.screenHorizontal)
+                    .padding(top = 8.dp, bottom = 20.dp)
             ) {
                 Button(
                     onClick = handleDismiss,
@@ -546,11 +513,11 @@ fun NotificationBlockerSheet(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp)
+                        .heightIn(min = 54.dp)
                         .testTag("done_notification_blocker_button")
                 ) {
                     Text(
-                        text = "Done",
+                        text = stringResource(R.string.action_done),
                         color = doneBtnText,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
@@ -570,11 +537,10 @@ private fun StonePermissionBanner(
     onRequestPermission: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bannerBg = if (isDark) Color(0xFF1E2124) else Color(0xFFF1F5F9)
-    val bannerBorder = if (isDark) Color(0xFF33383F) else Color(0xFFCBD5E1)
-    val stoneBtnBg = if (isDark) Color(0xFF475569) else Color(0xFF64748B) // Stone slate tone
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val bannerBg = FocusColors.OverlaySurface
+    val bannerBorder = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Box(
         modifier = modifier
@@ -590,61 +556,38 @@ private fun StonePermissionBanner(
             )
             .padding(14.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(stoneBtnBg.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Security,
-                    contentDescription = "Permission Required",
-                    tint = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
+            Column {
                 Text(
-                    text = "Notification Access Required",
+                    text = stringResource(R.string.notification_permission_title),
                     color = textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Allow FocusShield to intercept distracting alerts during sessions.",
+                    text = stringResource(R.string.notification_permission_body),
                     color = textSecondary,
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
-
-            // Stone-like styled button
-            Button(
+            OutlinedButton(
                 onClick = onRequestPermission,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = stoneBtnBg,
-                    contentColor = Color.White
-                ),
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, FocusColors.ControlBorder),
                 shape = RoundedCornerShape(50),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
-                    text = "Grant",
+                    text = stringResource(R.string.action_grant_notification_access),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = textPrimary
                 )
             }
         }
@@ -663,10 +606,10 @@ private fun MasterShieldCard(
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
-    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val cardBg = FocusColors.OverlaySurface
+    val dashedBorderColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Box(
         modifier = modifier
@@ -680,6 +623,8 @@ private fun MasterShieldCard(
                 dashLength = 7.dp,
                 gapLength = 5.dp
             )
+            .toggleable(value = isMasterEnabled, role = Role.Switch, onValueChange = onToggle)
+            .testTag("notification_blocker_master_switch")
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(
@@ -697,13 +642,13 @@ private fun MasterShieldCard(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(if (isMasterEnabled) (if (isDark) Color(0xFF1E3A2F) else Color(0xFFDCFCE7)) else (if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0))),
+                        .background(if (isMasterEnabled) FocusColors.EmeraldLight else FocusColors.SurfaceSubtle),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (isMasterEnabled) Icons.Rounded.NotificationsOff else Icons.Rounded.Notifications,
                         contentDescription = null,
-                        tint = if (isMasterEnabled) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
+                        tint = if (isMasterEnabled) FocusColors.EmeraldText else textSecondary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -712,12 +657,10 @@ private fun MasterShieldCard(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Notification Shield Engine",
+                        text = stringResource(R.string.notification_shield_label),
                         color = textPrimary,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Row(
@@ -729,20 +672,21 @@ private fun MasterShieldCard(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A))
+                                    .background(FocusColors.EmeraldText)
                             )
                         }
                         Text(
                             text = if (isMasterEnabled) {
-                                if (isSessionActive) "Session Active • $blockedAppsCount apps silent"
-                                else "Active • $blockedAppsCount apps silent"
+                                pluralStringResource(
+                                    if (isSessionActive) R.plurals.notification_session_active_apps else R.plurals.notification_active_apps,
+                                    blockedAppsCount,
+                                    blockedAppsCount
+                                )
                             } else {
-                                "Shield paused (Turn ON to silence)"
+                                stringResource(R.string.notification_shield_paused)
                             },
-                            color = if (isMasterEnabled) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            color = if (isMasterEnabled) FocusColors.EmeraldText else textSecondary,
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -750,14 +694,9 @@ private fun MasterShieldCard(
 
             Switch(
                 checked = isMasterEnabled,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.ToggleGreen,
-                    uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
-                    uncheckedTrackColor = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
-                ),
-                modifier = Modifier.testTag("notification_blocker_master_switch")
+                onCheckedChange = null,
+                colors = FocusColors.SwitchColors,
+                modifier = Modifier.clearAndSetSemantics { }
             )
         }
     }
@@ -775,18 +714,19 @@ private fun NotificationTabSelector(
     onTabSelect: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val tabBg = if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
-    val activeBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val activeText = if (isDark) Color.Black else Color.White
-    val inactiveText = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val tabBg = FocusColors.OverlaySurface
+    val activeBg = FocusColors.OverlayTextPrimary
+    val activeText = FocusColors.OverlayBackground
+    val inactiveText = FocusColors.OverlayTextSecondary
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(50))
             .background(tabBg)
-            .padding(4.dp),
+            .padding(4.dp)
+            .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         // Tab 0: Apps
@@ -794,18 +734,21 @@ private fun NotificationTabSelector(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .heightIn(min = 48.dp)
                 .clip(RoundedCornerShape(50))
                 .background(if (selectedTab == 0) activeBg else Color.Transparent)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
+                .selectable(
+                    selected = selectedTab == 0,
+                    role = Role.Tab,
                     onClick = { onTabSelect(0) }
-                ),
+                )
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Blocked Apps ($blockedAppsCount)",
+                text = pluralStringResource(R.plurals.notification_apps_tab, blockedAppsCount, blockedAppsCount),
                 color = if (selectedTab == 0) activeText else inactiveText,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 fontSize = 13.sp,
                 fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Medium
             )
@@ -816,40 +759,24 @@ private fun NotificationTabSelector(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .heightIn(min = 48.dp)
                 .clip(RoundedCornerShape(50))
                 .background(if (selectedTab == 1) activeBg else Color.Transparent)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
+                .selectable(
+                    selected = selectedTab == 1,
+                    role = Role.Tab,
                     onClick = { onTabSelect(1) }
-                ),
+                )
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Silenced Vault",
-                    color = if (selectedTab == 1) activeText else inactiveText,
-                    fontSize = 13.sp,
-                    fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Medium
-                )
-                if (vaultCount > 0) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(if (selectedTab == 1) (if (isDark) Color.Black else Color.White) else (if (isDark) Color.White else Color(0xFF0F172A))),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "$vaultCount",
-                            color = if (selectedTab == 1) (if (isDark) Color.White else Color(0xFF0F172A)) else (if (isDark) Color.Black else Color.White),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
+            Text(
+                text = pluralStringResource(R.plurals.notification_vault_tab, vaultCount, vaultCount),
+                color = if (selectedTab == 1) activeText else inactiveText,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                fontSize = 13.sp,
+                fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Medium
+            )
         }
     }
 }
@@ -865,15 +792,10 @@ private fun ThemedAppBlockCard(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
-    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-
-    val addBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val addBtnText = if (isDark) Color.Black else Color.White
-    val addedBtnBg = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
-    val addedBtnText = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B)
+    val cardBg = FocusColors.OverlaySurface
+    val dashedBorderColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Box(
         modifier = modifier
@@ -887,6 +809,7 @@ private fun ThemedAppBlockCard(
                 dashLength = 7.dp,
                 gapLength = 5.dp
             )
+            .toggleable(value = isBlocked, role = Role.Checkbox, onValueChange = { onToggle() })
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Row(
@@ -901,7 +824,7 @@ private fun ThemedAppBlockCard(
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap,
-                        contentDescription = appItem.appName,
+                        contentDescription = null,
                         modifier = Modifier
                             .size(46.dp)
                             .clip(RoundedCornerShape(10.dp))
@@ -920,85 +843,19 @@ private fun ThemedAppBlockCard(
                     text = appItem.appName,
                     color = textPrimary,
                     fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = if (isBlocked) "Notifications will be silenced" else "Notifications allowed",
-                    color = if (isBlocked) (if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)) else textSecondary,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = stringResource(if (isBlocked) R.string.notification_silenced_status else R.string.notification_allowed_status),
+                    color = if (isBlocked) FocusColors.EmeraldText else textSecondary,
+                    fontSize = 12.sp
                 )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            if (!isBlocked) {
-                // "Silence" / "Add" button matching YouTube sheet Add button
-                Box(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(addBtnBg)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onToggle
-                        )
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Silence",
-                            color = addBtnText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = "Silence app",
-                            tint = addBtnText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            } else {
-                // "Silenced" check button matching YouTube sheet Added button
-                Box(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(addedBtnBg)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onToggle
-                        )
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Silenced",
-                            color = addedBtnText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = "Silenced",
-                            tint = addedBtnText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
+            Checkbox(checked = isBlocked, onCheckedChange = null, modifier = Modifier.clearAndSetSemantics { })
         }
     }
 }
@@ -1014,13 +871,16 @@ private fun ThemedSilencedVaultItemCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
-    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val cardBg = FocusColors.OverlaySurface
+    val dashedBorderColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
-    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+    val context = LocalContext.current
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val timeFormat = remember(context, configuration) { android.text.format.DateFormat.getTimeFormat(context) }
     val formattedTime = remember(record.timestamp) { timeFormat.format(Date(record.timestamp)) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     // Sender name display logic: prioritize senderName, fallback to title if non-empty
     val displaySender = record.senderName ?: record.title
@@ -1058,7 +918,7 @@ private fun ThemedSilencedVaultItemCard(
                         if (bitmap != null) {
                             Image(
                                 bitmap = bitmap,
-                                contentDescription = record.appName,
+                                contentDescription = null,
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(RoundedCornerShape(8.dp))
@@ -1072,25 +932,23 @@ private fun ThemedSilencedVaultItemCard(
 
                     Spacer(modifier = Modifier.width(10.dp))
 
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Column {
                             Text(
                                 text = record.appName,
                                 color = textPrimary,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
+                                color = FocusColors.SurfaceSubtle
                             ) {
                                 Text(
-                                    text = "SILENCED",
-                                    color = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B),
-                                    fontSize = 8.sp,
+                                    text = stringResource(R.string.notification_silenced_badge),
+                                    color = FocusColors.TextSecondary,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                 )
@@ -1106,13 +964,13 @@ private fun ThemedSilencedVaultItemCard(
                 }
 
                 IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(28.dp)
+                    onClick = { showDeleteConfirmation = true },
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
-                        contentDescription = "Dismiss from vault",
-                        tint = textSecondary,
+                        contentDescription = stringResource(R.string.notification_delete_title, record.appName),
+                        tint = FocusColors.BlockedText,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1127,23 +985,21 @@ private fun ThemedSilencedVaultItemCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9))
+                        .background(FocusColors.SurfaceSubtle)
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Person,
                         contentDescription = null,
-                        tint = if (isDark) Color(0xFFA78BFA) else Color(0xFF7C3AED),
+                        tint = FocusColors.Primary,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Sender: $displaySender",
+                        text = stringResource(R.string.notification_sender, displaySender),
                         color = textPrimary,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1153,14 +1009,22 @@ private fun ThemedSilencedVaultItemCard(
             if (record.text.isNotBlank()) {
                 Text(
                     text = record.text,
-                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+                    color = textSecondary,
                     fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+                    lineHeight = 20.sp
                 )
             }
         }
+    }
+
+    if (showDeleteConfirmation) {
+        FocusDestructiveDialog(
+            title = stringResource(R.string.notification_delete_title, record.appName),
+            message = stringResource(R.string.notification_delete_body),
+            confirmLabel = stringResource(R.string.action_delete_notification),
+            onConfirm = onDelete,
+            onDismiss = { showDeleteConfirmation = false }
+        )
     }
 }
 
@@ -1175,46 +1039,70 @@ private fun SilencedVaultHeaderRow(
     onTestSimulate: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textPrimary = FocusColors.OverlayTextPrimary
+    var showClearConfirmation by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Silenced Notification Vault",
+                text = stringResource(R.string.notification_vault_title),
                 color = textPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Interceptions preserved quietly while studying",
-                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B),
+                text = stringResource(R.string.notification_vault_subtitle),
+                color = FocusColors.OverlayTextSecondary,
                 fontSize = 12.sp
             )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (vaultCount > 0) {
-                Text(
-                    text = "Clear all",
-                    color = Color(0xFFFF6D2C),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable(onClick = onClearVault)
-                )
+                TextButton(onClick = { showClearConfirmation = true }) {
+                    Text(stringResource(R.string.action_clear_all), color = FocusColors.BlockedText)
+                }
             } else {
-                Text(
-                    text = "Test sample",
-                    color = if (isDark) Color(0xFFA78BFA) else Color(0xFF7C3AED),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable(onClick = onTestSimulate)
-                )
+                TextButton(onClick = onTestSimulate) {
+                    Text(stringResource(R.string.action_test_notification))
+                }
             }
         }
+    }
+
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text(stringResource(R.string.clear_vault_title)) },
+            text = {
+                Text(
+                    pluralStringResource(R.plurals.notification_clear_vault_body, vaultCount, vaultCount)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirmation = false
+                        onClearVault()
+                    }
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_clear_all),
+                        color = FocusColors.BlockedText,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 
@@ -1227,10 +1115,10 @@ private fun EmptySilencedVaultCard(
     onTestSimulate: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
-    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val cardBg = FocusColors.OverlaySurface
+    val dashedBorderColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Box(
         modifier = modifier
@@ -1252,26 +1140,26 @@ private fun EmptySilencedVaultCard(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(CircleShape)
-                    .background(if (isDark) Color(0xFF1E1E20) else Color(0xFFE2E8F0)),
+                    .background(FocusColors.SurfaceSubtle),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Rounded.NotificationsOff,
                     contentDescription = null,
-                    tint = if (isDark) Color.White else Color(0xFF0F172A),
+                    tint = FocusColors.OverlayTextPrimary,
                     modifier = Modifier.size(26.dp)
                 )
             }
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "No Silenced Notifications Yet",
+                text = stringResource(R.string.notification_vault_empty_title),
                 color = textPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "When you start a Focus Session, incoming notifications from selected apps will be caught and displayed with their logo and sender here.",
+                text = stringResource(R.string.notification_vault_empty_body),
                 color = textSecondary,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
@@ -1282,8 +1170,8 @@ private fun EmptySilencedVaultCard(
                 onClick = onTestSimulate,
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isDark) Color.White else Color(0xFF0F172A),
-                    contentColor = if (isDark) Color.Black else Color.White
+                    containerColor = FocusColors.OverlayTextPrimary,
+                    contentColor = FocusColors.OverlayBackground
                 ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1294,7 +1182,7 @@ private fun EmptySilencedVaultCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Test WhatsApp Interception",
+                    text = stringResource(R.string.action_test_notification),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1317,12 +1205,13 @@ private fun DefaultAppLogoFallback(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)),
+            .background(FocusColors.SurfaceSubtle)
+            .clearAndSetSemantics { },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = initial,
-            color = if (isDark) Color.White else Color(0xFF0F172A),
+            color = FocusColors.OverlayTextPrimary,
             fontSize = (size.value * 0.42f).sp,
             fontWeight = FontWeight.Bold
         )
@@ -1337,32 +1226,14 @@ private fun QuickPresetChip(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     isDark: Boolean,
-    onClick: () -> Unit,
-    isDestructive: Boolean = false
+    onClick: () -> Unit
 ) {
-    val bg = if (isDestructive) {
-        Color(0xFFEF4444).copy(alpha = 0.12f)
-    } else {
-        if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
-    }
-    val border = if (isDestructive) {
-        Color(0xFFEF4444).copy(alpha = 0.3f)
-    } else {
-        if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
-    }
-    val textColor = if (isDestructive) {
-        Color(0xFFEF4444)
-    } else {
-        if (isDark) Color.White else Color(0xFF0F172A)
-    }
-
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(bg)
-            .border(1.dp, border, RoundedCornerShape(50))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp)
+    val textColor = FocusColors.OverlayTextPrimary
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, FocusColors.ControlBorder),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(

@@ -1,6 +1,8 @@
 package com.example.core.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -88,6 +90,8 @@ fun FocusNavGraph(
     // Collected rather than read once from the StateFlow: restoring the snapshot in
     // SessionViewModel.init and the splash gate must agree even across a recomposition.
     val pendingSessionSummary by sessionViewModel.pendingSessionSummary.collectAsStateWithLifecycle()
+    val isSavingSession by sessionViewModel.isSavingSession.collectAsStateWithLifecycle()
+    val sessionSaveError by sessionViewModel.sessionSaveError.collectAsStateWithLifecycle()
     val resolvedUpdateVm: UpdateViewModel = updateViewModel ?: hiltViewModel()
     val updateState by resolvedUpdateVm.state.collectAsStateWithLifecycle()
     val showUpdateDot by resolvedUpdateVm.showDot.collectAsStateWithLifecycle()
@@ -156,6 +160,8 @@ fun FocusNavGraph(
     // (deep-linked session buried under Home, or onboarding pushed over an active session).
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+    val reduceMotion = com.example.core.design.LocalFocusMotion.current.reduceMotion
+    val tabRoutes = setOf(Screen.Home.route, Screen.Planner.route, Screen.StatsDetail.route, Screen.Blocks.route)
     val isSplashRoute = currentRoute == null || currentRoute == Screen.Splash.route
 
     // Show the interactive Update Push Modal (Available → Inline Downloading → Ready to Install & Restart)
@@ -258,7 +264,9 @@ fun FocusNavGraph(
         navController = navController,
         startDestination = Screen.Splash.route,
         enterTransition = {
-            if (initialState.destination.route == Screen.Splash.route) {
+            if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) {
+                EnterTransition.None
+            } else if (reduceMotion || initialState.destination.route == Screen.Splash.route) {
                 fadeIn(animationSpec = tween(120))
             } else {
                 fadeIn(animationSpec = tween(200)) + slideIntoContainer(
@@ -268,20 +276,32 @@ fun FocusNavGraph(
             }
         },
         exitTransition = {
-            if (initialState.destination.route == Screen.Splash.route) {
+            if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) {
+                ExitTransition.None
+            } else if (reduceMotion || initialState.destination.route == Screen.Splash.route) {
                 fadeOut(animationSpec = tween(120))
             } else {
                 fadeOut(animationSpec = tween(160))
             }
         },
         popEnterTransition = {
-            fadeIn(animationSpec = tween(200))
+            if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) {
+                EnterTransition.None
+            } else {
+                fadeIn(animationSpec = tween(if (reduceMotion) 120 else 200))
+            }
         },
         popExitTransition = {
-            fadeOut(animationSpec = tween(160)) + slideOutOfContainer(
-                AnimatedContentTransitionScope.SlideDirection.End,
-                tween(160)
-            )
+            if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) {
+                ExitTransition.None
+            } else if (reduceMotion) {
+                fadeOut(animationSpec = tween(120))
+            } else {
+                fadeOut(animationSpec = tween(160)) + slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    tween(160)
+                )
+            }
         },
         modifier = modifier
     ) {
@@ -558,7 +578,10 @@ fun FocusNavGraph(
                         sessionViewModel.discardPendingSession {
                             navigateBackHome()
                         }
-                    }
+                    },
+                    isSaving = isSavingSession,
+                    saveError = sessionSaveError,
+                    onDismissSaveError = sessionViewModel::clearSessionSaveError
                 )
             } else {
                 // If summary is null (e.g. back navigation or cleared), return cleanly to Home
@@ -705,26 +728,42 @@ private fun handleBottomTabNavigation(tab: BottomTab, navController: NavHostCont
     when (tab) {
         BottomTab.FOCUS -> {
             navController.navigate(Screen.Home.route) {
-                popUpTo(Screen.Home.route) { inclusive = false }
+                popUpTo(Screen.Home.route) {
+                    inclusive = false
+                    saveState = true
+                }
                 launchSingleTop = true
+                restoreState = true
             }
         }
         BottomTab.PLANNER -> {
             navController.navigate(Screen.Planner.route) {
-                popUpTo(Screen.Home.route) { inclusive = false }
+                popUpTo(Screen.Home.route) {
+                    inclusive = false
+                    saveState = true
+                }
                 launchSingleTop = true
+                restoreState = true
             }
         }
         BottomTab.STATS -> {
             navController.navigate(Screen.StatsDetail.route) {
-                popUpTo(Screen.Home.route) { inclusive = false }
+                popUpTo(Screen.Home.route) {
+                    inclusive = false
+                    saveState = true
+                }
                 launchSingleTop = true
+                restoreState = true
             }
         }
         BottomTab.BLOCKS -> {
             navController.navigate(Screen.Blocks.route) {
-                popUpTo(Screen.Home.route) { inclusive = false }
+                popUpTo(Screen.Home.route) {
+                    inclusive = false
+                    saveState = true
+                }
                 launchSingleTop = true
+                restoreState = true
             }
         }
     }

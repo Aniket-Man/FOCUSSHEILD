@@ -223,9 +223,42 @@ open class FocusPreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] = appBlocking
             preferences[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] = strictMode
             preferences[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] = studyChannels
-            if (strictMode) {
-                preferences[PreferencesKeys.KEY_BLOCK_UNINSTALL] = true
-            }
+        }
+    }
+
+    /** A session default never silently changes unrelated global protection or app-limit locks. */
+    suspend fun updateStrictModeDefault(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] = enabled }
+    }
+
+    suspend fun updateAppBlockingDefault(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] = enabled }
+    }
+
+    suspend fun updateStudyChannelsDefault(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] = enabled }
+    }
+
+    /** All editor defaults commit together; there is no half-updated protection configuration. */
+    suspend fun updateSessionProtectionDefaults(
+        appBlocking: Boolean,
+        strictMode: Boolean,
+        studyChannels: Boolean,
+        manualWebsites: Boolean,
+        blockUninstall: Boolean,
+        blockSplitScreen: Boolean,
+        blockFloatingWindow: Boolean,
+        blockNotifications: Boolean
+    ) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_APP_BLOCKING_DEFAULT] = appBlocking
+            preferences[PreferencesKeys.KEY_STRICT_MODE_DEFAULT] = strictMode
+            preferences[PreferencesKeys.KEY_STUDY_CHANNELS_DEFAULT] = studyChannels
+            preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] = manualWebsites
+            preferences[PreferencesKeys.KEY_BLOCK_UNINSTALL] = blockUninstall
+            preferences[PreferencesKeys.KEY_BLOCK_SPLIT_SCREEN] = blockSplitScreen
+            preferences[PreferencesKeys.KEY_BLOCK_FLOATING_WINDOW] = blockFloatingWindow
+            preferences[PreferencesKeys.KEY_BLOCK_NOTIFICATIONS] = blockNotifications
         }
     }
 
@@ -281,6 +314,14 @@ open class FocusPreferencesRepository(private val context: Context) {
     suspend fun updateManualWebsiteBlocking(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] = enabled
+        }
+    }
+
+    /** Browser Study Mode needs both switches; write them together so a partial failure is impossible. */
+    suspend fun updateWebsiteBlockingDefaults(autoAdult: Boolean, manual: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_AUTO_ADULT_WEBSITE_BLOCKING] = autoAdult
+            preferences[PreferencesKeys.KEY_MANUAL_WEBSITE_BLOCKING] = manual
         }
     }
 

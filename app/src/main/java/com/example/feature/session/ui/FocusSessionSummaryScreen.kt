@@ -4,9 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -15,12 +13,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,10 +29,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -63,10 +62,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.Font
@@ -81,15 +86,20 @@ import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.design.LocalFocusMotion
+import com.example.core.design.rememberFocusInfiniteFloat
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.sessionModeTitle
 import com.example.core.util.TimeFormatter
 import com.example.data.model.SessionMode
 import com.example.data.repository.SessionQuote
 import com.example.data.repository.SessionQuoteRepository
 import com.example.feature.session.domain.SessionSummaryData
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
+import java.text.DateFormat
 import java.util.Date
-import java.util.Locale
 
 // Eye-attractive custom Google Fonts bundled locally via font-util
 private val PlayfairDisplayFontFamily = FontFamily(
@@ -108,38 +118,65 @@ private val CinzelFontFamily = FontFamily(
 )
 
 /**
- * Post-Session Summary Screen matching the user's reference layout:
- * - No gray circular dot at the top.
- * - In that top space, a Live-Writing Animated Quote fetched from Cloud Firestore (`/session_quotes`)
- *   writes itself out live in an eye-catching custom display font.
- * - Clean `TOTAL STUDY TIME RECORDED` hero card, Subject/Topic/Goal card, 2x2 metric grid,
- *   `Protection & Telemetry Breakdown` card, and `Save Session` / `Don't Save` bottom actions.
+ * Post-session summary screen. A quote opens the page, then the recorded study time, the session
+ * tags, and a truthful breakdown of what protection was actually active. Saving and discarding are
+ * explicit decisions: the session is never deleted without first naming that consequence.
  */
 @Composable
 fun FocusSessionSummaryScreen(
     summaryData: SessionSummaryData,
     onSaveSession: () -> Unit,
     onDiscardSession: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSaving: Boolean = false,
+    saveError: String? = null,
+    onDismissSaveError: () -> Unit = {}
 ) {
-    var isSaving by remember { mutableStateOf(false) }
-
-    // Intercept back button to prompt discard/leave cleanly
-    BackHandler {
-        if (!isSaving) {
-            onDiscardSession()
-        }
+    val context = LocalContext.current
+    val timeFormat: DateFormat = remember(context) {
+        android.text.format.DateFormat.getTimeFormat(context)
+    }
+    val startFormatted = remember(summaryData.startedAt, timeFormat) {
+        timeFormat.format(Date(summaryData.startedAt))
+    }
+    val endFormatted = remember(summaryData.endedAt, timeFormat) {
+        timeFormat.format(Date(summaryData.endedAt))
     }
 
-    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    val startFormatted = remember(summaryData.startedAt) { timeFormat.format(Date(summaryData.startedAt)) }
-    val endFormatted = remember(summaryData.endedAt) { timeFormat.format(Date(summaryData.endedAt)) }
-
-    val formattedStudyDuration = remember(summaryData.pureStudyDurationMillis) {
-        TimeFormatter.formatDetailed(summaryData.pureStudyDurationMillis)
-    }
+    val formattedStudyDuration = studyDurationText(summaryData.pureStudyDurationMillis)
+    val modeTitle = sessionModeTitle(summaryData.mode)
 
     val isCompletedGoal = summaryData.isCompleted && !summaryData.isCancelled
+    val isSessionStrict = summaryData.isStrictModeEnabled && summaryData.mode != SessionMode.STOPWATCH
+    val isYouTubeStudyActive =
+        summaryData.isYouTubeStudyModeEnabled || summaryData.isStudyChannelsEnabled
+    val distractionsDetail =
+        if (summaryData.distractionsBlockedCount > 0) {
+            stringResource(
+                R.string.session_summary_distractions_detail,
+                summaryData.distractionsBlockedCount
+            )
+        } else {
+            stringResource(R.string.session_summary_distractions_none_detail)
+        }
+    val appShieldDetail = when {
+        !summaryData.isAppBlockingEnabled -> stringResource(R.string.session_summary_not_active)
+        summaryData.blockedAppsCount > 0 -> pluralStringResource(
+            R.plurals.session_summary_apps_shielded,
+            summaryData.blockedAppsCount,
+            summaryData.blockedAppsCount
+        )
+        else -> stringResource(R.string.session_summary_app_shield_none)
+    }
+
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestDiscard: () -> Unit = {
+        if (!isSaving) showDiscardDialog = true
+    }
+
+    BackHandler(enabled = !isSaving) {
+        showDiscardDialog = true
+    }
 
     // Live-writing quote state fetched from Cloud Firestore (/session_quotes)
     var activeQuote by remember(summaryData.sessionId) {
@@ -150,56 +187,40 @@ fun FocusSessionSummaryScreen(
         activeQuote = SessionQuoteRepository.fetchRandomQuoteForSummary()
     }
 
+    if (showDiscardDialog) {
+        FocusDestructiveDialog(
+            title = stringResource(R.string.session_summary_discard_title),
+            message = stringResource(R.string.session_summary_discard_body),
+            onConfirm = { onDiscardSession() },
+            onDismiss = { showDiscardDialog = false },
+            confirmLabel = stringResource(R.string.session_summary_discard_confirm)
+        )
+    }
+
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(
-                    onClick = {
-                        if (!isSaving) onDiscardSession()
-                    },
-                    modifier = Modifier.testTag("summary_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
+            FocusScreenHeader(
+                title = stringResource(R.string.session_summary_title),
+                onBack = requestDiscard,
+                modifier = Modifier.statusBarsPadding(),
+                backButtonModifier = Modifier.testTag("summary_back_button"),
+                actions = {
+                    IconButton(
+                        onClick = requestDiscard,
+                        enabled = !isSaving,
+                        modifier = Modifier.testTag("summary_close_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = stringResource(R.string.session_summary_discard_desc),
+                            tint = FocusColors.TextSecondary
+                        )
+                    }
                 }
-
-                // Header title
-                Text(
-                    text = "Session Summary",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 17.sp
-                    )
-                )
-
-                // Top right discard icon button for quick navigation
-                IconButton(
-                    onClick = {
-                        if (!isSaving) onDiscardSession()
-                    },
-                    modifier = Modifier.testTag("summary_close_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Discard and Exit",
-                        tint = FocusColors.TextSecondary
-                    )
-                }
-            }
+            )
         },
         bottomBar = {
-            // Prominent Bottom Action Bar with "Save Session" and "Don't Save"
+            // Every exit from this screen is an explicit save or a confirmed discard.
             Surface(
                 color = FocusColors.Surface,
                 modifier = Modifier
@@ -211,27 +232,34 @@ fun FocusSessionSummaryScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                        .padding(
+                            horizontal = FocusSpacing.screenHorizontal,
+                            vertical = FocusSpacing.base
+                        ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Option 1: Save Session
+                    if (saveError != null) {
+                        FocusStatusMessage(
+                            message = saveError,
+                            isError = true,
+                            onDismiss = onDismissSaveError
+                        )
+                    }
+
                     Button(
                         onClick = {
-                            if (!isSaving) {
-                                isSaving = true
-                                onSaveSession()
-                            }
+                            if (!isSaving) onSaveSession()
                         },
                         enabled = !isSaving,
                         shape = FocusShapes.large,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = FocusColors.Primary,
-                            contentColor = Color.White,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
                             disabledContainerColor = FocusColors.Primary.copy(alpha = 0.6f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .heightIn(min = 54.dp)
                             .testTag("save_session_button")
                     ) {
                         if (isSaving) {
@@ -242,7 +270,7 @@ fun FocusSessionSummaryScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Saving Session...",
+                                text = stringResource(R.string.session_summary_saving),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 16.sp
@@ -260,7 +288,7 @@ fun FocusSessionSummaryScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Save Session",
+                                    text = stringResource(R.string.session_summary_save),
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 16.sp
@@ -270,13 +298,8 @@ fun FocusSessionSummaryScreen(
                         }
                     }
 
-                    // Option 2: Don't Save
                     OutlinedButton(
-                        onClick = {
-                            if (!isSaving) {
-                                onDiscardSession()
-                            }
-                        },
+                        onClick = requestDiscard,
                         enabled = !isSaving,
                         shape = FocusShapes.large,
                         border = androidx.compose.foundation.BorderStroke(
@@ -284,11 +307,11 @@ fun FocusSessionSummaryScreen(
                             FocusColors.CoralWarning.copy(alpha = 0.5f)
                         ),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = FocusColors.CoralWarning
+                            contentColor = FocusColors.CoralText
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .heightIn(min = 50.dp)
                             .testTag("dont_save_session_button")
                     ) {
                         Row(
@@ -303,11 +326,11 @@ fun FocusSessionSummaryScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Don't Save",
+                                text = stringResource(R.string.session_summary_discard),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 15.sp,
-                                    color = FocusColors.CoralWarning
+                                    color = FocusColors.CoralText
                                 )
                             )
                         }
@@ -325,12 +348,12 @@ fun FocusSessionSummaryScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = FocusSpacing.screenHorizontal),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Live-Writing Quote Showcase in the top space (gray circle dot completely removed)
+            // Live-writing quote showcase in the top space.
             LiveWritingQuoteHero(
                 quote = activeQuote ?: SessionQuoteRepository.PRELOADED_QUOTES.first(),
                 modifier = Modifier
@@ -341,7 +364,13 @@ fun FocusSessionSummaryScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = if (isCompletedGoal) "Great Job! Session Finished" else "Focus Session Ended",
+                text = stringResource(
+                    if (isCompletedGoal) {
+                        R.string.session_summary_complete_title
+                    } else {
+                        R.string.session_summary_ended_title
+                    }
+                ),
                 style = MaterialTheme.typography.headlineSmall.copy(
                     fontWeight = FontWeight.ExtraBold,
                     color = FocusColors.TextPrimary,
@@ -353,10 +382,13 @@ fun FocusSessionSummaryScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = if (isCompletedGoal)
-                    "Review all data taken during this session below. Choose whether to save it to your history and database."
-                else
-                    "Your session progress was stopped early. You can review the gathered metrics below before saving or discarding.",
+                text = stringResource(
+                    if (isCompletedGoal) {
+                        R.string.session_summary_complete_body
+                    } else {
+                        R.string.session_summary_ended_body
+                    }
+                ),
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = FocusColors.TextSecondary,
                     fontSize = 13.5.sp,
@@ -368,7 +400,6 @@ fun FocusSessionSummaryScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // TOTAL STUDY TIME RECORDED Hero Card (matches reference screenshot)
             TotalStudyTimeRecordedCard(
                 formattedStudyDuration = formattedStudyDuration,
                 startFormatted = startFormatted,
@@ -377,7 +408,6 @@ fun FocusSessionSummaryScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Subject, Topic & Session Goal Card (only shown when at least one is set)
             val hasSubjectOrTopicOrGoal = summaryData.subject.isNotBlank() ||
                 summaryData.topic.isNotBlank() ||
                 summaryData.goal.isNotBlank()
@@ -395,21 +425,24 @@ fun FocusSessionSummaryScreen(
                         if (summaryData.subject.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Subject",
+                                    text = stringResource(R.string.session_summary_subject),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextSecondary
                                     )
                                 )
+                                Spacer(modifier = Modifier.weight(1f))
                                 Text(
                                     text = summaryData.subject,
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = FocusColors.TextPrimary
-                                    )
+                                    ),
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -417,21 +450,24 @@ fun FocusSessionSummaryScreen(
                         if (summaryData.topic.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Topic",
+                                    text = stringResource(R.string.session_summary_topic),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextSecondary
                                     )
                                 )
+                                Spacer(modifier = Modifier.weight(1f))
                                 Text(
                                     text = summaryData.topic,
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = FocusColors.TextPrimary
-                                    )
+                                    ),
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -467,72 +503,107 @@ fun FocusSessionSummaryScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // 2x2 Grid: Key Telemetry Metrics
+            // 2x2 key metrics. Intrinsic sizing keeps both tiles in a row equal when a
+            // translated value wraps to a second line.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Metric 1: Mode
                 MetricSummaryTile(
-                    title = "SESSION MODE",
-                    value = summaryData.mode.label,
+                    title = stringResource(R.string.session_summary_mode),
+                    value = modeTitle,
                     icon = when (summaryData.mode) {
                         SessionMode.TIMER -> Icons.Rounded.HourglassBottom
                         SessionMode.POMODORO -> Icons.Rounded.Timer
                         SessionMode.STOPWATCH -> Icons.Rounded.Schedule
                     },
                     accentColor = FocusColors.Primary,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
 
-                // Metric 2: Distractions Blocked
                 MetricSummaryTile(
-                    title = "DISTRACTIONS BLOCKED",
-                    value = "${summaryData.distractionsBlockedCount} blocked",
+                    title = stringResource(R.string.session_summary_distractions),
+                    value = if (summaryData.distractionsBlockedCount > 0) {
+                        stringResource(
+                            R.string.session_summary_distractions_value,
+                            summaryData.distractionsBlockedCount
+                        )
+                    } else {
+                        stringResource(R.string.session_summary_distractions_none_value)
+                    },
                     icon = Icons.Rounded.Block,
-                    accentColor = if (summaryData.distractionsBlockedCount > 0) FocusColors.CoralWarning else FocusColors.EmeraldSuccess,
-                    modifier = Modifier.weight(1f)
+                    accentColor = if (summaryData.distractionsBlockedCount > 0) {
+                        FocusColors.CoralWarning
+                    } else {
+                        FocusColors.EmeraldSuccess
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Metric 3: YouTube Study Mode Status
-                val ytStatusText = if (summaryData.isYouTubeStudyModeEnabled || summaryData.isStudyChannelsEnabled) "Study Mode ON" else "Standard"
                 MetricSummaryTile(
-                    title = "YOUTUBE STUDY MODE",
-                    value = ytStatusText,
+                    title = stringResource(R.string.session_summary_youtube_mode),
+                    value = stringResource(
+                        if (isYouTubeStudyActive) {
+                            R.string.session_summary_study_on
+                        } else {
+                            R.string.session_summary_standard
+                        }
+                    ),
                     icon = Icons.Rounded.SmartDisplay,
-                    accentColor = if (summaryData.isYouTubeStudyModeEnabled || summaryData.isStudyChannelsEnabled) FocusColors.ChannelsAmber else FocusColors.TextMuted,
-                    modifier = Modifier.weight(1f)
+                    accentColor = if (isYouTubeStudyActive) {
+                        FocusColors.ChannelsAmber
+                    } else {
+                        FocusColors.TextMuted
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
 
-                // Metric 4: Break Time / Pomodoro Cycles / Laps
                 val secondaryMetricTitle: String
                 val secondaryMetricValue: String
                 val secondaryMetricIcon: ImageVector
 
                 when (summaryData.mode) {
                     SessionMode.POMODORO -> {
-                        secondaryMetricTitle = "POMODORO CYCLES"
-                        secondaryMetricValue = "${summaryData.completedPomodoroCycles} of ${summaryData.totalPomodoroCycles}"
+                        secondaryMetricTitle = stringResource(R.string.session_summary_pomodoro_cycles)
+                        secondaryMetricValue = stringResource(
+                            R.string.session_summary_cycles_value,
+                            summaryData.completedPomodoroCycles,
+                            summaryData.totalPomodoroCycles
+                        )
                         secondaryMetricIcon = Icons.Rounded.CheckCircle
                     }
                     SessionMode.STOPWATCH -> {
-                        secondaryMetricTitle = "LAPS RECORDED"
-                        secondaryMetricValue = "${summaryData.lapsCount} recorded"
+                        secondaryMetricTitle = stringResource(R.string.session_summary_laps)
+                        secondaryMetricValue = pluralStringResource(
+                            R.plurals.session_summary_laps_value,
+                            summaryData.lapsCount,
+                            summaryData.lapsCount
+                        )
                         secondaryMetricIcon = Icons.Rounded.Flag
                     }
                     SessionMode.TIMER -> {
-                        secondaryMetricTitle = "BREAK TIME"
+                        secondaryMetricTitle = stringResource(R.string.session_summary_break_time)
                         secondaryMetricValue = if (summaryData.totalBreakDurationMillis > 0) {
                             TimeFormatter.formatDigital(summaryData.totalBreakDurationMillis, true)
                         } else {
-                            "None (0m)"
+                            stringResource(R.string.session_summary_none_value)
                         }
                         secondaryMetricIcon = Icons.Rounded.Schedule
                     }
@@ -543,24 +614,25 @@ fun FocusSessionSummaryScreen(
                     value = secondaryMetricValue,
                     icon = secondaryMetricIcon,
                     accentColor = FocusColors.CyanBlue,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Protection & Feature Breakdown
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(FocusShapes.large)
                     .background(FocusColors.Surface)
                     .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.large)
-                    .padding(16.dp)
+                    .padding(FocusSpacing.base)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Protection & Telemetry Breakdown",
+                        text = stringResource(R.string.session_summary_protection),
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = FocusColors.TextSecondary
@@ -568,36 +640,51 @@ fun FocusSessionSummaryScreen(
                     )
 
                     FeatureCheckRow(
-                        label = "Distractions Intercepted & Blocked",
+                        label = stringResource(R.string.session_summary_distractions_label),
                         isActive = summaryData.distractionsBlockedCount > 0,
-                        detail = "${summaryData.distractionsBlockedCount} attempts blocked"
+                        detail = distractionsDetail
                     )
 
                     FeatureCheckRow(
-                        label = "YouTube Educational Study Mode",
-                        isActive = summaryData.isYouTubeStudyModeEnabled || summaryData.isStudyChannelsEnabled,
-                        detail = if (summaryData.isYouTubeStudyModeEnabled || summaryData.isStudyChannelsEnabled)
-                            "Distracting videos blocked, study channels allowed"
-                        else
-                            "Not active"
+                        label = stringResource(R.string.session_summary_youtube_label),
+                        isActive = isYouTubeStudyActive,
+                        detail = stringResource(
+                            if (isYouTubeStudyActive) {
+                                R.string.session_summary_youtube_active
+                            } else {
+                                R.string.session_summary_not_active
+                            }
+                        )
                     )
 
                     FeatureCheckRow(
-                        label = "App Shield & Distraction Blocker",
+                        label = stringResource(R.string.session_summary_app_shield),
                         isActive = summaryData.isAppBlockingEnabled,
-                        detail = if (summaryData.isAppBlockingEnabled) "${summaryData.blockedAppsCount} apps shielded" else "Not active"
+                        detail = appShieldDetail
                     )
 
                     FeatureCheckRow(
-                        label = "Safe Browser Study Mode",
+                        label = stringResource(R.string.session_summary_browser),
                         isActive = summaryData.isBrowserStudyModeEnabled,
-                        detail = if (summaryData.isBrowserStudyModeEnabled) "Adult & distracting sites blocked" else "Not active"
+                        detail = stringResource(
+                            if (summaryData.isBrowserStudyModeEnabled) {
+                                R.string.session_summary_browser_active
+                            } else {
+                                R.string.session_summary_not_active
+                            }
+                        )
                     )
 
                     FeatureCheckRow(
-                        label = "Strict Mode Tamper Guard",
-                        isActive = summaryData.isStrictModeEnabled,
-                        detail = if (summaryData.isStrictModeEnabled) "Enforced throughout session" else "Standard focus"
+                        label = stringResource(R.string.session_summary_strict),
+                        isActive = isSessionStrict,
+                        detail = stringResource(
+                            if (isSessionStrict) {
+                                R.string.session_summary_strict_active
+                            } else {
+                                R.string.session_summary_not_active
+                            }
+                        )
                     )
                 }
             }
@@ -605,6 +692,25 @@ fun FocusSessionSummaryScreen(
             Spacer(modifier = Modifier.height(28.dp))
         }
     }
+}
+
+/** Localised compact study duration, e.g. "1 hour 30 minutes". */
+@Composable
+private fun studyDurationText(millis: Long): String {
+    val totalMinutes = millis.coerceAtLeast(0L) / 60_000L
+    val hours = (totalMinutes / 60L).toInt()
+    val minutes = (totalMinutes % 60L).toInt()
+    val hourText = if (hours > 0) {
+        pluralStringResource(R.plurals.session_picker_hours, hours, hours)
+    } else {
+        null
+    }
+    val minuteText = if (minutes > 0 || hours == 0) {
+        pluralStringResource(R.plurals.session_picker_minutes, minutes, minutes)
+    } else {
+        null
+    }
+    return listOfNotNull(hourText, minuteText).joinToString(" ")
 }
 
 /**
@@ -617,14 +723,22 @@ private fun LiveWritingQuoteHero(
     quote: SessionQuote,
     modifier: Modifier = Modifier
 ) {
+    val reduceMotion = LocalFocusMotion.current.reduceMotion
+    val entryOffsetPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     var visibleCharCount by remember(quote.id, quote.text) { mutableIntStateOf(0) }
     var isFinishedWriting by remember(quote.id, quote.text) { mutableStateOf(false) }
 
-    LaunchedEffect(quote.id, quote.text) {
+    LaunchedEffect(quote.id, quote.text, reduceMotion) {
         visibleCharCount = 0
         isFinishedWriting = false
         val fullLength = quote.text.length
-        val stepDelay = quote.typingSpeedMs.coerceIn(12L, 80L)
+        if (reduceMotion || fullLength == 0) {
+            visibleCharCount = fullLength
+            isFinishedWriting = true
+            return@LaunchedEffect
+        }
+        // This decorative reveal must never withhold the quote for more than five seconds.
+        val stepDelay = minOf(quote.typingSpeedMs.coerceIn(12L, 80L), 5_000L / fullLength)
         for (i in 1..fullLength) {
             delay(stepDelay)
             visibleCharCount = i
@@ -632,15 +746,15 @@ private fun LiveWritingQuoteHero(
         isFinishedWriting = true
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "quoteCursor")
-    val cursorAlpha by infiniteTransition.animateFloat(
+    val cursorAlpha by rememberFocusInfiniteFloat(
         initialValue = 0.15f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 480, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "cursorAlpha"
+        label = "cursorAlpha",
+        staticValue = 1f
     )
 
     val selectedFontFamily = remember(quote.fontStyle) {
@@ -663,7 +777,6 @@ private fun LiveWritingQuoteHero(
             .defaultMinSize(minHeight = 96.dp)
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        // Live-writing quote text with glowing ink cursor (gridless, open layout)
         Text(
             text = buildAnnotatedString {
                 withStyle(
@@ -674,7 +787,7 @@ private fun LiveWritingQuoteHero(
                         fontSize = 24.sp
                     )
                 ) {
-                    append("“")
+                    append("\u201C")
                 }
                 withStyle(
                     SpanStyle(
@@ -696,7 +809,7 @@ private fun LiveWritingQuoteHero(
                             fontSize = 24.sp
                         )
                     ) {
-                        append("”")
+                        append("\u201D")
                     }
                 } else {
                     withStyle(
@@ -706,7 +819,7 @@ private fun LiveWritingQuoteHero(
                             fontSize = 20.sp
                         )
                     ) {
-                        append(" ▍")
+                        append(" \u258D")
                     }
                 }
             },
@@ -715,16 +828,21 @@ private fun LiveWritingQuoteHero(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("session_summary_live_quote_text")
+                .clearAndSetSemantics { text = AnnotatedString(quote.text) }
         )
 
         AnimatedVisibility(
             visible = isFinishedWriting && quote.author.isNotBlank(),
-            enter = fadeIn(tween(420)) + slideInVertically(tween(420)) { it / 2 }
+            enter = if (reduceMotion) {
+                fadeIn(tween(120))
+            } else {
+                fadeIn(tween(300)) + slideInVertically(tween(300)) { entryOffsetPx }
+            }
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "— ${quote.author}",
+                    text = "\u2014 ${quote.author}",
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontFamily = CinzelFontFamily,
                         fontWeight = FontWeight.Bold,
@@ -740,9 +858,7 @@ private fun LiveWritingQuoteHero(
     }
 }
 
-/**
- * Gridless `TOTAL STUDY TIME RECORDED` hero section (no outer box, no border, no grid lines).
- */
+/** Gridless total study time hero section, with the recorded start and end time. */
 @Composable
 private fun TotalStudyTimeRecordedCard(
     formattedStudyDuration: String,
@@ -769,13 +885,14 @@ private fun TotalStudyTimeRecordedCard(
                 modifier = Modifier.size(15.dp)
             )
             Text(
-                text = "TOTAL STUDY TIME RECORDED",
+                text = stringResource(R.string.session_summary_total_study),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = FocusColors.Primary,
                     fontSize = 11.5.sp,
                     letterSpacing = 1.sp
-                )
+                ),
+                textAlign = TextAlign.Center
             )
         }
 
@@ -784,17 +901,23 @@ private fun TotalStudyTimeRecordedCard(
             style = MaterialTheme.typography.headlineLarge.copy(
                 fontWeight = FontWeight.ExtraBold,
                 color = FocusColors.TextPrimary,
-                fontSize = 38.sp
-            )
+                fontSize = 32.sp
+            ),
+            textAlign = TextAlign.Center
         )
 
         Text(
-            text = "$startFormatted  →  $endFormatted",
+            text = stringResource(
+                R.string.session_summary_time_range,
+                startFormatted,
+                endFormatted
+            ),
             style = MaterialTheme.typography.bodySmall.copy(
                 color = FocusColors.TextSecondary,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp
-            )
+            ),
+            textAlign = TextAlign.Center
         )
     }
 }

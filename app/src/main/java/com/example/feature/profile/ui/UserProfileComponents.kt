@@ -1,11 +1,11 @@
 package com.example.feature.profile.ui
 
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
+import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,148 +16,103 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EmojiEvents
-import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.LocalFireDepartment
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.RocketLaunch
-import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
-import com.example.core.util.ProfilePhotoStorage
+import com.example.core.design.FocusSpacing
+import com.example.core.design.LocalFocusColors
+import com.example.core.design.LocalFocusMotion
+import com.example.core.ui.FocusStatusMessage
 import java.io.File
 
-/**
- * Avatar Preset Option definition for student personas
- */
 data class AvatarPreset(
     val id: String,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
     val gradientColors: List<Color>
 )
 
+// Persisted IDs and emblem artwork are unchanged; only display labels are localized.
 val AVATAR_PRESETS = listOf(
-    AvatarPreset(
-        id = "SHIELD",
-        label = "Scholar",
-        icon = com.example.core.ui.FocusBrandMark,
-        gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6E18E6))
-    ),
-    AvatarPreset(
-        id = "PHOENIX",
-        label = "Flame",
-        icon = Icons.Rounded.LocalFireDepartment,
-        gradientColors = listOf(Color(0xFFFF8A65), Color(0xFFFF5722))
-    ),
-    AvatarPreset(
-        id = "MEDAL",
-        label = "Champion",
-        icon = Icons.Rounded.EmojiEvents,
-        gradientColors = listOf(Color(0xFFFFD54F), Color(0xFFFFA000))
-    ),
-    AvatarPreset(
-        id = "ASTRONAUT",
-        label = "Cosmic",
-        icon = Icons.Rounded.RocketLaunch,
-        gradientColors = listOf(Color(0xFF81D4FA), Color(0xFF0288D1))
-    ),
-    AvatarPreset(
-        id = "BRAIN",
-        label = "Thinker",
-        icon = Icons.Rounded.Psychology,
-        gradientColors = listOf(Color(0xFFCE93D8), Color(0xFF7B1FA2))
-    ),
-    AvatarPreset(
-        id = "LIGHTNING",
-        label = "Velocity",
-        icon = Icons.Rounded.Bolt,
-        gradientColors = listOf(Color(0xFFA5D6A7), Color(0xFF2E7D32))
-    )
+    AvatarPreset("SHIELD", R.string.profile_avatar_scholar, com.example.core.ui.FocusBrandMark,
+        listOf(Color(0xFF8B5CF6), Color(0xFF6E18E6))),
+    AvatarPreset("PHOENIX", R.string.profile_avatar_flame, Icons.Rounded.LocalFireDepartment,
+        listOf(Color(0xFFFF8A65), Color(0xFFFF5722))),
+    AvatarPreset("MEDAL", R.string.profile_avatar_champion, Icons.Rounded.EmojiEvents,
+        listOf(Color(0xFFFFD54F), Color(0xFFFFA000))),
+    AvatarPreset("ASTRONAUT", R.string.profile_avatar_cosmic, Icons.Rounded.RocketLaunch,
+        listOf(Color(0xFF81D4FA), Color(0xFF0288D1))),
+    AvatarPreset("BRAIN", R.string.profile_avatar_thinker, Icons.Rounded.Psychology,
+        listOf(Color(0xFFCE93D8), Color(0xFF7B1FA2))),
+    AvatarPreset("LIGHTNING", R.string.profile_avatar_velocity, Icons.Rounded.Bolt,
+        listOf(Color(0xFFA5D6A7), Color(0xFF2E7D32)))
 )
 
-/**
- * Coil cache key for an avatar image.
- *
- * The committed avatar and the staged crop each live at a fixed path, so their `file://` URI is
- * byte-for-byte identical before and after a re-crop. Coil keys both its memory and disk caches on
- * that URI, so without this a newly cropped photo keeps rendering the previously cached bitmap.
- * Folding in the file's last-modified stamp — which changes on every write — makes the key change
- * with it. `content://` and cached cloud avatars already have unique URIs and are left alone.
- *
- * Deliberately not wrapped in `remember`: the whole point is to pick up a new timestamp while the
- * URI stays the same.
- */
 private fun avatarCacheKey(uri: Uri): String {
     if (uri.scheme != "file") return uri.toString()
-    val file = uri.path?.let { File(it) }
-    val stamp = if (file != null && file.exists()) file.lastModified() else 0L
-    return "$uri#$stamp"
+    return "$uri#${uri.path?.let(::File)?.lastModified() ?: 0L}"
 }
 
-/**
- * User Profile Avatar component.
- * Gracefully displays uploaded image from local storage or falls back to preset avatar.
- */
 @Composable
 fun UserProfileAvatar(
     photoUri: String?,
@@ -165,88 +120,48 @@ fun UserProfileAvatar(
     size: Dp = 56.dp,
     showEditBadge: Boolean = false,
     onEditClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
-    val preset = remember(avatarPresetId) {
-        AVATAR_PRESETS.find { it.id == avatarPresetId } ?: AVATAR_PRESETS.first()
-    }
-
+    val preset = remember(avatarPresetId) { AVATAR_PRESETS.find { it.id == avatarPresetId } ?: AVATAR_PRESETS.first() }
+    val editLabel = stringResource(R.string.profile_edit)
+    val motion = LocalFocusMotion.current
+    val outline = if (LocalFocusColors.current.isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f)
     Box(
-        modifier = modifier
-            .size(size)
-            .then(
-                if (onEditClick != null) Modifier.clickable(onClick = onEditClick) else Modifier
-            ),
+        modifier = modifier.size(size).then(if (onEditClick != null) {
+            Modifier.clip(CircleShape)
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = editLabel, onClick = onEditClick)
+                .semantics { contentDescription = editLabel }
+        } else Modifier),
         contentAlignment = Alignment.Center
     ) {
         if (!photoUri.isNullOrBlank()) {
-            val avatarUri = Uri.parse(photoUri)
-            val cacheKey = avatarCacheKey(avatarUri)
+            val uri = Uri.parse(photoUri)
+            val cacheKey = avatarCacheKey(uri)
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(avatarUri)
-                    .memoryCacheKey(cacheKey)
-                    .diskCacheKey(cacheKey)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = "User Profile Photo",
+                model = ImageRequest.Builder(LocalContext.current).data(uri)
+                    .memoryCacheKey(cacheKey).diskCacheKey(cacheKey).crossfade(!motion.reduceMotion).build(),
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(size)
-                    .clip(CircleShape)
-                    .border(2.dp, FocusColors.Primary, CircleShape)
+                modifier = Modifier.size(size).clip(CircleShape).border(1.dp, outline, CircleShape)
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .size(size)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(colors = preset.gradientColors)
-                    )
-                    .border(2.dp, FocusColors.CardBorderSubtle, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = preset.icon,
-                    contentDescription = preset.label,
-                    tint = Color.White,
-                    modifier = Modifier.size(size * 0.52f)
-                )
+            Box(Modifier.size(size).clip(CircleShape).background(Brush.linearGradient(preset.gradientColors)),
+                contentAlignment = Alignment.Center) {
+                Icon(preset.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(size * 0.52f))
             }
         }
-
-        if (showEditBadge) {
-            Box(
-                modifier = Modifier
-                    .size(size * 0.38f)
-                    .align(Alignment.BottomEnd)
-                    .clip(CircleShape)
-                    .background(FocusColors.Primary)
-                    .border(1.5.dp, FocusColors.Surface, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.PhotoCamera,
-                    contentDescription = "Change photo",
-                    tint = FocusColors.TextOnDark,
-                    modifier = Modifier.size(size * 0.22f)
-                )
+        if (showEditBadge && onEditClick != null) {
+            Box(Modifier.size(size * 0.38f).align(Alignment.BottomEnd).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary).border(1.dp, FocusColors.Surface, CircleShape),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.PhotoCamera, null, tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(size * 0.22f))
             }
         }
     }
 }
 
-/**
- * Edit User Profile Bottom Sheet.
- * Allows user to:
- * - Upload custom photo via system Photo Picker / Gallery
- * - Pick from stylish student avatar presets
- * - Edit Name
- * - Edit Personal Motto / Vision
- * - Edit Academic / Exam Goal
- * - Adjust Daily Focus Target Minutes
- */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditProfileBottomSheet(
@@ -258,472 +173,130 @@ fun EditProfileBottomSheet(
     currentDailyGoalMinutes: Int,
     onDismiss: () -> Unit,
     onSaveProfile: (name: String, photoUri: String?, preset: String, motto: String, goal: String, dailyMinutes: Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    saving: Boolean = false,
+    saveError: String? = null,
+    onDismissSaveError: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var name by remember { mutableStateOf(currentName) }
-    var photoUri by remember { mutableStateOf(currentPhotoUri) }
-    var avatarPreset by remember { mutableStateOf(currentAvatarPreset) }
-    var motto by remember { mutableStateOf(currentMotto) }
-    var academicGoal by remember { mutableStateOf(currentAcademicGoal) }
-    var dailyGoalMinutes by remember { mutableIntStateOf(currentDailyGoalMinutes) }
-
-    // The raw gallery URI awaits cropping in the full-screen crop screen. It is deliberately kept
-    // out of `photoUri` so a picked-but-uncropped image can never become the avatar.
-    var pendingCropUri by remember { mutableStateOf<String?>(null) }
-
-    // System Image Picker launcher
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
+    var name by rememberSaveable { mutableStateOf(currentName) }
+    var photoUri by rememberSaveable { mutableStateOf(currentPhotoUri) }
+    var avatarPreset by rememberSaveable { mutableStateOf(currentAvatarPreset) }
+    var motto by rememberSaveable { mutableStateOf(currentMotto) }
+    var academicGoal by rememberSaveable { mutableStateOf(currentAcademicGoal) }
+    var dailyGoalMinutes by rememberSaveable { mutableStateOf(currentDailyGoalMinutes) }
+    var pendingCropUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var nameError by rememberSaveable { mutableStateOf<String?>(null) }
+    var feedback by rememberSaveable { mutableStateOf<String?>(null) }
+    val nameFocus = remember { FocusRequester() }
+    val busy = saving
+    val requestDismiss = { if (!busy) onDismiss() }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            // Persist read permissions if needed
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (e: Exception) {
-                // Ignore if not persistable
-            }
+            try { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            catch (_: SecurityException) { /* The crop is copied to private storage before saving. */ }
             pendingCropUri = uri.toString()
         }
     }
-
-    // Fallback Content launcher
-    val fallbackPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            pendingCropUri = uri.toString()
+    val fallbackPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) pendingCropUri = uri.toString()
+    }
+    fun choosePhoto() {
+        try { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        catch (exception: Exception) {
+            try { fallbackPicker.launch("image/*") }
+            catch (fallbackError: Exception) {
+                Log.w("EditProfile", "Unable to open photo picker", fallbackError)
+                feedback = context.getString(R.string.profile_photo_picker_error)
+            }
         }
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        onDismissRequest = requestDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { !busy }),
         containerColor = FocusColors.Surface,
         contentColor = FocusColors.TextPrimary,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 10.dp, bottom = 4.dp)
-                    .width(40.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(FocusColors.TextMuted.copy(alpha = 0.4f))
-            )
-        },
         modifier = modifier
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Edit Scholar Profile",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 20.sp
-                    )
-                )
-
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(FocusColors.SurfaceVariant)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = FocusColors.TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+            .verticalScroll(rememberScrollState()).padding(FocusSpacing.screenHorizontal),
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.profile_edit_title), style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() })
+                IconButton(onClick = requestDismiss, enabled = !busy) {
+                    Icon(Icons.Rounded.Close, stringResource(R.string.action_close))
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Profile Photo & Preset Section
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = FocusColors.SurfaceSubtle,
-                border = BorderStroke(1.dp, FocusColors.CardBorderSubtle),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Center Avatar with click-to-edit
-                    UserProfileAvatar(
-                        photoUri = photoUri,
-                        avatarPresetId = avatarPreset,
-                        size = 80.dp,
-                        showEditBadge = true,
-                        onEditClick = {
-                            try {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            } catch (e: Exception) {
-                                fallbackPickerLauncher.launch("image/*")
-                            }
+            FocusStatusMessage(saveError ?: feedback, isError = true, onDismiss = {
+                if (saveError != null) onDismissSaveError()
+                feedback = null
+            })
+            Surface(color = FocusColors.SurfaceVariant, shape = FocusShapes.card) {
+                Column(Modifier.fillMaxWidth().padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                    UserProfileAvatar(photoUri, avatarPreset, size = 80.dp, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Text(stringResource(R.string.profile_photo_hint), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                        OutlinedButton(onClick = ::choosePhoto, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("profile_upload_photo_button")) {
+                            Icon(Icons.Rounded.AddPhotoAlternate, null, modifier = Modifier.size(20.dp))
+                            Text(stringResource(R.string.profile_upload_photo), Modifier.padding(start = FocusSpacing.sm))
                         }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Button(
-                            onClick = {
-                                try {
-                                    photoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                } catch (e: Exception) {
-                                    fallbackPickerLauncher.launch("image/*")
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = FocusColors.Primary,
-                                contentColor = FocusColors.TextOnDark
-                            ),
-                            modifier = Modifier.testTag("profile_upload_photo_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.AddPhotoAlternate,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Upload Photo", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-
-                        if (photoUri != null) {
-                            TextButton(
-                                // Only clears the pending selection — the stored file is removed on
-                                // save, so cancelling the sheet never destroys the saved avatar.
-                                onClick = { photoUri = null },
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.DeleteOutline,
-                                    contentDescription = null,
-                                    tint = FocusColors.BlockedRed,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Remove", color = FocusColors.BlockedRed, fontSize = 13.sp)
-                            }
+                        if (photoUri != null) TextButton(onClick = { photoUri = null }, enabled = !busy) {
+                            Text(stringResource(R.string.profile_remove_photo), color = FocusColors.BlockedText)
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Preset Avatars Selector
-                    Text(
-                        text = "Or choose an avatar emblem:",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 11.sp
-                        ),
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(AVATAR_PRESETS, key = { it.id }) { preset ->
-                            val isSelected = photoUri == null && avatarPreset == preset.id
-                            val borderColor by animateColorAsState(
-                                if (isSelected) FocusColors.Primary else Color.Transparent,
-                                label = "border"
-                            )
-
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        photoUri = null
-                                        avatarPreset = preset.id
-                                    }
-                                    .padding(4.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(Brush.linearGradient(preset.gradientColors))
-                                        .border(2.5.dp, borderColor, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = preset.icon,
-                                        contentDescription = preset.label,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = preset.label,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSelected) FocusColors.Primary else FocusColors.TextSecondary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 10.sp
-                                    )
-                                )
-                            }
+                    Text(stringResource(R.string.profile_avatar_options), style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+                    // All options wrap into view. A selected chip retains a check and native state.
+                    FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                        AVATAR_PRESETS.forEach { preset ->
+                            val selected = photoUri == null && avatarPreset == preset.id
+                            FilterChip(selected = selected, onClick = { photoUri = null; avatarPreset = preset.id }, enabled = !busy,
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("profile_avatar_${preset.id}"),
+                                label = { Text(stringResource(preset.labelRes)) },
+                                leadingIcon = { Icon(if (selected) Icons.Rounded.Check else preset.icon, null, Modifier.size(20.dp)) })
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Name Input
-            Text(
-                text = "Full Name / Nickname",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = FocusColors.TextPrimary
-                )
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = { Text("e.g. Alex Morgan, Focus Scholar", color = FocusColors.TextMuted) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Person,
-                        contentDescription = null,
-                        tint = FocusColors.Primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = FocusColors.Primary,
-                    unfocusedBorderColor = FocusColors.CardBorderSubtle,
-                    focusedContainerColor = FocusColors.SurfaceSubtle,
-                    unfocusedContainerColor = FocusColors.SurfaceSubtle,
-                    focusedTextColor = FocusColors.TextPrimary,
-                    unfocusedTextColor = FocusColors.TextPrimary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("profile_name_input")
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Motto / Vision Input
-            Text(
-                text = "Daily Motto & Inspiration",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = FocusColors.TextPrimary
-                )
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = motto,
-                onValueChange = { motto = it },
-                placeholder = { Text("e.g. Deep Work & Daily Mastery", color = FocusColors.TextMuted) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Bolt,
-                        contentDescription = null,
-                        tint = FocusColors.AmberOrange,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = FocusColors.Primary,
-                    unfocusedBorderColor = FocusColors.CardBorderSubtle,
-                    focusedContainerColor = FocusColors.SurfaceSubtle,
-                    unfocusedContainerColor = FocusColors.SurfaceSubtle,
-                    focusedTextColor = FocusColors.TextPrimary,
-                    unfocusedTextColor = FocusColors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Academic / Exam Target Goal Input
-            Text(
-                text = "Academic Target / Target Exam",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = FocusColors.TextPrimary
-                )
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = academicGoal,
-                onValueChange = { academicGoal = it },
-                placeholder = { Text("e.g. JEE Advanced Top 500 / USMLE Step 1 / University Finals", color = FocusColors.TextMuted) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.School,
-                        contentDescription = null,
-                        tint = FocusColors.EmeraldSuccess,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = FocusColors.Primary,
-                    unfocusedBorderColor = FocusColors.CardBorderSubtle,
-                    focusedContainerColor = FocusColors.SurfaceSubtle,
-                    unfocusedContainerColor = FocusColors.SurfaceSubtle,
-                    focusedTextColor = FocusColors.TextPrimary,
-                    unfocusedTextColor = FocusColors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Daily Target Focus Hours
-            Text(
-                text = "Daily Focus Study Target: ${dailyGoalMinutes / 60}h ${dailyGoalMinutes % 60}m",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = FocusColors.TextPrimary
-                )
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            val goalOptions = listOf(60, 120, 180, 240, 300, 360, 480)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                goalOptions.forEach { minutesOption ->
-                    val hrs = minutesOption / 60
-                    val isSelected = dailyGoalMinutes == minutesOption
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) FocusColors.Primary else FocusColors.SurfaceSubtle,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) FocusColors.Primary else FocusColors.CardBorderSubtle
-                        ),
-                        modifier = Modifier.clickable { dailyGoalMinutes = minutesOption }
-                    ) {
-                        Text(
-                            text = "${hrs}h / day",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSelected) FocusColors.TextOnDark else FocusColors.TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 12.sp
-                            ),
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
+            OutlinedTextField(value = name, onValueChange = { name = it; nameError = null }, enabled = !busy,
+                label = { Text(stringResource(R.string.profile_name_label)) }, placeholder = { Text(stringResource(R.string.profile_name_example)) },
+                isError = nameError != null, supportingText = nameError?.let { message -> ({ Text(message) }) },
+                modifier = Modifier.fillMaxWidth().focusRequester(nameFocus).testTag("profile_name_input"))
+            OutlinedTextField(value = motto, onValueChange = { motto = it }, enabled = !busy,
+                label = { Text(stringResource(R.string.profile_motto_label)) }, placeholder = { Text(stringResource(R.string.profile_motto_example)) },
+                modifier = Modifier.fillMaxWidth(), minLines = 2)
+            OutlinedTextField(value = academicGoal, onValueChange = { academicGoal = it }, enabled = !busy,
+                label = { Text(stringResource(R.string.profile_academic_label)) }, placeholder = { Text(stringResource(R.string.profile_academic_example)) },
+                modifier = Modifier.fillMaxWidth(), minLines = 2)
+            val duration = stringResource(R.string.profile_goal_duration, dailyGoalMinutes / 60, dailyGoalMinutes % 60)
+            Text(stringResource(R.string.profile_daily_target, duration), style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.semantics { heading() })
+            FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                (listOf(60, 120, 180, 240, 300, 360, 480) + dailyGoalMinutes).distinct().sorted().forEach { minutes ->
+                    FilterChip(selected = dailyGoalMinutes == minutes, onClick = { dailyGoalMinutes = minutes }, enabled = !busy,
+                        modifier = Modifier.heightIn(min = 48.dp), label = {
+                            Text(if (minutes % 60 == 0) pluralStringResource(R.plurals.profile_goal_hours, minutes / 60, minutes / 60)
+                                else stringResource(R.string.profile_goal_duration, minutes / 60, minutes % 60))
+                        })
                 }
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Save Action Button
-            Button(
-                onClick = {
-                    val finalName = if (name.isBlank()) "Focus Scholar" else name.trim()
-                    // A freshly cropped photo is still sitting in the staging file; promote it to
-                    // the permanent avatar (or drop both files when the photo was removed) before
-                    // handing the URI up to be persisted and uploaded.
-                    val finalPhoto = when {
-                        ProfilePhotoStorage.isStaged(context, photoUri) ->
-                            ProfilePhotoStorage.commitStagedCrop(context) ?: photoUri
-
-                        photoUri == null -> {
-                            ProfilePhotoStorage.deleteStoredPhotos(context)
-                            null
-                        }
-
-                        else -> photoUri
-                    }
-                    onSaveProfile(
-                        finalName,
-                        finalPhoto,
-                        avatarPreset,
-                        motto.trim(),
-                        academicGoal.trim(),
-                        dailyGoalMinutes
-                    )
-                    onDismiss()
-                },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = FocusColors.Primary,
-                    contentColor = FocusColors.TextOnDark
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("profile_save_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Check,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Save Profile",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                )
+            Button(onClick = {
+                if (name.isBlank()) {
+                    nameError = context.getString(R.string.profile_name_error)
+                    nameFocus.requestFocus()
+                } else {
+                    feedback = null
+                    onSaveProfile(name.trim(), photoUri, avatarPreset, motto.trim(), academicGoal.trim(), dailyGoalMinutes)
+                }
+            }, enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("profile_save_button")) {
+                Text(stringResource(if (busy) R.string.action_saving else R.string.profile_save))
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
         }
     }
-
-    // Rendered as a sibling of the sheet rather than inside it: a Dialog gets its own window and
-    // layers above the ModalBottomSheet, so the sheet's drag gestures cannot fight the pinch-zoom.
     pendingCropUri?.let { source ->
-        ImageCropDialog(
-            sourceUri = Uri.parse(source),
-            onConfirm = { croppedUri ->
-                photoUri = croppedUri
-                pendingCropUri = null
-            },
-            onCancel = { pendingCropUri = null }
-        )
+        ImageCropDialog(sourceUri = Uri.parse(source), onConfirm = { photoUri = it; pendingCropUri = null }, onCancel = { pendingCropUri = null })
     }
 }

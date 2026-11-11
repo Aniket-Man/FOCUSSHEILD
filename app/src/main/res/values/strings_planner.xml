@@ -1,0 +1,51 @@
+<resources>
+    <string name="planner_missing_schedule_error">This schedule was removed. Close this editor and add a new schedule.</string>
+    <string name="planner_add_schedule">Add schedule</string>
+    <string name="planner_help">Planner help</string>
+    <string name="planner_help_title">FocusShield planner</string>
+    <string name="planner_help_calendar">Select a date in the calendar to view and edit its focus routines.</string>
+    <string name="planner_help_add">Use Add schedule to choose the times, repeat days and apps to block.</string>
+    <string name="planner_help_suggestions">Suggestions add a routine using the displayed times and repeat days. You can edit it after adding.</string>
+    <string name="planner_focus_metric">Focus</string>
+    <string name="planner_usage_metric">Usage</string>
+    <string name="planner_usage_unavailable">Usage access needed</string>
+    <string name="planner_no_schedules">No schedules for this date</string>
+    <string name="planner_no_schedules_body">Add a focus block to plan your study time.</string>
+    <string name="planner_suggestions">Suggested schedules</string>
+    <string name="planner_today_state">Today</string>
+    <string name="planner_morning_title">Morning study</string>
+    <string name="planner_afternoon_title">Afternoon study</string>
+    <string name="planner_night_title">Night study</string>
+    <string name="planner_weekdays">Monday–Friday</string>
+    <string name="planner_daily">Every day</string>
+    <string name="planner_time_range">%1$s–%2$s</string>
+    <string name="planner_dismiss_suggestion">Dismiss suggestion: %1$s</string>
+    <string name="planner_add_suggestion">Add %1$s</string>
+    <string name="planner_adding_suggestion">Adding schedule…</string>
+    <string name="planner_preset_error">Unable to add this suggestion. Check the schedule list, then try again.</string>
+    <string name="planner_active_toggle_error">This schedule is running. Wait until its focus window ends, then turn it off.</string>
+    <string name="planner_toggle_error">Unable to change this schedule. Check its current state, then try again.</string>
+    <string name="planner_active_delete_error">This schedule is running. Wait until its focus window ends, then delete it.</string>
+    <string name="planner_delete_error">Unable to delete this schedule. Check the schedule list, then try again.</string>
+    <string name="planner_active_edit_error">“%1$s” is running. Wait until its focus window ends, then edit it.</string>
+    <string name="planner_overlap_error">This overlaps “%1$s” (%2$s–%3$s). Adjust one of the two time windows.</string>
+    <string name="planner_delete_title">Delete %1$s?</string>
+    <string name="planner_delete_body">This removes the schedule and its future reminders. Session history is kept. The schedule cannot be recovered.</string>
+    <string name="planner_delete_confirm">Delete schedule</string>
+    <string name="planner_enable_schedule">Enable schedule: %1$s</string>
+    <string name="planner_start_schedule">Start session: %1$s</string>
+    <string name="planner_edit_schedule">Edit schedule: %1$s</string>
+    <string name="planner_delete_schedule">Delete schedule: %1$s</string>
+    <string name="planner_active_remaining">Active now · %1$d min left, until %2$s</string>
+    <string name="planner_invalid_schedule">Schedule settings are invalid. Edit the schedule and choose valid times, days and a mode before starting.</string>
+    <string name="planner_one_time">One-time schedule</string>
+    <string name="planner_invalid_days">Repeat days need attention</string>
+    <plurals name="planner_schedule_count">
+        <item quantity="one">%1$d schedule for this date</item>
+        <item quantity="other">%1$d schedules for this date</item>
+    </plurals>
+    <plurals name="planner_blocked_apps">
+        <item quantity="one">%1$d app blocked</item>
+        <item quantity="other">%1$d apps blocked</item>
+    </plurals>
+</resources>

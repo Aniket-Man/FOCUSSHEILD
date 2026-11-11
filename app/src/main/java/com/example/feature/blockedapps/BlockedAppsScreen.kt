@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,9 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Warning
@@ -34,12 +33,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -48,21 +44,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.FocusSearchField
+import com.example.core.ui.FocusStatusMessage
 
 @Composable
 fun BlockedAppsScreen(
@@ -72,9 +76,11 @@ fun BlockedAppsScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val savingPackages by viewModel.savingPackages.collectAsStateWithLifecycle()
+    val operationError by viewModel.operationError.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Refresh accessibility status whenever user returns from system settings
+    // Refresh accessibility status whenever the user returns from system settings.
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -89,42 +95,17 @@ fun BlockedAppsScreen(
 
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.sm, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                Column {
-                    Text(
-                        text = "Distracting Apps Shield",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary,
-                            fontSize = 20.sp
-                        )
-                    )
-                    Text(
-                        text = "${uiState.totalBlockedCount} applications configured to block",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
-            }
+            FocusScreenHeader(
+                title = stringResource(R.string.blocked_apps_title),
+                onBack = onNavigateBack,
+                subtitle = pluralStringResource(
+                    R.plurals.blocked_apps_subtitle,
+                    uiState.totalBlockedCount,
+                    uiState.totalBlockedCount
+                ),
+                modifier = Modifier.statusBarsPadding(),
+                backButtonModifier = Modifier.testTag("back_button")
+            )
         },
         containerColor = FocusColors.Background,
         modifier = modifier.testTag("blocked_apps_screen")
@@ -134,63 +115,36 @@ fun BlockedAppsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = FocusSpacing.screenHorizontal),
-            verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.md),
+            contentPadding = PaddingValues(bottom = FocusSpacing.xl)
         ) {
-            // 1. Accessibility Service Status Banner
+            if (operationError != null) {
+                item {
+                    FocusStatusMessage(
+                        message = operationError,
+                        isError = true,
+                        onDismiss = viewModel::clearOperationError
+                    )
+                }
+            }
+
             item {
                 AccessibilityStatusCard(
                     isEnabled = uiState.isAccessibilityEnabled,
-                    onEnableClick = {
-                        AccessibilityHelper.openAccessibilitySettings(context)
-                    }
+                    onEnableClick = { AccessibilityHelper.openAccessibilitySettings(context) }
                 )
             }
 
-            // 2. Search Filter Input
             item {
-                OutlinedTextField(
+                FocusSearchField(
                     value = uiState.searchQuery,
-                    onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    placeholder = {
-                        Text(
-                            text = "Search installed applications...",
-                            color = FocusColors.TextMuted,
-                            fontSize = 14.sp
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Search",
-                            tint = FocusColors.TextSecondary
-                        )
-                    },
-                    trailingIcon = {
-                        if (uiState.searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = "Clear search",
-                                    tint = FocusColors.TextSecondary
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = FocusShapes.medium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = FocusColors.Surface,
-                        unfocusedContainerColor = FocusColors.Surface,
-                        focusedBorderColor = FocusColors.Primary,
-                        unfocusedBorderColor = FocusColors.CardBorder
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("search_apps_input")
+                    onValueChange = viewModel::onSearchQueryChanged,
+                    label = stringResource(R.string.blocked_apps_search_label),
+                    placeholder = stringResource(R.string.blocked_apps_search_placeholder),
+                    modifier = Modifier.testTag("search_apps_input")
                 )
             }
 
-            // 3. App List or Loading / Empty States
             if (uiState.isLoading) {
                 item {
                     Box(
@@ -222,10 +176,18 @@ fun BlockedAppsScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = if (uiState.searchQuery.isNotEmpty()) "No matching apps found" else "No applications available",
+                                text = if (uiState.searchQuery.isNotBlank()) {
+                                    stringResource(
+                                        R.string.blocked_apps_empty_search,
+                                        uiState.searchQuery
+                                    )
+                                } else {
+                                    stringResource(R.string.blocked_apps_empty_all)
+                                },
                                 color = FocusColors.TextSecondary,
                                 fontWeight = FontWeight.Medium,
-                                fontSize = 15.sp
+                                fontSize = 15.sp,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -237,15 +199,16 @@ fun BlockedAppsScreen(
                 ) { appItem ->
                     AppBlockRowItem(
                         app = appItem,
+                        enabled = !savingPackages.contains(appItem.packageName),
                         onToggle = { isChecked ->
-                            viewModel.toggleAppBlocked(appItem.packageName, appItem.appName, isChecked)
+                            viewModel.toggleAppBlocked(
+                                appItem.packageName,
+                                appItem.appName,
+                                isChecked
+                            )
                         }
                     )
                 }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(FocusSpacing.xl))
             }
         }
     }
@@ -289,28 +252,34 @@ private fun AccessibilityStatusCard(
                 Icon(
                     imageVector = if (isEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
                     contentDescription = null,
-                    tint = if (isEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
+                    tint = if (isEnabled) FocusColors.EmeraldText else FocusColors.CoralText,
                     modifier = Modifier.size(22.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text(
-                    text = if (isEnabled) "Accessibility Shield Active" else "Accessibility Permission Required",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                    text = stringResource(
+                        if (isEnabled) R.string.blocked_apps_access_on_title
+                        else R.string.blocked_apps_access_off_title
+                    ),
+                    style = MaterialTheme.typography.titleSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        color = if (isEnabled) Color(0xFF15803D) else Color(0xFFC2410C),
+                        color = if (isEnabled) FocusColors.EmeraldText else FocusColors.CoralText,
                         fontSize = 14.sp
                     )
                 )
                 Text(
-                    text = if (isEnabled)
-                        "Foreground distraction detection is running and ready."
-                    else
-                        "FocusShield needs Accessibility access to detect and block distracting apps during sessions.",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                    text = stringResource(
+                        if (isEnabled) R.string.blocked_apps_access_on_body
+                        else R.string.blocked_apps_access_off_body
+                    ),
+                    style = MaterialTheme.typography.bodySmall.copy(
                         color = FocusColors.TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -323,14 +292,14 @@ private fun AccessibilityStatusCard(
                 ElevatedButton(
                     onClick = onEnableClick,
                     colors = ButtonDefaults.elevatedButtonColors(
-                        containerColor = FocusColors.CoralWarning,
-                        contentColor = Color.White
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.testTag("enable_accessibility_button")
                 ) {
                     Text(
-                        text = "Enable",
+                        text = stringResource(R.string.blocked_apps_enable_access),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
@@ -343,8 +312,10 @@ private fun AccessibilityStatusCard(
 @Composable
 private fun AppBlockRowItem(
     app: InstalledAppItem,
+    enabled: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
+    val switchDescription = stringResource(R.string.blocked_apps_switch_description, app.appName)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -358,10 +329,8 @@ private fun AppBlockRowItem(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // App Icon
             AppIconImage(
                 drawable = app.icon,
-                appName = app.appName,
                 modifier = Modifier.size(42.dp)
             )
 
@@ -370,7 +339,7 @@ private fun AppBlockRowItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = app.appName,
-                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                    style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         color = FocusColors.TextPrimary,
                         fontSize = 15.sp
@@ -379,7 +348,7 @@ private fun AppBlockRowItem(
                 )
                 Text(
                     text = app.packageName,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                    style = MaterialTheme.typography.bodySmall.copy(
                         color = FocusColors.TextMuted,
                         fontSize = 11.sp
                     ),
@@ -392,13 +361,11 @@ private fun AppBlockRowItem(
             Switch(
                 checked = app.isBlocked,
                 onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.ToggleGreen,
-                    uncheckedThumbColor = Color.White,
-                    uncheckedTrackColor = FocusColors.CardBorder
-                ),
-                modifier = Modifier.testTag("toggle_${app.packageName}")
+                enabled = enabled,
+                colors = FocusColors.SwitchColors,
+                modifier = Modifier
+                    .semantics { contentDescription = switchDescription }
+                    .testTag("toggle_${app.packageName}")
             )
         }
     }
@@ -407,7 +374,6 @@ private fun AppBlockRowItem(
 @Composable
 fun AppIconImage(
     drawable: Drawable?,
-    appName: String,
     modifier: Modifier = Modifier
 ) {
     val bitmap = remember(drawable) {
@@ -433,7 +399,8 @@ fun AppIconImage(
     if (bitmap != null) {
         Image(
             bitmap = bitmap.asImageBitmap(),
-            contentDescription = appName,
+            // The row already announces the app name; the icon is decorative.
+            contentDescription = null,
             modifier = modifier.clip(RoundedCornerShape(10.dp))
         )
     } else {

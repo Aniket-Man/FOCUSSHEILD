@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,10 +14,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.MilitaryTech
@@ -49,6 +51,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusContrast
+import com.example.core.design.rememberFocusInfiniteFloat
 import com.example.core.design.FocusShapes
 import com.example.core.ui.FocusLottieAnimation
 import com.example.feature.rewards.domain.BadgeIconType
@@ -60,19 +64,20 @@ fun RewardCelebrationDialog(
     onClaimReward: () -> Unit,
     onNavigateToProfileRewards: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scalePulse by infiniteTransition.animateFloat(
+    val scalePulse by rememberFocusInfiniteFloat(
         initialValue = 0.95f,
         targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulse_scale"
+        label = "pulse_scale",
+        staticValue = 1f
     )
 
     val goldPrimary = Color(badge.primaryColorHex)
-    val goldAccent = Color(badge.accentColorHex)
+    val accentText = FocusContrast.readableAccent(goldPrimary, FocusColors.Surface)
+    val tagContainer = FocusContrast.tintedSurface(goldPrimary, FocusColors.Surface, 0.15f)
 
     Dialog(
         onDismissRequest = onClaimReward,
@@ -90,6 +95,7 @@ fun RewardCelebrationDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -105,14 +111,14 @@ fun RewardCelebrationDialog(
                 // Header Tag
                 Surface(
                     shape = FocusShapes.pill,
-                    color = goldPrimary.copy(alpha = 0.15f),
+                    color = tagContainer,
                     border = androidx.compose.foundation.BorderStroke(1.dp, goldPrimary.copy(alpha = 0.4f))
                 ) {
                     Text(
                         text = "🏆 NEW REWARD UNLOCKED!",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelSmall.copy(
-                            color = goldPrimary,
+                            color = FocusContrast.readableAccent(goldPrimary, tagContainer),
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
                             letterSpacing = 1.sp
@@ -160,7 +166,7 @@ fun RewardCelebrationDialog(
                 Text(
                     text = badge.subtitle,
                     style = MaterialTheme.typography.titleSmall.copy(
-                        color = goldPrimary,
+                        color = accentText,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center
@@ -189,12 +195,12 @@ fun RewardCelebrationDialog(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("reward_claim_profile_button"),
                     shape = FocusShapes.button,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = goldPrimary,
-                        contentColor = Color.White
+                        contentColor = FocusContrast.foregroundFor(goldPrimary)
                     )
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -221,10 +227,10 @@ fun RewardCelebrationDialog(
                     onClick = onClaimReward,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("reward_keep_studying_button"),
                     shape = FocusShapes.button,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.CardBorderSubtle)
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FocusColors.ControlBorder)
                 ) {
                     Text(
                         text = "Awesome, Keep Studying",

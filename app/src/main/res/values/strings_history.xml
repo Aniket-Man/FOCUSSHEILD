@@ -1,0 +1,28 @@
+<resources>
+    <string name="history_title">Study history</string>
+    <string name="history_subtitle">Every focused session you’ve recorded</string>
+    <string name="history_empty_title">No study sessions yet</string>
+    <string name="history_empty_body">Finish a focus session and it will appear here with your study time and progress.</string>
+    <string name="history_start_session">Start focus session</string>
+    <string name="history_total_label">Total recorded study</string>
+    <string name="history_completed_count">%1$d completed</string>
+    <string name="history_today">Today</string>
+    <string name="history_yesterday">Yesterday</string>
+    <string name="history_status_completed">Completed</string>
+    <string name="history_status_cancelled">Cancelled</string>
+    <string name="history_status_ended">Ended</string>
+    <string name="history_mode_session">%1$s session</string>
+    <string name="history_time_range">%1$s – %2$s</string>
+    <string name="history_actual_study">Actual study</string>
+    <string name="history_mode_label">Mode</string>
+    <string name="history_pomodoro_progress">Pomodoro progress</string>
+    <string name="history_pomodoro_cycles">%1$d of %2$d cycles completed</string>
+    <string name="history_timestamps">Timestamps</string>
+    <string name="history_timestamps_value">%1$s  →  %2$s</string>
+    <string name="history_delete_title">Delete this session record?</string>
+    <string name="history_delete_body">This permanently deletes the record for “%1$s” on %2$s. This cannot be undone.</string>
+    <string name="history_delete_confirm">Delete record</string>
+    <string name="history_delete_error">Unable to delete this session record. It is still in your history. Try again.</string>
+    <string name="history_card_action">Open session details</string>
+    <string name="history_delete_action">Delete session record</string>
+</resources>

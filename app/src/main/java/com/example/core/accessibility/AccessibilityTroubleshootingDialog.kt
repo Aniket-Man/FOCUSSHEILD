@@ -27,11 +27,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 
@@ -109,7 +111,7 @@ fun AccessibilityTroubleshootingDialog(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Accessibility Service Guide",
+                            text = stringResource(R.string.accessibility_guide_title),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = FocusColors.TextPrimary,
@@ -117,9 +119,15 @@ fun AccessibilityTroubleshootingDialog(
                             )
                         )
                         Text(
-                            text = if (isServiceActive) "Service is active and working properly" else "Fix permission greyed out / restricted settings",
+                            text = stringResource(
+                                if (isServiceActive) {
+                                    R.string.accessibility_guide_active
+                                } else {
+                                    R.string.accessibility_guide_inactive
+                                }
+                            ),
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = if (isServiceActive) FocusColors.EmeraldSuccess else FocusColors.TextSecondary,
+                                color = if (isServiceActive) FocusColors.EmeraldText else FocusColors.TextSecondary,
                                 fontSize = 12.sp
                             )
                         )
@@ -133,12 +141,8 @@ fun AccessibilityTroubleshootingDialog(
                 // Section 1: Android 13+ Restricted Setting Fix
                 TroubleshootingStepCard(
                     stepNumber = "1",
-                    title = "Android 13 / 14 / 15 Restricted Setting Fix",
-                    description = "If phone shows 'Restricted setting: For your security, this setting is currently unavailable':\n" +
-                            "• Tap 'Open App Info' below\n" +
-                            "• Tap the 3 dots menu (top right)\n" +
-                            "• Select 'Allow restricted settings'\n" +
-                            "• Return here and enable Accessibility Service!"
+                    title = stringResource(R.string.accessibility_step_1_title),
+                    description = stringResource(R.string.accessibility_step_1_body)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -146,11 +150,8 @@ fun AccessibilityTroubleshootingDialog(
                 // Section 2: Xiaomi / MIUI / HyperOS Autostart & Battery
                 TroubleshootingStepCard(
                     stepNumber = "2",
-                    title = "Xiaomi / MIUI / Samsung / Vivo Fix",
-                    description = "If the service turns off automatically when app is closed:\n" +
-                            "• Open App Info -> Enable 'Autostart'\n" +
-                            "• Battery Saver -> Set to 'No Restrictions'\n" +
-                            "• Lock FocusShield in Recent Apps screen"
+                    title = stringResource(R.string.accessibility_step_2_title),
+                    description = stringResource(R.string.accessibility_step_2_body)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -169,7 +170,10 @@ fun AccessibilityTroubleshootingDialog(
                     ) {
                         Icon(imageVector = Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("1. Open Accessibility Settings", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = stringResource(R.string.accessibility_open_settings),
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
                     OutlinedButton(
@@ -181,14 +185,21 @@ fun AccessibilityTroubleshootingDialog(
                     ) {
                         Icon(imageVector = Icons.Rounded.Smartphone, contentDescription = null, modifier = Modifier.size(18.dp), tint = FocusColors.Primary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("2. Open App Info (Allow Restricted)", color = FocusColors.Primary, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = stringResource(R.string.accessibility_open_app_info),
+                            color = FocusColors.Primary,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
                     TextButton(
                         onClick = onDismissRequest,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Done", color = FocusColors.TextSecondary)
+                        Text(
+                            text = stringResource(R.string.action_done),
+                            color = FocusColors.TextSecondary
+                        )
                     }
                 }
             }

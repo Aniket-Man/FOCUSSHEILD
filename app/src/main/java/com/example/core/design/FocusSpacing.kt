@@ -18,5 +18,5 @@ object FocusSpacing {
     val xxl: Dp = 32.dp
     val xxxl: Dp = 40.dp
     val huge: Dp = 48.dp
-    val screenHorizontal: Dp = 20.dp
+    val screenHorizontal: Dp = 16.dp
 }

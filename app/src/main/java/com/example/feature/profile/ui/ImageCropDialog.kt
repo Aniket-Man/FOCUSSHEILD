@@ -12,12 +12,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
@@ -25,12 +30,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowForward
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +72,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -66,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.core.design.FocusColors
+import com.example.R
 import com.example.core.util.ProfilePhotoStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -97,6 +114,7 @@ private val CropBackdrop = Color(0xFF101014)
  * file and hands its `file://` URI back. Nothing is committed to the saved avatar here — that
  * happens on Save — so dismissing this screen or the sheet leaves the previous avatar intact.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ImageCropDialog(
     sourceUri: Uri,
@@ -159,6 +177,7 @@ fun ImageCropDialog(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
             ) {
                 CropToolbar(
                     saving = saving,
@@ -192,7 +211,8 @@ fun ImageCropDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
+                        .heightIn(min = 160.dp, max = 400.dp)
+                        .aspectRatio(1f)
                         .onSizeChanged {
                             viewportSidePx =
                                 min(it.width, it.height).toFloat() * VIEWPORT_FRACTION
@@ -266,7 +286,7 @@ fun ImageCropDialog(
 
                 if (bitmap != null && !failed) {
                     Text(
-                        text = "Pinch to zoom · Drag to reposition",
+                        text = stringResource(R.string.photo_adjust_hint),
                         color = Color.White.copy(alpha = 0.72f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
@@ -275,6 +295,61 @@ fun ImageCropDialog(
                             .fillMaxWidth()
                             .padding(vertical = 14.dp)
                     )
+
+                    val zoomLabel = stringResource(R.string.photo_zoom)
+                    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(
+                            text = zoomLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White
+                        )
+                        Slider(
+                            value = scale,
+                            onValueChange = { next ->
+                                val image = bitmap ?: return@Slider
+                                val factor = next / scale
+                                scale = next
+                                offset = clampOffset(offset * factor, next, image)
+                            },
+                            valueRange = MIN_SCALE..MAX_SCALE,
+                            enabled = !saving,
+                            modifier = Modifier
+                                .semantics { contentDescription = zoomLabel }
+                                .testTag("image_crop_zoom_slider")
+                        )
+                        val moveStep = viewportSidePx * 0.08f
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            listOf(
+                                Triple(Icons.Rounded.ArrowUpward, R.string.photo_move_up, Offset(0f, -moveStep)),
+                                Triple(Icons.Rounded.ArrowDownward, R.string.photo_move_down, Offset(0f, moveStep)),
+                                Triple(Icons.Rounded.ArrowBack, R.string.photo_move_left, Offset(-moveStep, 0f)),
+                                Triple(Icons.Rounded.ArrowForward, R.string.photo_move_right, Offset(moveStep, 0f))
+                            ).forEach { (icon, labelRes, delta) ->
+                                IconButton(
+                                    enabled = !saving,
+                                    onClick = {
+                                        bitmap?.let { image -> offset = clampOffset(offset + delta, scale, image) }
+                                    }
+                                ) {
+                                    Icon(icon, stringResource(labelRes), tint = Color.White)
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    scale = MIN_SCALE
+                                    offset = Offset.Zero
+                                },
+                                enabled = !saving,
+                                modifier = Modifier.testTag("image_crop_reset_button")
+                            ) {
+                                Text(stringResource(R.string.photo_reset), color = Color.White)
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,6 +27,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 
@@ -156,7 +158,7 @@ fun AccessibilityPermissionRequiredDialog(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Accessibility Required",
+                            text = stringResource(R.string.accessibility_required_title),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = FocusColors.TextPrimary,
@@ -179,7 +181,11 @@ fun AccessibilityPermissionRequiredDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "To enable $featureTitle, FocusShield needs Accessibility permission to detect and shield $featureDescription in real time.",
+                    text = stringResource(
+                        R.string.accessibility_required_body,
+                        featureTitle,
+                        featureDescription
+                    ),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = FocusColors.TextPrimary,
                         fontSize = 14.sp,
@@ -207,7 +213,7 @@ fun AccessibilityPermissionRequiredDialog(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "100% On-Device & Private. FocusShield never records keystrokes, personal info, or sensitive data.",
+                            text = stringResource(R.string.accessibility_privacy_body),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextSecondary,
                                 fontSize = 11.5.sp,
@@ -245,7 +251,10 @@ fun AccessibilityPermissionRequiredDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Enable in Settings", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = stringResource(R.string.accessibility_enable_settings),
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
                     OutlinedButton(
@@ -267,7 +276,7 @@ fun AccessibilityPermissionRequiredDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Help / Restricted Settings Guide",
+                            text = stringResource(R.string.accessibility_help_guide),
                             color = FocusColors.TextSecondary,
                             fontWeight = FontWeight.Medium,
                             fontSize = 13.sp
@@ -278,7 +287,10 @@ fun AccessibilityPermissionRequiredDialog(
                         onClick = onDismissRequest,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Cancel", color = FocusColors.TextSecondary)
+                        Text(
+                            text = stringResource(R.string.action_cancel),
+                            color = FocusColors.TextSecondary
+                        )
                     }
                 }
             }

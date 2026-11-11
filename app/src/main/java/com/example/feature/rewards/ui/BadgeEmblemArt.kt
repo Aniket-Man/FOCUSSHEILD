@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -45,6 +44,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.core.design.FocusColors
+import com.example.core.design.rememberFocusInfiniteFloat
 import com.example.feature.rewards.domain.BadgeIconType
 import com.example.feature.rewards.domain.BadgeShapeType
 import com.example.feature.rewards.domain.RewardBadge
@@ -144,15 +144,15 @@ private fun GlowHalo(
     pulsing: Boolean
 ) {
     val haloModifier = if (pulsing) {
-        val transition = rememberInfiniteTransition(label = "badge_aura")
-        val scale by transition.animateFloat(
+        val scale by rememberFocusInfiniteFloat(
             initialValue = 0.94f,
             targetValue = 1.08f,
             animationSpec = infiniteRepeatable(
                 animation = tween(2200, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
-            label = "aura_pulse"
+            label = "aura_pulse",
+            staticValue = 1f
         )
         Modifier.scale(scale)
     } else {

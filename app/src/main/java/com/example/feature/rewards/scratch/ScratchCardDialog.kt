@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +45,12 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -121,6 +129,7 @@ fun ScratchCardDialog(
 
                 ScratchCardSurface(
                     card = card,
+                    isRevealed = revealed,
                     foilAlpha = foilAlpha,
                     onScratchProgress = { progress ->
                         if (progress >= DEFAULT_REVEAL_THRESHOLD && !revealed) {
@@ -139,14 +148,25 @@ fun ScratchCardDialog(
                     )
                     Button(
                         onClick = onDismiss,
-                        colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FocusColors.Primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Collect", fontWeight = FontWeight.Bold)
                     }
                 } else {
+                    OutlinedButton(
+                        onClick = { revealed = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("scratch_reveal_button")
+                    ) {
+                        Text(stringResource(R.string.action_reveal_reward))
+                    }
                     Text(
-                        text = "👆 Use your finger to scratch",
+                        text = stringResource(R.string.scratch_alternative_hint),
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = FocusColors.TextMuted,
                             fontSize = 12.sp
@@ -176,6 +196,7 @@ fun ScratchCardDialog(
 @Composable
 private fun ScratchCardSurface(
     card: ScratchCardEntity,
+    isRevealed: Boolean,
     foilAlpha: Float,
     onScratchProgress: (Float) -> Unit
 ) {
@@ -206,13 +227,17 @@ private fun ScratchCardSurface(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(240.dp)
+            .heightIn(min = 240.dp)
             .clip(RoundedCornerShape(20.dp))
     ) {
         // Layer 1: reward content (revealed underneath)
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .then(
+                    if (isRevealed) Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    else Modifier.clearAndSetSemantics { }
+                )
                 .background(
                     Brush.verticalGradient(
                         listOf(Color(0xFF1E1B4B), Color(0xFF312E81))
@@ -258,7 +283,7 @@ private fun ScratchCardSurface(
         if (foilAlpha > 0.01f) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .graphicsLayer {
                         compositingStrategy = CompositingStrategy.Offscreen
                         alpha = foilAlpha

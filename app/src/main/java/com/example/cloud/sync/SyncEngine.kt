@@ -729,6 +729,16 @@ class SyncEngine(
         isFirstSyncForAccount: Boolean,
         appContext: FocusShieldApp?
     ) {
+        val pendingPhoto = installState.pendingProfilePhoto(uid)
+        if (pendingPhoto != null) {
+            val avatarContext = appContext ?: error("Application context is required to back up a pending profile photo")
+            val uploader = ProfileImageUploader(avatarContext, authRepository)
+            val uploaded = pendingPhoto.photoUri?.let { uploader.uploadOwnImage(it, expectedUserId = uid) }
+                ?: uploader.deleteOwnImage(expectedUserId = uid)
+            check(uploaded) { "Profile photo is saved locally. Check your connection and use Sync now to retry its backup." }
+            installState.clearPendingProfilePhoto(pendingPhoto)
+            installState.setProfileDirty(true)
+        }
         val userSnap = getFromFirestore(uid)
         val prefSnap = getFromFirestore(uid, "user_preferences", "default")
 
@@ -755,7 +765,8 @@ class SyncEngine(
         }
 
         // 3b. Pull Remote Profile metadata if this account is being imported/migrated or local profile isn't dirty
-        val shouldPullProfile = isFirstSyncForAccount || !installState.profileDirty()
+        val shouldPullProfile = pendingPhoto == null && installState.pendingProfilePhoto(uid) == null &&
+            (isFirstSyncForAccount || !installState.profileDirty())
         if (shouldPullProfile && userSnap.exists()) {
             val currentPrefsBeforeProfile = preferencesRepository.preferencesFlow.first()
             val remoteDisplayName = userSnap.readString("displayName")?.takeIf { it.isNotBlank() }

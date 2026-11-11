@@ -7,7 +7,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,14 +31,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.rounded.BarChart
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.material.icons.rounded.MoreVert
@@ -47,7 +44,6 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,13 +54,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +64,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,6 +88,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.FocusShieldApp
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
@@ -105,6 +98,9 @@ import com.example.core.util.DigitalWellbeingSnapshot
 import com.example.core.util.InstalledAppsProvider.toImageBitmapCached
 import com.example.core.util.WellbeingAppUsageItem
 import com.example.data.local.entity.AppLimitEntity
+import com.example.feature.applimits.ui.AppLimitEditorHost
+import com.example.feature.applimits.ui.AppLimitFeedback
+import com.example.feature.applimits.ui.AppLimitsViewModel
 import com.patrykandpatrick.vico.compose.axis.horizontal.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.axis.vertical.rememberStartAxis
 import com.patrykandpatrick.vico.compose.chart.Chart
@@ -153,6 +149,7 @@ fun DigitalWellbeingScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val app = remember { FocusShieldApp.instance }
+    val appLimitsViewModel: AppLimitsViewModel = viewModel()
 
     val appLimits by app.appLimitRepository.getAllLimitsFlow()
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -165,9 +162,17 @@ fun DigitalWellbeingScreen(
     }
     var isRefreshing by remember { mutableStateOf(true) }
     var selectedFilter by remember { mutableStateOf(WellbeingAppFilter.ALL) }
-    var selectedAppForTimer by remember { mutableStateOf<WellbeingAppUsageItem?>(null) }
+    var editorPackage by rememberSaveable { mutableStateOf<String?>(null) }
+    var editorName by rememberSaveable { mutableStateOf<String?>(null) }
+    var editorRequiresExisting by rememberSaveable { mutableStateOf(false) }
     var showAppActivityDetailsScreen by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
+    val openLimitEditor: (WellbeingAppUsageItem) -> Unit = { item ->
+        editorPackage = item.packageName
+        editorName = item.appName
+        editorRequiresExisting = limitsByPackage[item.packageName] != null
+        appLimitsViewModel.loadInstalledApps()
+    }
 
     BackHandler(enabled = showAppActivityDetailsScreen) {
         showAppActivityDetailsScreen = false
@@ -411,6 +416,9 @@ fun DigitalWellbeingScreen(
                         .padding(innerPadding),
                     contentPadding = PaddingValues(top = 8.dp, bottom = 36.dp)
                 ) {
+                    item(key = "app_limit_feedback_details") {
+                        AppLimitFeedback(appLimitsViewModel)
+                    }
                     if (filteredApps.isEmpty()) {
                         item(key = "empty_details_apps") {
                             GridlessEmptyAppsState(selectedFilter = selectedFilter)
@@ -426,7 +434,7 @@ fun DigitalWellbeingScreen(
                                 item = appItem,
                                 accentColor = segmentColor,
                                 existingLimit = existingLimit,
-                                onTimerClick = { selectedAppForTimer = appItem },
+                                onTimerClick = { openLimitEditor(appItem) },
                                 onInfoClick = {
                                     openSystemAppDetails(context, appItem.packageName)
                                 }
@@ -442,6 +450,10 @@ fun DigitalWellbeingScreen(
                         .padding(innerPadding),
                     contentPadding = PaddingValues(bottom = 40.dp)
                 ) {
+                    item(key = "app_limit_feedback") {
+                        AppLimitFeedback(appLimitsViewModel)
+                    }
+
                     // 1. Usage Permission Banner (if not granted)
                     if (!currentSnapshot.hasUsagePermission) {
                         item(key = "permission_banner") {
@@ -459,7 +471,7 @@ fun DigitalWellbeingScreen(
                             snapshot = currentSnapshot,
                             todayStudyTimeFormatted = todayStudyTimeFormatted,
                             focusRatioPercentage = focusRatioPercentage,
-                            onAppClick = { appItem -> selectedAppForTimer = appItem },
+                            onAppClick = { appItem -> openLimitEditor(appItem) },
                             onOpenAppActivityDetails = { showAppActivityDetailsScreen = true }
                         )
                     }
@@ -500,7 +512,7 @@ fun DigitalWellbeingScreen(
                                 item = appItem,
                                 accentColor = segmentColor,
                                 existingLimit = existingLimit,
-                                onTimerClick = { selectedAppForTimer = appItem },
+                                onTimerClick = { openLimitEditor(appItem) },
                                 onInfoClick = {
                                     openSystemAppDetails(context, appItem.packageName)
                                 }
@@ -526,51 +538,19 @@ fun DigitalWellbeingScreen(
         }
     }
 
-    // Inline Digital Wellbeing "Set App Timer" Dialog
-    selectedAppForTimer?.let { targetApp ->
-        val existingLimit = limitsByPackage[targetApp.packageName]
-        WellbeingAppTimerDialog(
-            appItem = targetApp,
-            existingLimit = existingLimit,
-            onDismiss = { selectedAppForTimer = null },
-            onSaveLimit = { limitMinutes ->
-                if (existingLimit?.isStrictOverride == true) {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Strict Mode Active: ${targetApp.appName} timer is locked and cannot be modified or deleted.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    selectedAppForTimer = null
-                    return@WellbeingAppTimerDialog
-                }
-                scope.launch {
-                    app.appLimitRepository.saveLimit(
-                        packageName = targetApp.packageName,
-                        appName = targetApp.appName,
-                        dailyLimitMinutes = limitMinutes,
-                        isEnabled = true,
-                        isStrictOverride = existingLimit?.isStrictOverride ?: false,
-                        showRemindersBeforeLimit = existingLimit?.showRemindersBeforeLimit ?: true,
-                        emergencyUsesAllowed = existingLimit?.emergencyUsesAllowed ?: 1
-                    )
-                    selectedAppForTimer = null
-                }
+    // One app-limit editor is shared with Blocks and the App limits dashboard. A rejected or
+    // failed save keeps this editor open with the entered values and an actionable message.
+    if (editorPackage != null) {
+        AppLimitEditorHost(
+            viewModel = appLimitsViewModel,
+            editingPackage = editorPackage,
+            onDismiss = {
+                editorPackage = null
+                editorName = null
+                editorRequiresExisting = false
             },
-            onRemoveLimit = {
-                if (existingLimit?.isStrictOverride == true) {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Strict Mode Active: You cannot delete ${targetApp.appName} app limit while Strict Mode is active.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    selectedAppForTimer = null
-                    return@WellbeingAppTimerDialog
-                }
-                scope.launch {
-                    app.appLimitRepository.deleteLimit(targetApp.packageName)
-                    selectedAppForTimer = null
-                }
-            }
+            initialAppName = editorName,
+            requireExisting = editorRequiresExisting
         )
     }
 }
@@ -1310,7 +1290,7 @@ private fun WellbeingAppUsageRow(
             Text(
                 text = durationSubtitle,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    color = if (isLimitReached) FocusColors.CoralWarning else FocusColors.TextSecondary,
+                    color = if (isLimitReached) FocusColors.CoralText else FocusColors.TextSecondary,
                     fontWeight = FontWeight.Normal,
                     fontSize = 14.sp
                 ),
@@ -1424,7 +1404,7 @@ private fun WeeklyAppUsageGridlessSection(
             if (useMinutesScale) {
                 "${value.roundToInt()}m"
             } else {
-                if (value == 0f) "0h" else String.format(Locale.US, "%.1fh", value)
+                if (value == 0f) "0h" else String.format(Locale.getDefault(), "%.1fh", value)
             }
         }
     }
@@ -1674,208 +1654,4 @@ private fun HourlyActivityGridlessSection(
     }
 }
 
-@Composable
-private fun WellbeingAppTimerDialog(
-    appItem: WellbeingAppUsageItem,
-    existingLimit: AppLimitEntity?,
-    onDismiss: () -> Unit,
-    onSaveLimit: (Int) -> Unit,
-    onRemoveLimit: () -> Unit
-) {
-    val presetMinutes = listOf(15, 30, 45, 60, 90, 120)
-    var selectedMinutes by remember(existingLimit) {
-        mutableIntStateOf(existingLimit?.dailyLimitMinutes ?: 30)
-    }
 
-    val isStrictLocked = existingLimit?.isStrictOverride == true
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = FocusColors.Surface,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(FocusColors.Primary.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.HourglassBottom,
-                        contentDescription = null,
-                        tint = FocusColors.Primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "App Timer • ${appItem.appName}",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.TextPrimary
-                        )
-                    )
-                    Text(
-                        text = "Used ${appItem.formattedUsage} today",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (isStrictLocked) {
-                    Surface(
-                        shape = FocusShapes.medium,
-                        color = FocusColors.CoralWarning.copy(alpha = 0.14f),
-                        border = BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.45f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Strict Mode Active: This app limit is locked and cannot be deleted or modified.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.CoralWarning,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            ),
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "Set a daily Digital Wellbeing timer for ${appItem.appName}. Once reached, FocusShield pauses the app for the rest of the day.",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "DAILY ALLOWANCE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.Primary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = DeviceUsageStatsHelper.formatDurationHoursMins(selectedMinutes * 60_000L),
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            color = FocusColors.Primary,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    )
-                }
-
-                if (!isStrictLocked) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        presetMinutes.chunked(3).forEach { rowPresets ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                rowPresets.forEach { mins ->
-                                    val isSelected = selectedMinutes == mins
-                                    val label = DeviceUsageStatsHelper.formatDurationHoursMins(mins * 60_000L)
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(FocusShapes.pill)
-                                            .background(if (isSelected) FocusColors.Primary else FocusColors.SurfaceSubtle)
-                                            .clickable { selectedMinutes = mins }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = if (isSelected) Color.White else FocusColors.TextPrimary,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Column {
-                        Slider(
-                            value = selectedMinutes.toFloat(),
-                            onValueChange = { selectedMinutes = (it / 5f).roundToInt() * 5 },
-                            valueRange = 5f..240f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = FocusColors.Primary,
-                                activeTrackColor = FocusColors.Primary
-                            )
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("5m", style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextMuted))
-                            Text("4h", style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextMuted))
-                        }
-                    }
-
-                    if (existingLimit != null) {
-                        OutlinedButton(
-                            onClick = onRemoveLimit,
-                            modifier = Modifier.fillMaxWidth(),
-                            border = BorderStroke(1.dp, FocusColors.CoralWarning.copy(alpha = 0.5f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = FocusColors.CoralWarning)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Delete App Timer", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (isStrictLocked) {
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary),
-                    modifier = Modifier.testTag("save_wellbeing_timer_button")
-                ) {
-                    Text("Close", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            } else {
-                Button(
-                    onClick = { onSaveLimit(selectedMinutes.coerceAtLeast(5)) },
-                    colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary),
-                    modifier = Modifier.testTag("save_wellbeing_timer_button")
-                ) {
-                    Text("Save Timer", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
-        },
-        dismissButton = {
-            if (!isStrictLocked) {
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = FocusColors.TextSecondary)
-                }
-            }
-        }
-    )
-}

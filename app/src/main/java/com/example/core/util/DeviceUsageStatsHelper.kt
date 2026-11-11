@@ -866,8 +866,8 @@ object DeviceUsageStatsHelper {
         todayTotalMillis: Long,
         todayTopAppName: String?
     ): List<DailyUsageHistoryItem> {
-        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
-        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault())
+        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault())
         val maxDayMillis = 24L * 3600_000L
         val items = mutableListOf<DailyUsageHistoryItem>()
 
@@ -968,8 +968,8 @@ object DeviceUsageStatsHelper {
     }
 
     private fun buildEmptyWeeklyUsageHistory(): List<DailyUsageHistoryItem> {
-        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
-        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+        val dayShortFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault())
+        val dateFormat = java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault())
         return (6 downTo 0).map { daysAgo ->
             val cal = Calendar.getInstance().apply {
                 add(Calendar.DAY_OF_YEAR, -daysAgo)

@@ -99,7 +99,7 @@ fun AutomatedFocusSchedulesSection(
                 shape = FocusShapes.pill,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = FocusColors.Primary,
-                    contentColor = Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 modifier = Modifier.testTag("add_schedule_chip")
             ) {

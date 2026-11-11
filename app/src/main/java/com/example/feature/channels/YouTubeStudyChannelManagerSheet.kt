@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,14 +14,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -31,15 +31,18 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -66,6 +69,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -76,14 +83,23 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusSpacing
+import com.example.core.design.FocusShapes
+import com.example.core.design.LocalFocusMotion
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusSearchField
+import com.example.core.ui.FocusStatusMessage
 import com.example.core.design.LocalFocusColors
 import com.example.core.util.ChannelLogoStorageManager
 import com.example.core.util.YouTubeChannelSearchEngine
 import com.example.core.util.YouTubeChannelSearchResult
 import com.example.data.local.entity.StudyChannelEntity
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -141,9 +157,8 @@ fun YouTubeStudyChannelManagerSheet(
     val keyboardController = LocalSoftwareKeyboardController.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val isDark = LocalFocusColors.current.isDark
-    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val sheetBg = FocusColors.OverlayBackground
+    val textPrimary = FocusColors.OverlayTextPrimary
 
     val handleDismiss: () -> Unit = {
         focusManager.clearFocus()
@@ -183,16 +198,12 @@ fun YouTubeStudyChannelContent(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val isDark = LocalFocusColors.current.isDark
-    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
-    val dragHandleColor = if (isDark) Color(0xFF4E4E52) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val searchBg = if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
-    val searchBorder = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
-    val searchPlaceholder = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8)
-    val doneBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val doneBtnText = if (isDark) Color.Black else Color.White
+    val sheetBg = FocusColors.OverlayBackground
+    val dragHandleColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
+    val doneBtnBg = FocusColors.OverlayTextPrimary
+    val doneBtnText = FocusColors.OverlayBackground
 
     val repo = try { FocusShieldApp.instance.studyChannelRepository } catch (e: Exception) { null }
     val approvedChannelsState = repo?.allChannels?.collectAsState(initial = emptyList())
@@ -204,18 +215,81 @@ fun YouTubeStudyChannelContent(
         mutableStateOf<List<YouTubeChannelSearchResult>>(YouTubeChannelSearchEngine.CURATED_CATALOG.take(5))
     }
     var isSearching by remember { mutableStateOf(false) }
-    var searchJob by remember { mutableStateOf<Job?>(null) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf<String?>(null) }
+    var feedbackIsError by remember { mutableStateOf(false) }
+    var addingChannels by remember { mutableStateOf(emptySet<String>()) }
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
 
-    // Fetch live metadata (subscribers, logo, handle) directly from the internet on sheet open
-    LaunchedEffect(Unit) {
-        val live = YouTubeChannelSearchEngine.fetchSuggestedChannelsFromInternet()
-        if (live.isNotEmpty()) {
-            suggestedChannels = live
+    fun report(message: String, isError: Boolean = false) {
+        feedbackIsError = isError
+        feedback = message
+    }
+
+    fun addChannel(name: String, handle: String, avatar: String = "", clearSearch: Boolean = false) {
+        if (handle in addingChannels) return
+        addingChannels = addingChannels + handle
+        coroutineScope.launch {
+            try {
+                val channelRepo = repo
+                if (channelRepo == null) {
+                    report(context.getString(R.string.channel_repository_error), true)
+                    return@launch
+                }
+                val result = channelRepo.addChannel(name, handle, isApproved = true, thumbnailUrl = avatar)
+                if (result.isSuccess) {
+                    report(context.getString(R.string.channel_added_message, name))
+                    if (clearSearch) searchQuery = ""
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                } else {
+                    report(context.getString(R.string.channel_add_error), true)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.e("StudyChannels", "Unable to add study channel", error)
+                report(context.getString(R.string.channel_add_error), true)
+            } finally {
+                addingChannels = addingChannels - handle
+            }
         }
     }
 
+    fun removeChannel(channel: StudyChannelEntity) {
+        coroutineScope.launch {
+            try {
+                val channelRepo = repo ?: error("Study channel repository unavailable")
+                channelRepo.removeChannel(channel.id)
+                report(context.getString(R.string.channel_removed_message, channel.channelName))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.e("StudyChannels", "Unable to remove study channel", error)
+                report(context.getString(R.string.channel_remove_error), true)
+            }
+        }
+    }
+
+    LaunchedEffect(feedback) {
+        if (feedback != null) listState.scrollToItem(1)
+    }
+
+    // Fetch live metadata (subscribers, logo, handle) directly from the internet on sheet open
+    LaunchedEffect(Unit) {
+        try {
+            val live = YouTubeChannelSearchEngine.fetchSuggestedChannelsFromInternet()
+            if (live.isNotEmpty()) suggestedChannels = live
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("StudyChannels", "Using local channel suggestions", error)
+        }
+        if (repo == null) report(context.getString(R.string.channel_repository_error), true)
+    }
+
     LaunchedEffect(searchQuery) {
-        searchJob?.cancel()
         val trimmed = searchQuery.trim()
         if (trimmed.isEmpty()) {
             isSearching = false
@@ -223,20 +297,22 @@ fun YouTubeStudyChannelContent(
             return@LaunchedEffect
         }
 
-        searchJob = coroutineScope.launch {
-            isSearching = true
-            // Instant local catalog response
-            val localInstant = YouTubeChannelSearchEngine.searchLocalCatalog(trimmed)
-            if (localInstant.isNotEmpty()) {
-                searchResults = localInstant
-            }
+        isSearching = true
+        searchResults = YouTubeChannelSearchEngine.searchLocalCatalog(trimmed)
+        try {
             // Debounce for live network search
             delay(300)
             val networkResults = YouTubeChannelSearchEngine.searchChannels(trimmed, "All")
             if (networkResults.isNotEmpty()) {
                 searchResults = networkResults
             }
-            isSearching = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("StudyChannels", "Unable to search channels", error)
+            report(context.getString(R.string.channel_search_error), true)
+        } finally {
+            if (searchQuery.trim() == trimmed) isSearching = false
         }
     }
 
@@ -259,97 +335,38 @@ fun YouTubeStudyChannelContent(
         )
 
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
+            contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.base),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             // Main title
             item {
                 Text(
-                    text = "Add channels you study from and\nblock the rest",
+                    text = stringResource(R.string.channel_sheet_title),
                     color = textPrimary,
-                    fontSize = 22.sp,
-                    lineHeight = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 20.dp)
+                    style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.padding(bottom = FocusSpacing.base).semantics { heading() }
                 )
+            }
+
+            item {
+                FocusStatusMessage(feedback, isError = feedbackIsError, onDismiss = { feedback = null })
             }
 
             // Search bar
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(searchBg)
-                        .border(1.dp, searchBorder, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Search",
-                            tint = searchPlaceholder,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Box(modifier = Modifier.weight(1f)) {
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = "Search channel to add",
-                                    color = searchPlaceholder,
-                                    fontSize = 15.sp
-                                )
-                            }
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                singleLine = true,
-                                textStyle = TextStyle(
-                                    color = textPrimary,
-                                    fontSize = 15.sp
-                                ),
-                                cursorBrush = SolidColor(if (isDark) Color.White else FocusColors.Primary),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(
-                                    onSearch = {
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                    }
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("youtube_live_search_field")
-                            )
-                        }
-                        if (isSearching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = textPrimary,
-                                strokeWidth = 2.dp
-                            )
-                        } else if (searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = "Clear",
-                                    tint = searchPlaceholder,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+                FocusSearchField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = stringResource(R.string.channel_search_label),
+                    placeholder = stringResource(R.string.channel_search_example),
+                    isSearching = isSearching,
+                    onSearch = { focusManager.clearFocus(); keyboardController?.hide() },
+                    modifier = Modifier.testTag("youtube_live_search_field")
+                )
             }
 
             item { Spacer(modifier = Modifier.height(28.dp)) }
@@ -363,23 +380,15 @@ fun YouTubeStudyChannelContent(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Your Study Mode Channels",
+                            text = stringResource(R.string.channel_list_title),
                             color = textPrimary,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f).semantics { heading() }
                         )
                         if (existingChannels.isNotEmpty()) {
-                            Text(
-                                text = "Delete all",
-                                color = Color(0xFFFF6D2C),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.clickable {
-                                    coroutineScope.launch {
-                                        repo?.clearAllChannels()
-                                    }
-                                }
-                            )
+                            TextButton(onClick = { showDeleteAllDialog = true }) {
+                                Text(stringResource(R.string.action_delete_all), color = FocusColors.BlockedText)
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
@@ -388,7 +397,7 @@ fun YouTubeStudyChannelContent(
                 if (existingChannels.isEmpty()) {
                     item {
                         Text(
-                            text = "No study channels added yet",
+                            text = stringResource(R.string.channel_list_empty),
                             color = textSecondary,
                             fontSize = 14.sp,
                             modifier = Modifier.padding(bottom = 12.dp)
@@ -398,9 +407,7 @@ fun YouTubeStudyChannelContent(
                     items(existingChannels, key = { it.id }) { channel ->
                         ApprovedChannelItemRow(
                             channel = channel,
-                            onDelete = {
-                                coroutineScope.launch { repo?.removeChannel(channel.id) }
-                            },
+                            onDelete = { removeChannel(channel) },
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
                     }
@@ -410,11 +417,10 @@ fun YouTubeStudyChannelContent(
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Suggested for you",
+                        text = stringResource(R.string.channel_suggested_title),
                         color = textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = 14.dp)
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(bottom = 14.dp).semantics { heading() }
                     )
                 }
 
@@ -428,19 +434,8 @@ fun YouTubeStudyChannelContent(
                     YouTubeChannelCard(
                         channel = channelResult,
                         isApproved = isAlreadyApproved,
-                        onAdd = {
-                            coroutineScope.launch {
-                                val res = repo?.addChannel(
-                                    channelName = channelResult.channelName,
-                                    channelUrl = channelResult.handle,
-                                    isApproved = true,
-                                    thumbnailUrl = channelResult.avatarUrl
-                                )
-                                if (res?.isSuccess == true) {
-                                    focusManager.clearFocus()
-                                }
-                            }
-                        },
+                        isAdding = channelResult.handle.ifBlank { channelResult.channelId } in addingChannels,
+                        onAdd = { addChannel(channelResult.channelName, channelResult.handle.ifBlank { channelResult.channelId }, channelResult.avatarUrl) },
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
                 }
@@ -452,11 +447,11 @@ fun YouTubeStudyChannelContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Results for \"$searchQuery\"",
+                            text = stringResource(R.string.channel_results_title, searchQuery),
                             color = textPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(bottom = 14.dp)
+                            modifier = Modifier.padding(bottom = 14.dp).semantics { heading() }
                         )
                     }
                 }
@@ -477,7 +472,7 @@ fun YouTubeStudyChannelContent(
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "Searching YouTube channels...",
+                                    text = stringResource(R.string.channel_searching),
                                     color = textSecondary,
                                     fontSize = 14.sp
                                 )
@@ -494,34 +489,33 @@ fun YouTubeStudyChannelContent(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "No channels found matching \"$searchQuery\"",
+                                    text = stringResource(R.string.channel_no_results, searchQuery),
                                     color = textSecondary,
                                     fontSize = 14.sp
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
+                                Text(stringResource(R.string.channel_unverified_hint), color = textSecondary, style = MaterialTheme.typography.bodySmall)
                                 Button(
                                     onClick = {
-                                        coroutineScope.launch {
-                                            val handle = if (searchQuery.startsWith("@")) searchQuery.trim() else "@${searchQuery.trim().replace(" ", "")}"
-                                            repo?.addChannel(
-                                                channelName = searchQuery.trim().removePrefix("@"),
-                                                channelUrl = handle,
-                                                isApproved = true,
-                                                thumbnailUrl = ""
-                                            )
-                                            searchQuery = ""
+                                        val entered = searchQuery.trim()
+                                        val exactHandle = entered.startsWith("@") && entered.length > 1 && entered.none { it.isWhitespace() || it == '/' }
+                                        val channelUrl = runCatching {
+                                            val uri = java.net.URI(entered)
+                                            uri.scheme in listOf("http", "https") && uri.host in listOf("youtube.com", "www.youtube.com", "m.youtube.com") &&
+                                                listOf("/@", "/channel/", "/c/", "/user/").any { uri.path?.startsWith(it) == true }
+                                        }.getOrDefault(false)
+                                        if (exactHandle || channelUrl) {
+                                            addChannel(entered.removePrefix("@"), entered, clearSearch = true)
+                                        } else {
+                                            report(context.getString(R.string.channel_handle_error), true)
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0),
-                                        contentColor = textPrimary
-                                    ),
+                                    enabled = searchQuery.trim() !in addingChannels,
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
-                                        text = "Whitelist \"$searchQuery\" anyway",
-                                        fontSize = 13.sp,
-                                        color = textPrimary
+                                        text = stringResource(R.string.channel_add_unverified),
+                                        style = MaterialTheme.typography.labelLarge
                                     )
                                 }
                             }
@@ -538,19 +532,8 @@ fun YouTubeStudyChannelContent(
                         YouTubeChannelCard(
                             channel = channelResult,
                             isApproved = isAlreadyApproved,
-                            onAdd = {
-                                coroutineScope.launch {
-                                    val res = repo?.addChannel(
-                                        channelName = channelResult.channelName,
-                                        channelUrl = channelResult.handle,
-                                        isApproved = true,
-                                        thumbnailUrl = channelResult.avatarUrl
-                                    )
-                                    if (res?.isSuccess == true) {
-                                        focusManager.clearFocus()
-                                    }
-                                }
-                            },
+                            isAdding = channelResult.handle.ifBlank { channelResult.channelId } in addingChannels,
+                            onAdd = { addChannel(channelResult.channelName, channelResult.handle.ifBlank { channelResult.channelId }, channelResult.avatarUrl) },
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
                     }
@@ -563,7 +546,8 @@ fun YouTubeStudyChannelContent(
             color = sheetBg,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
+                .padding(horizontal = FocusSpacing.screenHorizontal)
+                .padding(top = FocusSpacing.sm, bottom = FocusSpacing.lg)
         ) {
             Button(
                 onClick = onDismiss,
@@ -574,17 +558,63 @@ fun YouTubeStudyChannelContent(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .heightIn(min = 54.dp)
                     .testTag("done_channels_button")
             ) {
                 Text(
-                    text = "Done",
+                    text = stringResource(R.string.action_done),
                     color = doneBtnText,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp
                 )
             }
         }
+    }
+
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text(stringResource(R.string.delete_all_channels_title)) },
+            text = {
+                Text(
+                    pluralStringResource(
+                        R.plurals.channel_clear_body,
+                        existingChannels.size,
+                        existingChannels.size
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAllDialog = false
+                        coroutineScope.launch {
+                            try {
+                                val channelRepo = repo ?: error("Study channel repository unavailable")
+                                channelRepo.clearAllChannels()
+                                report(context.getString(R.string.channel_cleared_message))
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                android.util.Log.e("StudyChannels", "Unable to remove study channels", error)
+                                report(context.getString(R.string.channel_clear_error), true)
+                            }
+                        }
+                    }
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_delete_all),
+                        color = FocusColors.BlockedText,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 
@@ -596,17 +626,14 @@ fun YouTubeChannelCard(
     channel: YouTubeChannelSearchResult,
     isApproved: Boolean,
     onAdd: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isAdding: Boolean = false
 ) {
-    val isDark = LocalFocusColors.current.isDark
-    val cardBg = if (isDark) Color(0xFF16181D).copy(alpha = 0.6f) else Color(0xFFF8FAFC)
-    val dashedBorderColor = if (isDark) Color(0xFF333336) else Color(0xFFCBD5E1)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val addBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val addBtnText = if (isDark) Color.Black else Color.White
-    val addedBtnBg = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
-    val addedBtnText = if (isDark) Color(0xFF9E9EA3) else Color(0xFF64748B)
+    val cardBg = FocusColors.OverlaySurface
+    val dashedBorderColor = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
+    val addLabel = stringResource(R.string.channel_add_named, channel.channelName)
 
     Box(
         modifier = modifier
@@ -622,6 +649,7 @@ fun YouTubeChannelCard(
             )
             .padding(horizontal = 16.dp, vertical = 13.dp)
     ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -639,49 +667,35 @@ fun YouTubeChannelCard(
                 Text(
                     text = channel.channelName,
                     color = textPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = channel.subscriberCount.ifBlank { channel.handle },
                     color = textSecondary,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+        }
 
             if (!isApproved) {
-                Box(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(addBtnBg)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onAdd
-                        )
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
+                Button(
+                    onClick = onAdd,
+                    enabled = !isAdding,
+                    shape = FocusShapes.pill,
+                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
+                        .semantics { contentDescription = addLabel }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Add",
-                            color = addBtnText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = stringResource(if (isAdding) R.string.channel_adding else R.string.channel_add_action),
+                            style = MaterialTheme.typography.labelLarge
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Rounded.Add,
-                            contentDescription = "Add",
-                            tint = addBtnText,
+                            contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -689,24 +703,24 @@ fun YouTubeChannelCard(
             } else {
                 Box(
                     modifier = Modifier
-                        .height(36.dp)
+                        .heightIn(min = 36.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(addedBtnBg)
-                        .padding(horizontal = 14.dp),
+                        .background(FocusColors.EmeraldLight)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .align(Alignment.End),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Added",
-                            color = addedBtnText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
+                            text = stringResource(R.string.channel_added_status),
+                            color = FocusColors.EmeraldText,
+                            style = MaterialTheme.typography.labelMedium
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Rounded.Check,
-                            contentDescription = "Added",
-                            tint = addedBtnText,
+                            contentDescription = null,
+                            tint = FocusColors.EmeraldText,
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -725,12 +739,11 @@ fun ApprovedChannelItemRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = LocalFocusColors.current.isDark
-    val rowBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFFFFFFF)
-    val rowBorder = if (isDark) Color(0xFF2A2A2E) else Color(0xFFE2E8F0)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val deleteIconTint = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8)
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val rowBg = FocusColors.OverlaySurface
+    val rowBorder = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -757,33 +770,37 @@ fun ApprovedChannelItemRow(
                 Text(
                     text = channel.channelName,
                     color = textPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = getChannelSubscriberDisplay(channel.channelName, channel.channelId),
                     color = textSecondary,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
             IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(36.dp)
+                onClick = { showDeleteConfirmation = true },
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Delete,
-                    contentDescription = "Delete",
-                    tint = deleteIconTint,
+                    contentDescription = stringResource(R.string.channel_remove_action, channel.channelName),
+                    tint = FocusColors.BlockedText,
                     modifier = Modifier.size(20.dp)
                 )
             }
         }
+    }
+    if (showDeleteConfirmation) {
+        FocusDestructiveDialog(
+            title = stringResource(R.string.channel_remove_title, channel.channelName),
+            message = stringResource(R.string.channel_remove_body),
+            confirmLabel = stringResource(R.string.channel_remove_confirm),
+            onConfirm = onDelete,
+            onDismiss = { showDeleteConfirmation = false }
+        )
     }
 }
 
@@ -800,6 +817,7 @@ fun StudyChannelAvatar(
 ) {
     val context = LocalContext.current
     val isDark = LocalFocusColors.current.isDark
+    val motion = LocalFocusMotion.current
     val normalizedName = name.trim().lowercase()
 
     val (bgColor, monogram, isSpecialLogo) = when {
@@ -865,16 +883,17 @@ fun StudyChannelAvatar(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(bgColor),
+            .background(bgColor)
+            .clearAndSetSemantics { },
         contentAlignment = Alignment.Center
     ) {
         if (effectiveUri.isNotBlank()) {
             SubcomposeAsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(effectiveUri)
-                    .crossfade(true)
+                    .crossfade(!motion.reduceMotion)
                     .build(),
-                contentDescription = name,
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
                 loading = { fallbackContent() },
@@ -885,4 +904,3 @@ fun StudyChannelAvatar(
         }
     }
 }
-

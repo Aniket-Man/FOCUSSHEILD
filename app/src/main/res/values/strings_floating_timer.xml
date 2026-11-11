@@ -1,0 +1,19 @@
+<resources>
+    <string name="floating_timer_channel_name">Floating focus timer</string>
+    <string name="floating_timer_channel_description">Live focus timer over other apps</string>
+    <string name="floating_timer_expand">Expand floating timer</string>
+    <string name="floating_timer_collapse">Collapse floating timer</string>
+    <string name="floating_timer_running">Session running</string>
+    <string name="floating_timer_paused">Session paused</string>
+    <string name="floating_timer_elapsed">Time elapsed</string>
+    <string name="floating_timer_remaining">Time remaining</string>
+    <string name="floating_timer_strict_hint">Strict mode is on. Pausing is unavailable.</string>
+    <string name="floating_timer_position_hint">Drag the status at the top, or use these buttons to move the timer.</string>
+    <string name="floating_timer_move_up">Move timer up</string>
+    <string name="floating_timer_move_down">Move timer down</string>
+    <string name="floating_timer_dock_left">Dock timer on left edge</string>
+    <string name="floating_timer_dock_right">Dock timer on right edge</string>
+    <string name="floating_timer_layout_error">Unable to move or expand the timer. Try again, or open FocusShield from the notification to use the full timer.</string>
+    <string name="floating_timer_open_error">Unable to open FocusShield. Open it from the timer notification or your app launcher.</string>
+    <string name="floating_timer_pause_error">Unable to change the session state. Open FocusShield to check whether the session is still running.</string>
+</resources>

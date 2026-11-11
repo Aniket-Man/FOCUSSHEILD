@@ -11,27 +11,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,19 +39,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.core.ui.FocusPrimaryButton
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.sessionModeDescription
+import com.example.core.ui.sessionModeSubtitle
+import com.example.core.ui.sessionModeTitle
 import com.example.data.model.SessionMode
 
 /**
  * Screen 2: Start Session screen.
- * Allows student to choose their focus mode (Timer, Stopwatch, Pomodoro) with clear explanations.
+ * Lets the student choose a focus mode, then continue into the detailed setup.
  */
 @Composable
 fun StartSessionScreen(
@@ -62,7 +69,7 @@ fun StartSessionScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.setupState.collectAsStateWithLifecycle()
-    var showSetupSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+    var showSetupSheet by remember { mutableStateOf(true) }
 
     if (showSetupSheet) {
         com.example.feature.session.ui.FocusSessionSetupSheet(
@@ -80,49 +87,31 @@ fun StartSessionScreen(
 
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.sm, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(FocusSpacing.xs))
-                Text(
-                    text = "Start Session",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary
-                    )
-                )
-            }
+            FocusScreenHeader(
+                title = stringResource(R.string.session_start_title),
+                onBack = onNavigateBack,
+                subtitle = stringResource(R.string.session_start_choose_body),
+                modifier = Modifier.statusBarsPadding(),
+                backButtonModifier = Modifier.testTag("back_button")
+            )
         },
         bottomBar = {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(FocusColors.Surface)
+                    .navigationBarsPadding()
                     .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.base)
             ) {
                 FocusPrimaryButton(
-                    text = "Continue to Setup",
+                    text = stringResource(R.string.session_start_continue),
                     onClick = onNavigateToSetup,
                     testTag = "continue_to_setup_button"
                 )
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.navigationBarsPadding().testTag("start_session_screen")
+        modifier = modifier.testTag("start_session_screen")
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -132,11 +121,10 @@ fun StartSessionScreen(
                 .padding(horizontal = FocusSpacing.screenHorizontal),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
-            // Intro headline
             Column {
                 Text(
-                    text = "Choose how you want to focus",
-                    style = androidx.compose.material3.MaterialTheme.typography.headlineMedium.copy(
+                    text = stringResource(R.string.session_start_choose_title),
+                    style = MaterialTheme.typography.headlineMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = FocusColors.TextPrimary,
                         fontSize = 22.sp
@@ -144,21 +132,20 @@ fun StartSessionScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Select a study session style tailored to your goal.",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
-                        color = FocusColors.TextSecondary
-                    )
+                    text = stringResource(R.string.session_start_choose_body),
+                    style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary)
                 )
             }
 
-            // Mode Selection Options
-            Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                SessionMode.values().forEach { mode ->
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                SessionMode.entries.forEach { mode ->
                     val isSelected = uiState.selectedMode == mode
                     val borderColor = if (isSelected) FocusColors.Primary else FocusColors.CardBorderSubtle
-                    val backgroundColor = if (isSelected) FocusColors.PrimaryContainer.copy(alpha = 0.4f) else FocusColors.Surface
+                    val backgroundColor =
+                        if (isSelected) FocusColors.PrimaryContainer.copy(alpha = 0.4f) else FocusColors.Surface
+                    val modeTitle = sessionModeTitle(mode)
+                    val modeSubtitle = sessionModeSubtitle(mode)
+                    val modeDescription = sessionModeDescription(mode)
 
                     Box(
                         modifier = Modifier
@@ -166,8 +153,16 @@ fun StartSessionScreen(
                             .shadow(
                                 elevation = if (isSelected) 3.dp else 1.dp,
                                 shape = FocusShapes.large,
-                                ambientColor = if (isSelected) FocusColors.Primary.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.02f),
-                                spotColor = if (isSelected) FocusColors.Primary.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.04f)
+                                ambientColor = if (isSelected) {
+                                    FocusColors.Primary.copy(alpha = 0.15f)
+                                } else {
+                                    Color.Black.copy(alpha = 0.02f)
+                                },
+                                spotColor = if (isSelected) {
+                                    FocusColors.Primary.copy(alpha = 0.2f)
+                                } else {
+                                    Color.Black.copy(alpha = 0.04f)
+                                }
                             )
                             .clip(FocusShapes.large)
                             .background(backgroundColor)
@@ -176,7 +171,11 @@ fun StartSessionScreen(
                                 color = borderColor,
                                 shape = FocusShapes.large
                             )
-                            .clickable { viewModel.selectMode(mode) }
+                            .selectable(
+                                selected = isSelected,
+                                role = Role.RadioButton,
+                                onClick = { viewModel.selectMode(mode) }
+                            )
                             .padding(FocusSpacing.base)
                             .testTag("mode_option_${mode.name.lowercase()}")
                     ) {
@@ -184,19 +183,16 @@ fun StartSessionScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            // Mode Icon Container
                             Box(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (isSelected) FocusColors.Primary else FocusColors.SurfaceVariant
-                                    ),
+                                    .background(if (isSelected) FocusColors.Primary else FocusColors.SurfaceVariant),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = mode.icon,
-                                    contentDescription = mode.title,
+                                    contentDescription = null,
                                     tint = if (isSelected) Color.White else FocusColors.Primary,
                                     modifier = Modifier.size(26.dp)
                                 )
@@ -204,21 +200,18 @@ fun StartSessionScreen(
 
                             Spacer(modifier = Modifier.width(FocusSpacing.base))
 
-                            // Text details
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = mode.title,
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                                    text = modeTitle,
+                                    style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = FocusColors.TextPrimary,
                                         fontSize = 16.sp
                                     )
                                 )
                                 Text(
-                                    text = mode.subtitle,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                    text = modeSubtitle,
+                                    style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextSecondary,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 12.5.sp
@@ -226,8 +219,8 @@ fun StartSessionScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = mode.description,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                    text = modeDescription,
+                                    style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextMuted,
                                         fontSize = 11.5.sp,
                                         lineHeight = 15.sp
@@ -237,10 +230,9 @@ fun StartSessionScreen(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Radio Indicator
                             RadioButton(
                                 selected = isSelected,
-                                onClick = { viewModel.selectMode(mode) },
+                                onClick = null,
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = FocusColors.Primary,
                                     unselectedColor = FocusColors.CardBorder
@@ -251,14 +243,13 @@ fun StartSessionScreen(
                 }
             }
 
-            // Quick link to detailed mode customization
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(FocusShapes.medium)
                     .background(FocusColors.Surface)
                     .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.medium)
-                    .clickable(onClick = onNavigateToModeSelection)
+                    .clickable(role = Role.Button, onClick = onNavigateToModeSelection)
                     .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
             ) {
                 Row(
@@ -266,17 +257,17 @@ fun StartSessionScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Explore Mode Presets",
-                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                            text = stringResource(R.string.session_start_presets_title),
+                            style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = FocusColors.Primary
                             )
                         )
                         Text(
-                            text = "JEE Sprint, Deep Study & Interval options",
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                            text = stringResource(R.string.session_start_presets_body),
+                            style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextSecondary,
                                 fontSize = 12.sp
                             )
@@ -284,7 +275,7 @@ fun StartSessionScreen(
                     }
                     Icon(
                         imageVector = Icons.Rounded.ChevronRight,
-                        contentDescription = "Details",
+                        contentDescription = null,
                         tint = FocusColors.Primary
                     )
                 }

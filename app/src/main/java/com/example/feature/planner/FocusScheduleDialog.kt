@@ -1,6 +1,5 @@
 package com.example.feature.planner
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
@@ -14,7 +13,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,16 +23,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -53,9 +55,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -73,7 +79,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
@@ -82,38 +91,66 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusSpacing
+import com.example.core.design.FocusShapes
+import com.example.core.design.LocalFocusMotion
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.FocusSwitchRow
+import com.example.core.ui.FocusActionRow
+import com.example.core.ui.FocusChoiceRow
+import com.example.core.ui.FocusNameDialog
+import com.example.core.ui.localizedSessionTag
 import com.example.core.design.LocalFocusColors
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
 import com.example.data.local.entity.BlockedAppEntity
 import com.example.data.local.entity.FocusScheduleEntity
 import com.example.data.local.entity.SubjectEntity
+import com.example.data.repository.FocusScheduleRepository
 import com.example.feature.channels.YouTubeStudyChannelContent
 import com.example.feature.session.SpecialAppOption
 import com.example.feature.session.ui.SelectAppsToBlockSheet
 import com.example.feature.websiteblocker.ui.WebsiteBlockerSheetContent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.text.DateFormatSymbols
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 private val DAYS = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
-private val DAY_LABELS = listOf("M", "T", "W", "T", "F", "S", "S")
+private val CALENDAR_DAYS = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
 
 private val DEFAULT_EMOJIS = listOf("🌅", "☀️", "🌇", "🌙", "⏳", "📚", "🎯", "💡", "💻", "🧠", "📝", "☕", "🔬", "📖")
 
@@ -177,7 +214,9 @@ fun FocusScheduleDialog(
     onOpenBlockedApps: () -> Unit = {},
     onDismiss: () -> Unit,
     onBlockNotificationsChanged: (Boolean) -> Unit = {},
-    onSave: (
+    onDefaultsSaveFailed: () -> Unit = {},
+    onFollowUpSaveFailed: () -> Unit = {},
+    onSave: suspend (
         title: String,
         daysOfWeek: String,
         startTime: String,
@@ -190,8 +229,9 @@ fun FocusScheduleDialog(
         breakMinutes: Int,
         description: String,
         blockedAppPackages: Set<String>,
-        blockNotifications: Boolean
-    ) -> Unit
+        blockNotifications: Boolean,
+        saveDefaults: suspend () -> Unit
+    ) -> FocusScheduleRepository.SaveResult
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as FocusShieldApp }
@@ -201,11 +241,10 @@ fun FocusScheduleDialog(
     val scheduleKey = initialSchedule?.id ?: "new_schedule"
 
     val customSubjects by subjectRepository.activeSubjects.collectAsStateWithLifecycle(initialValue = emptyList())
-    val prefs by preferencesRepository.preferencesFlow.collectAsStateWithLifecycle(
-        initialValue = com.example.data.preferences.FocusPreferences()
-    )
+    val prefs by preferencesRepository.preferencesFlow.collectAsStateWithLifecycle(initialValue = null)
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
 
-    var activeSubView by remember { mutableStateOf(ScheduleDialogSubView.MAIN) }
+    var activeSubView by rememberSaveable(scheduleKey) { mutableStateOf(ScheduleDialogSubView.MAIN) }
     var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
 
     var title by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.title ?: "") }
@@ -216,7 +255,7 @@ fun FocusScheduleDialog(
     var tag by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.subjectName.takeIf { !it.isNullOrBlank() } ?: "Untagged") }
     var isAutoStart by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.isAutoStartSession ?: true) }
     var blockNotifications by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.blockNotifications ?: initialBlockNotifications) }
-    var selectedMode by rememberSaveable(scheduleKey) { mutableStateOf("TIMER") }
+    var selectedMode by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.mode ?: "TIMER") }
 
     val effectiveScheduleDate = remember(initialSchedule?.scheduledDateMillis, selectedDateMillis) {
         val initMillis = initialSchedule?.scheduledDateMillis ?: 0L
@@ -224,18 +263,20 @@ fun FocusScheduleDialog(
     }
     var repeatEnabled by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.repeatEnabled ?: true) }
     var breakMinutes by rememberSaveable(scheduleKey) { mutableIntStateOf(initialSchedule?.breakMinutes ?: 5) }
-    var numberOfBreaks by rememberSaveable(scheduleKey) { mutableIntStateOf(if ((initialSchedule?.breakMinutes ?: 5) > 0) 1 else 0) }
     var description by rememberSaveable(scheduleKey) { mutableStateOf(initialSchedule?.description ?: "") }
 
     // Default blocked apps: use schedule's saved apps when editing, or default distracting apps + active app limits when creating
-    var selectedBlockedPackages by remember(scheduleKey) {
+    var selectedBlockedPackages by rememberSaveable(
+        scheduleKey,
+        stateSaver = Saver<Set<String>, ArrayList<String>>(save = { ArrayList(it) }, restore = { it.toSet() })
+    ) {
         val fromSchedule = initialSchedule?.blockedAppPackages
             ?.split(',')
             ?.map { it.trim() }
             ?.filter { it.isNotBlank() }
             ?.toSet()
-        val initialSet = if (!fromSchedule.isNullOrEmpty()) {
-            fromSchedule
+        val initialSet = if (initialSchedule != null) {
+            fromSchedule.orEmpty()
         } else {
             DEFAULT_DISTRACTING_PACKAGES + availableBlockedApps.map { it.packageName }
         }
@@ -251,15 +292,15 @@ fun FocusScheduleDialog(
     var isStrictMode by rememberSaveable(scheduleKey) { mutableStateOf(false) }
     var isYouTubeStudyMode by rememberSaveable(scheduleKey) { mutableStateOf(true) }
     var isBrowserStudyMode by rememberSaveable(scheduleKey) { mutableStateOf(true) }
-    var isBlockHomeScreen by rememberSaveable(scheduleKey) { mutableStateOf(false) }
     var isBlockUninstall by rememberSaveable(scheduleKey) { mutableStateOf(false) }
     var isBlockSplitScreen by rememberSaveable(scheduleKey) { mutableStateOf(false) }
     var isBlockFloatingWindow by rememberSaveable(scheduleKey) { mutableStateOf(false) }
-    var youtubeOption by remember { mutableStateOf(SpecialAppOption.STUDY_MODE) }
-    var browserOption by remember { mutableStateOf(SpecialAppOption.STUDY_MODE) }
+    var youtubeOption by rememberSaveable(scheduleKey) { mutableStateOf(SpecialAppOption.STUDY_MODE) }
+    var browserOption by rememberSaveable(scheduleKey) { mutableStateOf(SpecialAppOption.STUDY_MODE) }
     var prefsHydrated by rememberSaveable(scheduleKey) { mutableStateOf(false) }
 
     LaunchedEffect(prefs) {
+        val prefs = prefs ?: return@LaunchedEffect
         if (!prefsHydrated) {
             isStrictMode = prefs.isStrictModeDefault
             isYouTubeStudyMode = prefs.isStudyChannelsDefault
@@ -284,24 +325,29 @@ fun FocusScheduleDialog(
         }
     }
 
-    var titleError by remember { mutableStateOf<String?>(null) }
-    var activePicker by remember { mutableStateOf<ActivePicker?>(null) }
-    var showBreakPicker by remember { mutableStateOf(false) }
-    var showEmojiPicker by remember { mutableStateOf(false) }
-    var showAddTagDialog by remember { mutableStateOf(false) }
-    var newTagText by remember { mutableStateOf("") }
+    var titleError by rememberSaveable(scheduleKey) { mutableStateOf<String?>(null) }
+    var validationMessage by rememberSaveable(scheduleKey) {
+        mutableStateOf(if (initialSchedule != null && com.example.feature.session.notification.ScheduleTime.parseDaysOfWeekOrNull(initialSchedule.daysOfWeek) == null) context.getString(R.string.schedule_days_error) else null)
+    }
+    var isSaving by remember { mutableStateOf(false) }
+    val titleFocusRequester = remember { FocusRequester() }
+    val mainScrollState = rememberScrollState()
+    var activePicker by rememberSaveable(scheduleKey) { mutableStateOf<ActivePicker?>(null) }
+    var showBreakPicker by rememberSaveable(scheduleKey) { mutableStateOf(false) }
+    var showEmojiPicker by rememberSaveable(scheduleKey) { mutableStateOf(false) }
+    var showAddTagDialog by rememberSaveable(scheduleKey) { mutableStateOf(false) }
     var editingSubject by remember { mutableStateOf<SubjectEntity?>(null) }
-    var editSubjectText by remember { mutableStateOf("") }
+    var subjectToDelete by remember { mutableStateOf<SubjectEntity?>(null) }
 
     var selectedDaysList by rememberSaveable(scheduleKey) {
-        val daysStr = initialSchedule?.daysOfWeek?.takeIf { it.isNotBlank() }
-            ?: "MON,TUE,WED,THU,FRI,SAT,SUN"
-        mutableStateOf(DAYS.filter { daysStr.contains(it) })
+        val storedDays = initialSchedule?.let { com.example.feature.session.notification.ScheduleTime.parseDaysOfWeekOrNull(it.daysOfWeek) }
+        mutableStateOf(if (initialSchedule == null) DAYS.toList() else DAYS.filterIndexed { index, _ -> CALENDAR_DAYS[index] in storedDays.orEmpty() })
     }
 
     fun saveSchedule() {
+        if (isSaving || !prefsHydrated) return
         if (title.isBlank()) {
-            titleError = "Enter a schedule name"
+            titleError = context.getString(R.string.schedule_name_error)
             return
         }
         val selectedDayCode = SimpleDateFormat("EEE", Locale.ENGLISH)
@@ -313,7 +359,8 @@ fun FocusScheduleDialog(
             selectedDayCode
         }
         if (repeatEnabled && selectedDaysList.isEmpty()) {
-            titleError = "Select at least one repeat day"
+            validationMessage = context.getString(R.string.schedule_days_error)
+            coroutineScope.launch { mainScrollState.scrollTo(0) }
             return
         }
         val startMinutes = com.example.feature.session.notification.ScheduleTime
@@ -321,45 +368,72 @@ fun FocusScheduleDialog(
         val endMinutes = com.example.feature.session.notification.ScheduleTime
             .parseToMinutesOrNull(endTime)
         if (startMinutes == null || endMinutes == null) {
-            titleError = "Enter a start and end time as HH:mm"
+            validationMessage = context.getString(R.string.schedule_time_error)
+            coroutineScope.launch { mainScrollState.scrollTo(0) }
             return
         }
         if (startMinutes == endMinutes) {
-            titleError = "End time must differ from the start time"
+            validationMessage = context.getString(R.string.schedule_same_time_error)
+            coroutineScope.launch { mainScrollState.scrollTo(0) }
+            return
+        }
+        if (selectedMode !in listOf("TIMER", "STOPWATCH", "POMODORO")) {
+            validationMessage = context.getString(R.string.schedule_mode_error)
+            coroutineScope.launch { mainScrollState.scrollTo(0) }
+            return
+        }
+        if (breakMinutes !in 0..180) {
+            validationMessage = context.getString(R.string.schedule_break_choice_error)
+            coroutineScope.launch { mainScrollState.scrollTo(0) }
             return
         }
 
-        // Persist Deep Focus Settings to preferencesRepository so scheduled & manual sessions honor them
+        validationMessage = null
+        isSaving = true
+        // Await the actual schedule write; a rejected or failed save keeps every entered value.
         coroutineScope.launch {
-            preferencesRepository.updateProtectionDefaults(
-                appBlocking = selectedBlockedPackages.isNotEmpty(),
-                strictMode = isStrictMode && selectedMode != "STOPWATCH",
-                studyChannels = isYouTubeStudyMode
-            )
-            preferencesRepository.updateManualWebsiteBlocking(isBrowserStudyMode)
-            preferencesRepository.updateBlockUninstall(isBlockUninstall)
-            preferencesRepository.updateBlockSplitScreen(isBlockSplitScreen)
-            preferencesRepository.updateBlockFloatingWindow(isBlockFloatingWindow)
-            preferencesRepository.updateBlockNotifications(blockNotifications)
+            try {
+                when (val outcome = onSave(
+                    title.trim(), days, startTime, endTime, isAutoStart, selectedMode,
+                    tag.trim().ifBlank { "Untagged" }, repeatEnabled, effectiveScheduleDate.time,
+                    breakMinutes, description.trim(), selectedBlockedPackages, blockNotifications,
+                    {
+                        preferencesRepository.updateSessionProtectionDefaults(
+                            appBlocking = selectedBlockedPackages.isNotEmpty(),
+                            strictMode = isStrictMode && selectedMode != "STOPWATCH",
+                            studyChannels = isYouTubeStudyMode,
+                            manualWebsites = isBrowserStudyMode,
+                            blockUninstall = isBlockUninstall,
+                            blockSplitScreen = isBlockSplitScreen,
+                            blockFloatingWindow = isBlockFloatingWindow,
+                            blockNotifications = blockNotifications
+                        )
+                    }
+                )) {
+                    is FocusScheduleRepository.SaveResult.Saved -> {
+                        outcome.defaultsFailure?.let {
+                            android.util.Log.e("ScheduleEditor", "Schedule saved but defaults failed", it)
+                            onDefaultsSaveFailed()
+                        }
+                        outcome.followUpFailure?.let { onFollowUpSaveFailed() }
+                        onBlockNotificationsChanged(blockNotifications)
+                        onDismiss()
+                    }
+                    is FocusScheduleRepository.SaveResult.Rejected -> {
+                        validationMessage = outcome.reason
+                        mainScrollState.scrollTo(0)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.e("ScheduleEditor", "Unable to save schedule settings", error)
+                validationMessage = context.getString(R.string.schedule_save_error)
+                mainScrollState.scrollTo(0)
+            } finally {
+                isSaving = false
+            }
         }
-
-        val effectiveBreakMins = if (numberOfBreaks <= 0) 0 else breakMinutes
-
-        onSave(
-            title.trim(),
-            days,
-            startTime,
-            endTime,
-            isAutoStart,
-            selectedMode,
-            tag.trim().ifBlank { "Untagged" },
-            repeatEnabled,
-            effectiveScheduleDate.time,
-            effectiveBreakMins,
-            description.trim(),
-            selectedBlockedPackages,
-            blockNotifications
-        )
     }
 
     val palette = LocalFocusColors.current
@@ -372,39 +446,39 @@ fun FocusScheduleDialog(
     val textSecondary = palette.textSecondary
     val dividerColor = palette.cardBorder
     val saveBtnBg = palette.primary
-    val saveBtnText = Color.White
-    val switchTrackChecked = FocusColors.ToggleGreen
-    val switchTrackUnchecked = palette.surfaceVariant
+    val saveBtnText = MaterialTheme.colorScheme.onPrimary
 
-    BackHandler(enabled = true) {
-        val back = activeSubView.backTarget()
-        if (back != null) {
-            activeSubView = back
-        } else {
-            onDismiss()
+    val motion = LocalFocusMotion.current
+    val transitionOffset = with(LocalDensity.current) { 12.dp.roundToPx() }
+    val modalTitle = stringResource(if (initialSchedule != null) R.string.schedule_edit_title else R.string.schedule_new_title)
+
+    val handleBack: () -> Unit = {
+        if (!isSaving) {
+            val back = activeSubView.backTarget()
+            if (back != null) activeSubView = back else onDismiss()
         }
     }
 
+    Dialog(
+        onDismissRequest = handleBack,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .zIndex(20f)
             .background(bgColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {}
-            )
+            .imePadding()
+            .semantics { paneTitle = modalTitle }
             .testTag("focus_schedule_dialog"),
         color = bgColor
     ) {
         AnimatedContent(
             targetState = activeSubView,
             transitionSpec = {
-                if (targetState == ScheduleDialogSubView.MAIN || initialState == ScheduleDialogSubView.MAIN) {
+                if (!motion.reduceMotion && (targetState == ScheduleDialogSubView.MAIN || initialState == ScheduleDialogSubView.MAIN)) {
                     ContentTransform(
-                        targetContentEnter = slideInVertically(tween(220)) { it / 6 } + fadeIn(tween(220)),
-                        initialContentExit = slideOutVertically(tween(180)) { -it / 6 } + fadeOut(tween(180)),
+                        targetContentEnter = slideInVertically(tween(220)) { transitionOffset } + fadeIn(tween(220)),
+                        initialContentExit = slideOutVertically(tween(150)) { -transitionOffset } + fadeOut(tween(150)),
                         sizeTransform = null
                     )
                 } else {
@@ -430,8 +504,8 @@ fun FocusScheduleDialog(
                         onYoutubeOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "YouTube Study Mode",
-                                    description = "YouTube study channels and distractive video feeds",
+                                    title = context.getString(R.string.schedule_youtube_label),
+                                    description = context.getString(R.string.schedule_youtube_permission),
                                     onGranted = {
                                         youtubeOption = SpecialAppOption.STUDY_MODE
                                         isYouTubeStudyMode = true
@@ -451,8 +525,8 @@ fun FocusScheduleDialog(
                         onBrowserOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "Browser Study Mode",
-                                    description = "distracting websites and search results",
+                                    title = context.getString(R.string.schedule_browser_label),
+                                    description = context.getString(R.string.schedule_browser_permission),
                                     onGranted = {
                                         browserOption = SpecialAppOption.STUDY_MODE
                                         isBrowserStudyMode = true
@@ -518,35 +592,25 @@ fun FocusScheduleDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                                .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.md),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (initialSchedule != null) "Edit Schedule" else "New Schedule",
+                                text = modalTitle,
                                 color = textPrimary,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold
+                                style = MaterialTheme.typography.headlineLarge,
+                                modifier = Modifier.weight(1f).semantics { heading() }
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(
-                                    onClick = { saveSchedule() },
-                                    modifier = Modifier.testTag("save_schedule_header_button")
-                                ) {
-                                    Text(
-                                        text = "Save",
-                                        color = FocusColors.Primary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                }
                                 IconButton(
                                     onClick = onDismiss,
-                                    modifier = Modifier.size(36.dp)
+                                    enabled = !isSaving,
+                                    modifier = Modifier.size(48.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Close",
+                                        contentDescription = stringResource(R.string.action_close),
                                         tint = textPrimary,
                                         modifier = Modifier.size(24.dp)
                                     )
@@ -559,9 +623,9 @@ fun FocusScheduleDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                .verticalScroll(mainScrollState)
+                                .padding(horizontal = FocusSpacing.screenHorizontal),
+                            verticalArrangement = Arrangement.spacedBy(FocusSpacing.base)
                         ) {
                             // 1. Emoji Box + Schedule Name Input Box
                             Row(
@@ -569,14 +633,15 @@ fun FocusScheduleDialog(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
+                                IconButton(
+                                    onClick = { showEmojiPicker = true },
+                                    enabled = !isSaving,
                                     modifier = Modifier
                                         .size(58.dp)
                                         .clip(RoundedCornerShape(14.dp))
                                         .background(cardBg)
-                                        .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                                        .clickable { showEmojiPicker = true },
-                                    contentAlignment = Alignment.Center
+                                        .border(1.dp, FocusColors.ControlBorder, RoundedCornerShape(14.dp))
+                                        .semantics { contentDescription = context.getString(R.string.schedule_choose_icon) }
                                 ) {
                                     Text(
                                         text = selectedEmoji,
@@ -584,55 +649,32 @@ fun FocusScheduleDialog(
                                     )
                                 }
 
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(58.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(cardBg)
-                                        .border(
-                                            1.dp,
-                                            if (titleError != null) Color(0xFFEF4444) else cardBorder,
-                                            RoundedCornerShape(14.dp)
-                                        )
-                                        .padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    if (title.isEmpty()) {
-                                        Text(
-                                            text = "Enter schedule name (e.g. Morning Physics)",
-                                            color = textSecondary,
-                                            fontSize = 16.sp
-                                        )
-                                    }
-                                    BasicTextField(
+                                    OutlinedTextField(
                                         value = title,
                                         onValueChange = {
                                             title = it
                                             titleError = null
                                         },
+                                        label = { Text(stringResource(R.string.schedule_name_label)) },
+                                        placeholder = { Text(stringResource(R.string.schedule_name_example)) },
+                                        supportingText = { titleError?.let { Text(it) } },
+                                         isError = titleError != null,
+                                         enabled = !isSaving,
                                         singleLine = true,
-                                        textStyle = TextStyle(
-                                            color = textPrimary,
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Medium
-                                        ),
-                                        cursorBrush = SolidColor(if (isDark) Color.White else FocusColors.Primary),
+                                        textStyle = MaterialTheme.typography.bodyLarge,
+                                        shape = FocusShapes.medium,
                                         modifier = Modifier
-                                            .fillMaxWidth()
+                                            .weight(1f)
+                                            .focusRequester(titleFocusRequester)
+                                            .semantics { titleError?.let { error(it) } }
                                             .testTag("schedule_title_input")
                                     )
-                                }
                             }
-
-                            if (titleError != null) {
-                                Text(
-                                    text = titleError!!,
-                                    color = Color(0xFFEF4444),
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(start = 70.dp)
-                                )
+                            LaunchedEffect(titleError) {
+                                if (titleError != null) titleFocusRequester.requestFocus()
                             }
+                            FocusStatusMessage(validationMessage, isError = true, onDismiss = { validationMessage = null })
+                            ScheduleModeSegmentedSelector(selectedMode, onModeSelected = { selectedMode = it }, enabled = !isSaving)
 
                             // 3. Session Tag & Topic Section (Full parity with FocusSessionSetupSheet)
                             Card(
@@ -647,202 +689,77 @@ fun FocusScheduleDialog(
                                         .padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Session Tag & Topic",
-                                            color = textPrimary,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = tag,
-                                            color = FocusColors.Primary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                    Text(stringResource(R.string.schedule_subject_section), color = textPrimary,
+                                        style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                                    val presetNames = remember(customSubjects) {
+                                        val existing = customSubjects.map { it.name.lowercase(Locale.ENGLISH) }.toSet()
+                                        listOf("Study", "Exam", "Revision", "Deep Work").filter { it.lowercase(Locale.ENGLISH) !in existing }
                                     }
-
                                     FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        modifier = Modifier.fillMaxWidth().selectableGroup(),
+                                        horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                                        verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)
                                     ) {
-                                        // Preset quick tags if user hasn't created custom ones yet
-                                        val presetNames = remember(customSubjects) {
-                                            val existing = customSubjects.map { it.name.lowercase(Locale.ENGLISH) }.toSet()
-                                            listOf("Study", "Exam", "Revision", "Deep Work").filter {
-                                                it.lowercase(Locale.ENGLISH) !in existing
-                                            }
-                                        }
-
-                                        customSubjects.forEach { subjectEntity ->
-                                            val isSelected = tag.equals(subjectEntity.name, ignoreCase = true)
-                                            Row(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(
-                                                        if (isSelected) FocusColors.Primary
-                                                        else palette.surfaceVariant
-                                                    )
-                                                    .clickable {
-                                                        tag = if (isSelected) "Untagged" else subjectEntity.name
-                                                    }
-                                                    .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Label,
-                                                    contentDescription = null,
-                                                    tint = if (isSelected) Color.White else textSecondary,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(5.dp))
-                                                Text(
-                                                    text = subjectEntity.name,
-                                                    color = if (isSelected) Color.White else textPrimary,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(20.dp)
-                                                        .clip(CircleShape)
-                                                        .clickable {
-                                                            editingSubject = subjectEntity
-                                                            editSubjectText = subjectEntity.name
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.Edit,
-                                                        contentDescription = "Edit ${subjectEntity.name}",
-                                                        tint = if (isSelected) Color.White.copy(alpha = 0.85f) else textSecondary,
-                                                        modifier = Modifier.size(12.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        presetNames.forEach { presetTag ->
-                                            val isSelected = tag.equals(presetTag, ignoreCase = true)
-                                            Row(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(
-                                                        if (isSelected) FocusColors.Primary
-                                                        else palette.surfaceVariant
-                                                    )
-                                                    .clickable {
-                                                        tag = if (isSelected) "Untagged" else presetTag
-                                                    }
-                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Label,
-                                                    contentDescription = null,
-                                                    tint = if (isSelected) Color.White else textSecondary,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(5.dp))
-                                                Text(
-                                                    text = presetTag,
-                                                    color = if (isSelected) Color.White else textPrimary,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                                )
-                                            }
-                                        }
-
-                                        // "+ Add Tag" Pill
-                                        Row(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(palette.surfaceVariant)
-                                                .clickable {
-                                                    newTagText = ""
-                                                    showAddTagDialog = true
-                                                }
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Add,
-                                                contentDescription = "Add Tag",
-                                                tint = FocusColors.Primary,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "Add Tag",
-                                                color = FocusColors.Primary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                        (listOf("Untagged") + presetNames).forEach { presetTag ->
+                                            FilterChip(
+                                                selected = tag.equals(presetTag, ignoreCase = true),
+                                                onClick = { tag = presetTag },
+                                                enabled = !isSaving,
+                                                label = { Text(localizedSessionTag(presetTag)) }
                                             )
                                         }
+                                    }
+                                    customSubjects.forEach { subject ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                                            FilterChip(
+                                                selected = tag.equals(subject.name, ignoreCase = true),
+                                                onClick = { tag = subject.name },
+                                                enabled = !isSaving,
+                                                label = { Text(subject.name) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(onClick = { editingSubject = subject }, enabled = !isSaving) {
+                                                Icon(Icons.Rounded.Edit, stringResource(R.string.schedule_edit_tag, subject.name), tint = textSecondary)
+                                            }
+                                        }
+                                    }
+                                    OutlinedButton(onClick = { showAddTagDialog = true }, enabled = !isSaving) {
+                                        Icon(Icons.Rounded.Add, contentDescription = null)
+                                        Spacer(Modifier.width(FocusSpacing.sm))
+                                        Text(stringResource(R.string.schedule_add_tag))
                                     }
 
                                     // Topic / Chapter Input Field
                                     OutlinedTextField(
                                         value = description,
                                         onValueChange = { description = it },
-                                        placeholder = {
-                                            Text(
-                                                text = "Enter study topic, chapter, or focus goal (optional)",
-                                                fontSize = 13.sp,
-                                                color = textSecondary
-                                            )
-                                        },
-                                        singleLine = true,
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = palette.surfaceVariant.copy(alpha = 0.5f),
-                                            unfocusedContainerColor = palette.surfaceVariant.copy(alpha = 0.35f),
-                                            focusedBorderColor = FocusColors.Primary,
-                                            unfocusedBorderColor = cardBorder,
-                                            focusedTextColor = textPrimary,
-                                            unfocusedTextColor = textPrimary
-                                        ),
+                                        label = { Text(stringResource(R.string.schedule_topic_label)) },
+                                        placeholder = { Text(stringResource(R.string.schedule_topic_example)) },
+                                        enabled = !isSaving,
+                                        minLines = 2,
+                                        shape = FocusShapes.medium,
+                                        textStyle = MaterialTheme.typography.bodyLarge,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
 
                             // 4. Section: Schedule Timing & Repeat
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
                                 Text(
-                                    text = "Schedule & Timing",
+                                    text = stringResource(R.string.schedule_timing_section),
                                     color = textPrimary,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.semantics { heading() }
                                 )
                                 val durationMins = remember(startTime, endTime) {
                                     com.example.feature.session.notification.ScheduleTime.durationMinutesOrNull(startTime, endTime)
                                 }
                                 if (durationMins != null) {
-                                    val hrs = durationMins / 60
-                                    val mins = durationMins % 60
-                                    val label = when {
-                                        hrs > 0 && mins > 0 -> "${hrs}h ${mins}m window"
-                                        hrs > 0 -> "${hrs}h window"
-                                        else -> "${mins}m window"
-                                    }
                                     Text(
-                                        text = label,
+                                        text = pluralStringResource(R.plurals.schedule_window_minutes, durationMins, durationMins),
                                         color = FocusColors.Primary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")
                                     )
                                 }
                             }
@@ -855,73 +772,21 @@ fun FocusScheduleDialog(
                                 border = BorderStroke(1.dp, cardBorder)
                             ) {
                                 Column {
-                                    // "From" Row
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { activePicker = ActivePicker.START_TIME }
-                                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "From",
-                                            color = textPrimary,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = formatTimeDisplay(startTime),
-                                                color = textSecondary,
-                                                fontSize = 15.sp
-                                            )
-                                            Icon(
-                                                imageVector = Icons.Rounded.KeyboardArrowRight,
-                                                contentDescription = null,
-                                                tint = textSecondary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
+                                    FocusActionRow(
+                                        title = stringResource(R.string.schedule_start_label),
+                                        value = formatTimeDisplay(startTime),
+                                        enabled = !isSaving,
+                                        onClick = { activePicker = ActivePicker.START_TIME }
+                                    )
 
                                     HorizontalDivider(thickness = 1.dp, color = dividerColor)
 
-                                    // "To" Row
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { activePicker = ActivePicker.END_TIME }
-                                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "To",
-                                            color = textPrimary,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = formatTimeDisplay(endTime),
-                                                color = textSecondary,
-                                                fontSize = 15.sp
-                                            )
-                                            Icon(
-                                                imageVector = Icons.Rounded.KeyboardArrowRight,
-                                                contentDescription = null,
-                                                tint = textSecondary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
+                                    FocusActionRow(
+                                        title = stringResource(R.string.schedule_end_label),
+                                        value = formatTimeDisplay(endTime),
+                                        enabled = !isSaving,
+                                        onClick = { activePicker = ActivePicker.END_TIME }
+                                    )
 
                                     HorizontalDivider(thickness = 1.dp, color = dividerColor)
 
@@ -950,8 +815,7 @@ fun FocusScheduleDialog(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .background(
-                                                if (previewBounds != null) Color(0xFF22C55E).copy(alpha = 0.10f)
-                                                else FocusColors.Primary.copy(alpha = 0.08f)
+                                                if (previewBounds != null) FocusColors.EmeraldLight else FocusColors.PrimaryContainer
                                             )
                                             .padding(horizontal = 16.dp, vertical = 12.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -959,68 +823,38 @@ fun FocusScheduleDialog(
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Starts at ${formatTimeDisplay(startTime)} • Stops at ${formatTimeDisplay(endTime)}",
-                                                color = if (previewBounds != null) Color(0xFF22C55E) else FocusColors.Primary,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                text = stringResource(R.string.schedule_window_summary, formatTimeDisplay(startTime), formatTimeDisplay(endTime)),
+                                                color = if (previewBounds != null) FocusColors.EmeraldText else FocusColors.OnPrimaryContainer,
+                                                style = MaterialTheme.typography.bodyMedium
                                             )
                                             val subNote = if (previewBounds != null && isAutoStart) {
                                                 val remMins = ((previewBounds.remainingMillis(System.currentTimeMillis()) + 59_999L) / 60_000L).coerceAtLeast(1L)
-                                                "Active window now • Auto-starts immediately for ${remMins}m until ${formatTimeDisplay(endTime)}"
+                                                stringResource(R.string.schedule_window_active, remMins, formatTimeDisplay(endTime))
                                             } else {
-                                                "Timer automatically stops at ${formatTimeDisplay(endTime)} and logs pure study time"
+                                                stringResource(R.string.schedule_window_stop_note, formatTimeDisplay(endTime))
                                             }
                                             Text(
                                                 text = subNote,
                                                 color = textSecondary,
-                                                fontSize = 11.sp
+                                                style = MaterialTheme.typography.bodySmall
                                             )
                                         }
                                     }
 
                                     HorizontalDivider(thickness = 1.dp, color = dividerColor)
 
-                                    // "Break" Row (matching FocusSessionSetupSheet)
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { showBreakPicker = true }
-                                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Break",
-                                            color = textPrimary,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            val breakLabel = if (numberOfBreaks <= 0 || breakMinutes <= 0) {
-                                                "No breaks"
-                                            } else {
-                                                "$numberOfBreaks break (${breakMinutes}m each)"
-                                            }
-                                            Text(
-                                                text = breakLabel,
-                                                color = textSecondary,
-                                                fontSize = 15.sp
-                                            )
-                                            Icon(
-                                                imageVector = Icons.Rounded.KeyboardArrowRight,
-                                                contentDescription = null,
-                                                tint = textSecondary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
+                                    FocusActionRow(
+                                        title = stringResource(R.string.schedule_manual_break_label),
+                                        value = if (breakMinutes <= 0) stringResource(R.string.schedule_no_breaks)
+                                            else pluralStringResource(R.plurals.schedule_break_minutes, breakMinutes, breakMinutes),
+                                        description = stringResource(R.string.schedule_break_hint),
+                                        enabled = !isSaving,
+                                        onClick = { showBreakPicker = true }
+                                    )
                                 }
                             }
 
-                            // Card: Schedule Repetition Options (Repeat for Entire Week vs One-Time Schedule)
+                            // Stored day keys stay canonical; only the visible day names are localized.
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
@@ -1032,106 +866,32 @@ fun FocusScheduleDialog(
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Text(
-                                        text = "Schedule Repetition",
+                                        text = stringResource(R.string.schedule_repeat_section),
                                         color = textPrimary,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.semantics { heading() }
                                     )
 
-                                    // Option 1: Repeat for the Entire Week
-                                    val isRepeatWeekSelected = repeatEnabled
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(
-                                                if (isRepeatWeekSelected) FocusColors.Primary.copy(alpha = 0.12f)
-                                                else palette.surfaceVariant.copy(alpha = 0.45f)
-                                            )
-                                            .border(
-                                                width = if (isRepeatWeekSelected) 1.5.dp else 1.dp,
-                                                color = if (isRepeatWeekSelected) FocusColors.Primary else cardBorder,
-                                                shape = RoundedCornerShape(12.dp)
-                                            )
-                                            .clickable {
-                                                repeatEnabled = true
-                                                selectedDaysList = DAYS.toList()
-                                            }
-                                            .padding(horizontal = 14.dp, vertical = 12.dp)
-                                            .testTag("schedule_option_repeat_week"),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Repeat for the Entire Week",
-                                                color = if (isRepeatWeekSelected) FocusColors.Primary else textPrimary,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                text = "Repeat this schedule throughout the week",
-                                                color = textSecondary,
-                                                fontSize = 12.sp
-                                            )
+                                    Column(modifier = Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                                        FocusChoiceRow(
+                                            title = stringResource(R.string.schedule_repeat_label),
+                                            description = stringResource(R.string.schedule_repeat_body),
+                                            selected = repeatEnabled,
+                                            onClick = { repeatEnabled = true },
+                                            enabled = !isSaving,
+                                            modifier = Modifier.testTag("schedule_option_repeat_week")
+                                        )
+                                        val selectedDateLabel = remember(effectiveScheduleDate, locale) {
+                                            java.text.DateFormat.getDateInstance(java.text.DateFormat.FULL, locale).format(effectiveScheduleDate)
                                         }
-                                        if (isRepeatWeekSelected) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Check,
-                                                contentDescription = null,
-                                                tint = FocusColors.Primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-
-                                    // Option 2: One-Time Schedule
-                                    val isOneTimeSelected = !repeatEnabled
-                                    val selectedDayLabel = remember(effectiveScheduleDate) {
-                                        SimpleDateFormat("EEEE", Locale.ENGLISH).format(effectiveScheduleDate)
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(
-                                                if (isOneTimeSelected) FocusColors.Primary.copy(alpha = 0.12f)
-                                                else palette.surfaceVariant.copy(alpha = 0.45f)
-                                            )
-                                            .border(
-                                                width = if (isOneTimeSelected) 1.5.dp else 1.dp,
-                                                color = if (isOneTimeSelected) FocusColors.Primary else cardBorder,
-                                                shape = RoundedCornerShape(12.dp)
-                                            )
-                                            .clickable {
-                                                repeatEnabled = false
-                                            }
-                                            .padding(horizontal = 14.dp, vertical = 12.dp)
-                                            .testTag("schedule_option_one_time"),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "One-Time Schedule",
-                                                color = if (isOneTimeSelected) FocusColors.Primary else textPrimary,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                text = "Apply only to the selected day ($selectedDayLabel) without repeating",
-                                                color = textSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                        if (isOneTimeSelected) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Check,
-                                                contentDescription = null,
-                                                tint = FocusColors.Primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
+                                        FocusChoiceRow(
+                                            title = stringResource(R.string.schedule_once_label),
+                                            description = stringResource(R.string.schedule_once_body, selectedDateLabel),
+                                            selected = !repeatEnabled,
+                                            onClick = { repeatEnabled = false },
+                                            enabled = !isSaving,
+                                            modifier = Modifier.testTag("schedule_option_one_time")
+                                        )
                                     }
 
                                     if (repeatEnabled) {
@@ -1141,68 +901,40 @@ fun FocusScheduleDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "Active days (${selectedDaysList.size}/7)",
+                                                text = stringResource(R.string.schedule_active_days, selectedDaysList.size),
                                                 color = textSecondary,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium
+                                                style = MaterialTheme.typography.bodySmall,
+                                                modifier = Modifier.weight(1f)
                                             )
                                             if (selectedDaysList.size < DAYS.size) {
-                                                Text(
-                                                    text = "Select all 7 days",
-                                                    color = FocusColors.Primary,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    modifier = Modifier.clickable {
-                                                        selectedDaysList = DAYS.toList()
-                                                    }
-                                                )
+                                                TextButton(onClick = { selectedDaysList = DAYS.toList() }, enabled = !isSaving) {
+                                                    Text(stringResource(R.string.schedule_select_all_days))
+                                                }
                                             }
                                         }
 
-                                        Row(
+                                        val daySymbols = remember(locale) { DateFormatSymbols(locale) }
+                                        FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                            horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                                            verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)
                                         ) {
                                             DAYS.forEachIndexed { index, day ->
                                                 val isSelected = selectedDaysList.contains(day)
-                                                val dayBg = if (isSelected) {
-                                                    if (isDark) Color(0xFF1E4620) else Color(0xFFDCFCE7)
-                                                } else {
-                                                    if (isDark) Color(0xFF22252C) else Color(0xFFE2E8F0)
-                                                }
-                                                val dayBorder = if (isSelected) {
-                                                    if (isDark) Color(0xFF2A612D) else Color(0xFF86EFAC)
-                                                } else {
-                                                    Color.Transparent
-                                                }
-                                                val dayTextColor = if (isSelected) {
-                                                    if (isDark) Color(0xFF86EFAC) else Color(0xFF15803D)
-                                                } else {
-                                                    textSecondary
-                                                }
-
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(CircleShape)
-                                                        .background(dayBg)
-                                                        .border(1.dp, dayBorder, CircleShape)
-                                                        .clickable {
+                                                val fullDay = daySymbols.weekdays[CALENDAR_DAYS[index]]
+                                                FilterChip(
+                                                    selected = isSelected,
+                                                    enabled = !isSaving,
+                                                    onClick = {
                                                             selectedDaysList = if (isSelected) {
                                                                 selectedDaysList - day
                                                             } else {
                                                                 DAYS.filter { it in (selectedDaysList + day) }
                                                             }
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = DAY_LABELS[index],
-                                                        color = dayTextColor,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        fontSize = 13.sp
-                                                    )
-                                                }
+                                                    },
+                                                    label = { Text(daySymbols.shortWeekdays[CALENDAR_DAYS[index]]) },
+                                                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = fullDay }
+                                                )
                                             }
                                         }
                                     }
@@ -1211,58 +943,26 @@ fun FocusScheduleDialog(
 
                             // 5. Section: Block Settings (Fixed Blocked Apps Row opening full SelectAppsToBlockSheet!)
                             Text(
-                                text = "Block settings",
+                                text = stringResource(R.string.schedule_block_section),
                                 color = textPrimary,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 4.dp)
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(top = FocusSpacing.xs).semantics { heading() }
                             )
 
                             Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { activeSubView = ScheduleDialogSubView.SELECT_APPS },
+                                modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = cardBg),
                                 border = BorderStroke(1.dp, cardBorder)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(64.dp)
-                                        .padding(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text(
-                                            text = "Blocked Apps",
-                                            color = textPrimary,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = "YouTube, browsers & distracting apps",
-                                            color = textSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        ScheduleBlockedAppsIconStack(
-                                            blockedCount = selectedBlockedPackages.size
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Rounded.KeyboardArrowRight,
-                                            contentDescription = null,
-                                            tint = textSecondary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
+                                FocusActionRow(
+                                    title = stringResource(R.string.schedule_block_apps),
+                                    description = stringResource(R.string.schedule_block_apps_body),
+                                    value = if (selectedBlockedPackages.isEmpty()) stringResource(R.string.schedule_select_apps)
+                                        else pluralStringResource(R.plurals.schedule_blocked_app_count, selectedBlockedPackages.size, selectedBlockedPackages.size),
+                                    enabled = !isSaving,
+                                    onClick = { activeSubView = ScheduleDialogSubView.SELECT_APPS }
+                                )
                             }
 
                             // 6. Deep Focus Settings (PRO) — Full parity with FocusSessionSetupSheet
@@ -1273,46 +973,47 @@ fun FocusScheduleDialog(
                                 border = BorderStroke(1.dp, cardBorder)
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth()) {
+                                    val expandedState = stringResource(if (isDeepFocusExpanded) R.string.schedule_expanded_state else R.string.schedule_collapsed_state)
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { isDeepFocusExpanded = !isDeepFocusExpanded }
+                                            .clickable(enabled = !isSaving, role = Role.Button) { isDeepFocusExpanded = !isDeepFocusExpanded }
+                                            .semantics { stateDescription = expandedState }
                                             .padding(horizontal = 16.dp, vertical = 16.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = "Deep Focus Settings",
+                                                text = stringResource(R.string.schedule_deep_section),
                                                 color = textPrimary,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                style = MaterialTheme.typography.titleMedium,
+                                                modifier = Modifier.weight(1f).semantics { heading() }
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(6.dp))
-                                                    .background(Color(0xFFFEF3C7))
+                                                    .background(FocusColors.ProGold)
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
-                                                    text = "PRO",
-                                                    color = Color(0xFFB45309),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.ExtraBold
+                                                    text = stringResource(R.string.pro_label),
+                                                    color = FocusColors.ProGoldText,
+                                                    style = MaterialTheme.typography.labelSmall
                                                 )
                                             }
                                         }
 
                                         Icon(
                                             imageVector = if (isDeepFocusExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                                            contentDescription = "Expand Deep Focus Settings",
+                                            contentDescription = null,
                                             tint = textSecondary,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     }
 
-                                    AnimatedVisibility(visible = isDeepFocusExpanded) {
+                                    AnimatedVisibility(visible = isDeepFocusExpanded, enter = fadeIn(tween(150)), exit = fadeOut(tween(120))) {
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -1322,14 +1023,11 @@ fun FocusScheduleDialog(
 
                                             // Auto-Start Scheduled Session
                                             ScheduleToggleRow(
-                                                title = "Auto-start session",
-                                                subtitle = "Automatically start focus session at scheduled time",
+                                                title = stringResource(R.string.schedule_auto_start_label),
+                                                subtitle = stringResource(R.string.schedule_auto_start_body),
                                                 checked = isAutoStart,
                                                 onCheckedChange = { isAutoStart = it },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
@@ -1337,31 +1035,28 @@ fun FocusScheduleDialog(
                                             // Strict Mode (only for Timer / Pomodoro)
                                             if (selectedMode != "STOPWATCH") {
                                                 ScheduleToggleRow(
-                                                    title = "Strict mode",
-                                                    subtitle = "You cannot end your session early",
+                                                    title = stringResource(R.string.schedule_strict_label),
+                                                    subtitle = stringResource(R.string.schedule_strict_body),
                                                     checked = isStrictMode,
                                                     onCheckedChange = {
                                                         isStrictMode = it
                                                         if (it) isBlockUninstall = true
                                                     },
-                                                    textPrimary = textPrimary,
-                                                    textSecondary = textSecondary,
-                                                    switchTrackChecked = switchTrackChecked,
-                                                    switchTrackUnchecked = switchTrackUnchecked
+                                                    enabled = !isSaving
                                                 )
                                                 HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
                                             }
 
                                             // YouTube Study Mode
                                             ScheduleToggleRow(
-                                                title = "YouTube Study Mode",
-                                                subtitle = "Allow verified study channels while blocking feed & shorts",
+                                                title = stringResource(R.string.schedule_youtube_label),
+                                                subtitle = stringResource(R.string.schedule_youtube_body),
                                                 checked = isYouTubeStudyMode,
                                                 onCheckedChange = { enabled ->
                                                     if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                                         pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                                            title = "YouTube Study Mode",
-                                                            description = "YouTube study channels and distractive video feeds",
+                                                            title = context.getString(R.string.schedule_youtube_label),
+                                                            description = context.getString(R.string.schedule_youtube_permission),
                                                             onGranted = {
                                                                 isYouTubeStudyMode = true
                                                                 youtubeOption = SpecialAppOption.STUDY_MODE
@@ -1376,24 +1071,21 @@ fun FocusScheduleDialog(
                                                         }
                                                     }
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
 
                                             // Browser Study Mode
                                             ScheduleToggleRow(
-                                                title = "Browser Study Mode",
-                                                subtitle = "Block distracting websites while allowing study portals",
+                                                title = stringResource(R.string.schedule_browser_label),
+                                                subtitle = stringResource(R.string.schedule_browser_body),
                                                 checked = isBrowserStudyMode,
                                                 onCheckedChange = { enabled ->
                                                     if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                                         pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                                            title = "Browser Study Mode",
-                                                            description = "distracting websites while allowing study sites",
+                                                            title = context.getString(R.string.schedule_browser_label),
+                                                            description = context.getString(R.string.schedule_browser_permission),
                                                             onGranted = {
                                                                 isBrowserStudyMode = true
                                                                 browserOption = SpecialAppOption.STUDY_MODE
@@ -1408,113 +1100,83 @@ fun FocusScheduleDialog(
                                                         }
                                                     }
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
 
                                             // Block Notifications
                                             ScheduleToggleRow(
-                                                title = "Block Notifications",
-                                                subtitle = "Block notification from blocked apps",
+                                                title = stringResource(R.string.schedule_notifications_label),
+                                                subtitle = stringResource(R.string.schedule_notifications_body),
                                                 checked = blockNotifications,
                                                 onCheckedChange = {
                                                     blockNotifications = it
-                                                    onBlockNotificationsChanged(it)
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
-                                            )
-
-                                            HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
-
-                                            // Block Phone Home Screen
-                                            ScheduleToggleRow(
-                                                title = "Block Phone home screen",
-                                                subtitle = null,
-                                                checked = isBlockHomeScreen,
-                                                onCheckedChange = { isBlockHomeScreen = it },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
 
                                             // Block FocusShield App Uninstall
                                             ScheduleToggleRow(
-                                                title = "Block FocusShield app uninstall",
-                                                subtitle = "Prevents uninstalling or tampering with FocusShield",
+                                                title = stringResource(R.string.schedule_uninstall_label),
+                                                subtitle = stringResource(R.string.schedule_uninstall_body),
                                                 checked = isBlockUninstall,
                                                 onCheckedChange = { enabled ->
                                                     if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                                         pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                                            title = "App Uninstall Protection",
-                                                            description = "system settings to prevent FocusShield from being uninstalled",
+                                                            title = context.getString(R.string.schedule_uninstall_label),
+                                                            description = context.getString(R.string.schedule_uninstall_permission),
                                                             onGranted = { isBlockUninstall = true }
                                                         )
                                                     } else {
                                                         isBlockUninstall = enabled
                                                     }
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
 
                                             // Block Split Screen
                                             ScheduleToggleRow(
-                                                title = "Block split screen",
-                                                subtitle = "Cannot use blocked apps in split screen",
+                                                title = stringResource(R.string.schedule_split_label),
+                                                subtitle = stringResource(R.string.schedule_split_body),
                                                 checked = isBlockSplitScreen,
                                                 onCheckedChange = { enabled ->
                                                     if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                                         pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                                            title = "Split Screen Blocker",
-                                                            description = "split screen multi-window mode",
+                                                            title = context.getString(R.string.schedule_split_label),
+                                                            description = context.getString(R.string.schedule_split_permission),
                                                             onGranted = { isBlockSplitScreen = true }
                                                         )
                                                     } else {
                                                         isBlockSplitScreen = enabled
                                                     }
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
 
                                             HorizontalDivider(thickness = 1.dp, color = dividerColor, modifier = Modifier.padding(horizontal = 16.dp))
 
                                             // Block Floating Window
                                             ScheduleToggleRow(
-                                                title = "Block floating window",
-                                                subtitle = "Cannot use blocked apps in floating window",
+                                                title = stringResource(R.string.schedule_floating_label),
+                                                subtitle = stringResource(R.string.schedule_floating_body),
                                                 checked = isBlockFloatingWindow,
                                                 onCheckedChange = { enabled ->
                                                     if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                                         pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                                            title = "Floating Window Blocker",
-                                                            description = "picture-in-picture and floating windows",
+                                                            title = context.getString(R.string.schedule_floating_label),
+                                                            description = context.getString(R.string.schedule_floating_permission),
                                                             onGranted = { isBlockFloatingWindow = true }
                                                         )
                                                     } else {
                                                         isBlockFloatingWindow = enabled
                                                     }
                                                 },
-                                                textPrimary = textPrimary,
-                                                textSecondary = textSecondary,
-                                                switchTrackChecked = switchTrackChecked,
-                                                switchTrackUnchecked = switchTrackUnchecked
+                                                enabled = !isSaving
                                             )
                                         }
                                     }
@@ -1535,11 +1197,18 @@ fun FocusScheduleDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .navigationBarsPadding()
-                                    .imePadding()
                             ) {
-                                HorizontalDivider(thickness = 1.dp, color = dividerColor)
+                                            HorizontalDivider(thickness = 1.dp, color = dividerColor)
+
+                                            Text(
+                                                stringResource(R.string.schedule_device_defaults_note),
+                                                color = textSecondary,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(FocusSpacing.base)
+                                            )
                                 Button(
-                                    onClick = { saveSchedule() },
+                                     onClick = { saveSchedule() },
+                                     enabled = !isSaving && prefsHydrated,
                                     shape = RoundedCornerShape(32.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = saveBtnBg,
@@ -1547,15 +1216,17 @@ fun FocusScheduleDialog(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                                        .padding(bottom = 12.dp)
-                                        .height(54.dp)
+                                        .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.md)
+                                        .heightIn(min = 54.dp)
                                         .testTag("save_schedule_button")
                                 ) {
                                     Text(
-                                        text = "Save",
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        text = stringResource(when {
+                                            isSaving -> R.string.schedule_saving
+                                            !prefsHydrated -> R.string.schedule_loading_settings
+                                            else -> R.string.action_save
+                                        }),
+                                        style = MaterialTheme.typography.labelLarge,
                                         color = saveBtnText
                                     )
                                 }
@@ -1570,12 +1241,9 @@ fun FocusScheduleDialog(
     // Pickers / Sub-dialogs
     if (activePicker == ActivePicker.START_TIME || activePicker == ActivePicker.END_TIME) {
         val isStart = activePicker == ActivePicker.START_TIME
-        TimePickerDialog(
+        ScheduleClockDialog(
             initialTime = if (isStart) startTime else endTime,
-            title = if (isStart) "Select Start Time" else "Select End Time",
-            cardBg = cardBg,
-            textPrimary = textPrimary,
-            textSecondary = textSecondary,
+            title = stringResource(if (isStart) R.string.schedule_start_picker_title else R.string.schedule_end_picker_title),
             onDismiss = { activePicker = null },
             onTimeSelected = { newTime ->
                 if (isStart) {
@@ -1592,15 +1260,10 @@ fun FocusScheduleDialog(
     }
 
     if (showBreakPicker) {
-        BreakPickerDialog(
-            currentNumberOfBreaks = numberOfBreaks,
+        ScheduleBreakDialog(
             currentBreakMinutes = breakMinutes,
-            cardBg = cardBg,
-            textPrimary = textPrimary,
-            textSecondary = textSecondary,
             onDismiss = { showBreakPicker = false },
-            onSelect = { breaksCount, mins ->
-                numberOfBreaks = breaksCount
+            onSelect = { mins ->
                 breakMinutes = mins
                 showBreakPicker = false
             }
@@ -1608,10 +1271,9 @@ fun FocusScheduleDialog(
     }
 
     if (showEmojiPicker) {
-        EmojiPickerDialog(
+        ScheduleEmojiDialog(
             currentEmoji = selectedEmoji,
-            cardBg = cardBg,
-            textPrimary = textPrimary,
+            emojis = DEFAULT_EMOJIS,
             onDismiss = { showEmojiPicker = false },
             onSelect = {
                 selectedEmoji = it
@@ -1622,117 +1284,63 @@ fun FocusScheduleDialog(
     }
 
     if (showAddTagDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddTagDialog = false },
-            containerColor = cardBg,
-            title = {
-                Text(
-                    text = "New Subject Tag",
-                    fontWeight = FontWeight.Bold,
-                    color = textPrimary
-                )
+        FocusNameDialog(
+            title = stringResource(R.string.schedule_tag_new_title),
+            initialValue = "",
+            fieldLabel = stringResource(R.string.schedule_tag_name_label),
+            example = stringResource(R.string.schedule_tag_name_example),
+            emptyError = stringResource(R.string.schedule_tag_empty_error),
+            saveError = stringResource(R.string.schedule_tag_save_error),
+            confirmLabel = stringResource(R.string.schedule_add_tag),
+            onSave = { name ->
+                subjectRepository.addSubject(name)
+                tag = name
             },
-            text = {
-                OutlinedTextField(
-                    value = newTagText,
-                    onValueChange = { newTagText = it },
-                    placeholder = { Text("e.g., Physics, Organic Chemistry, Coding") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val trimmed = newTagText.trim()
-                        if (trimmed.isNotEmpty()) {
-                            coroutineScope.launch {
-                                subjectRepository.addSubject(trimmed)
-                            }
-                            tag = trimmed
-                            showAddTagDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary)
-                ) {
-                    Text("Add Tag", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddTagDialog = false }) {
-                    Text("Cancel", color = textSecondary)
-                }
-            }
+            onDismiss = { showAddTagDialog = false }
         )
     }
 
     editingSubject?.let { subjectToEdit ->
-        AlertDialog(
-            onDismissRequest = { editingSubject = null },
-            containerColor = cardBg,
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Manage Subject Tag",
-                        fontWeight = FontWeight.Bold,
-                        color = textPrimary
-                    )
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                subjectRepository.deleteSubject(subjectToEdit.id)
-                            }
-                            if (tag.equals(subjectToEdit.name, ignoreCase = true)) {
-                                tag = "Untagged"
-                            }
-                            editingSubject = null
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.DeleteOutline,
-                            contentDescription = "Delete Subject Tag",
-                            tint = Color(0xFFEF4444)
-                        )
+        FocusNameDialog(
+            title = stringResource(R.string.schedule_tag_manage_title),
+            initialValue = subjectToEdit.name,
+            fieldLabel = stringResource(R.string.schedule_tag_name_label),
+            example = stringResource(R.string.schedule_tag_name_example),
+            emptyError = stringResource(R.string.schedule_tag_empty_error),
+            saveError = stringResource(R.string.schedule_tag_save_error),
+            confirmLabel = stringResource(R.string.action_save),
+            onSave = { name ->
+                subjectRepository.renameSubject(subjectToEdit, name)
+                if (tag.equals(subjectToEdit.name, ignoreCase = true)) tag = name
+            },
+            onDismiss = { editingSubject = null },
+            onDelete = { subjectToDelete = subjectToEdit },
+            deleteLabel = stringResource(R.string.schedule_tag_delete_action, subjectToEdit.name)
+        )
+    }
+
+    subjectToDelete?.let { subject ->
+        FocusDestructiveDialog(
+            title = stringResource(R.string.schedule_tag_delete_title, subject.name),
+            message = stringResource(R.string.schedule_tag_delete_body),
+            confirmLabel = stringResource(R.string.schedule_tag_delete_confirm),
+            onDismiss = { subjectToDelete = null },
+            onConfirm = {
+                editingSubject = null
+                isSaving = true
+                coroutineScope.launch {
+                    try {
+                        subjectRepository.deleteSubject(subject.id)
+                        if (tag.equals(subject.name, ignoreCase = true)) tag = "Untagged"
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (exception: Exception) {
+                        android.util.Log.e("ScheduleEditor", "Unable to delete subject tag", exception)
+                        validationMessage = context.getString(R.string.schedule_tag_delete_error)
+                        mainScrollState.scrollTo(0)
+                    } finally {
+                        isSaving = false
                     }
-                }
-            },
-            text = {
-                OutlinedTextField(
-                    value = editSubjectText,
-                    onValueChange = { editSubjectText = it },
-                    placeholder = { Text("Subject tag name") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val trimmed = editSubjectText.trim()
-                        if (trimmed.isNotEmpty()) {
-                            coroutineScope.launch {
-                                subjectRepository.renameSubject(subjectToEdit, trimmed)
-                            }
-                            if (tag.equals(subjectToEdit.name, ignoreCase = true)) {
-                                tag = trimmed
-                            }
-                            editingSubject = null
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary)
-                ) {
-                    Text("Save", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingSubject = null }) {
-                    Text("Cancel", color = textSecondary)
                 }
             }
         )
@@ -1751,133 +1359,31 @@ fun FocusScheduleDialog(
     }
 }
 
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScheduleModeSegmentedSelector(
     selectedMode: String,
-    onModeSelected: (String) -> Unit
+    onModeSelected: (String) -> Unit,
+    enabled: Boolean = true
 ) {
-    val palette = LocalFocusColors.current
     val modes = listOf(
-        "TIMER" to "Timer",
-        "STOPWATCH" to "Stopwatch",
-        "POMODORO" to "Pomodoro"
+        "TIMER" to R.string.schedule_mode_timer,
+        "STOPWATCH" to R.string.schedule_mode_stopwatch,
+        "POMODORO" to R.string.schedule_mode_pomodoro
     )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(palette.surfaceVariant)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)
     ) {
         modes.forEach { (modeKey, label) ->
-            val isSelected = selectedMode.equals(modeKey, ignoreCase = true)
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isSelected) palette.surface else Color.Transparent)
-                    .clickable { onModeSelected(modeKey) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = label,
-                    color = if (isSelected) palette.textPrimary else palette.textSecondary,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScheduleBlockedAppsIconStack(blockedCount: Int) {
-    val context = LocalContext.current
-    var browserAppIcon by remember { mutableStateOf<InstalledAppItem?>(null) }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val allApps = InstalledAppsProvider.getInstalledUserApps(context)
-            val browserPackages = listOf(
-                "com.android.chrome",
-                "com.opera.browser",
-                "com.brave.browser",
-                "org.mozilla.firefox",
-                "com.sec.android.app.sbrowser",
-                "com.microsoft.emmx"
-            )
-            browserAppIcon = allApps.firstOrNull { it.packageName in browserPackages }
-        }
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy((-6).dp)
-    ) {
-        // 1. YouTube badge
-        Box(
-            modifier = Modifier
-                .size(26.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFEF4444))
-                .border(1.5.dp, FocusColors.Surface, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(15.dp)
-            )
-        }
-
-        // 2. Real Browser icon or Globe badge
-        val currentBrowser = browserAppIcon
-        if (currentBrowser?.iconBitmap != null) {
-            Image(
-                bitmap = currentBrowser.iconBitmap,
-                contentDescription = currentBrowser.appName,
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .border(1.5.dp, FocusColors.Surface, CircleShape)
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2563EB))
-                    .border(1.5.dp, FocusColors.Surface, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Language,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
-        }
-
-        // 3. Count pill
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(FocusColors.SurfaceSubtle)
-                .border(1.5.dp, FocusColors.Surface, RoundedCornerShape(12.dp))
-                .padding(horizontal = 8.dp, vertical = 3.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = if (blockedCount == 0) "Select" else "$blockedCount apps",
-                color = FocusColors.TextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+            FilterChip(
+                selected = selectedMode.equals(modeKey, ignoreCase = true),
+                onClick = { onModeSelected(modeKey) },
+                enabled = enabled,
+                label = { Text(stringResource(label)) }
             )
         }
     }
@@ -1889,458 +1395,12 @@ private fun ScheduleToggleRow(
     subtitle: String?,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    textPrimary: Color,
-    textSecondary: Color,
-    switchTrackChecked: Color,
-    switchTrackUnchecked: Color
+    enabled: Boolean = true
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 12.dp)
-        ) {
-            Text(
-                text = title,
-                color = textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
-            if (subtitle != null) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    color = textSecondary,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = switchTrackChecked,
-                uncheckedThumbColor = textSecondary,
-                uncheckedTrackColor = switchTrackUnchecked
-            )
-        )
-    }
+    FocusSwitchRow(title = title, description = subtitle, checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
 }
 
 private enum class ActivePicker { START_TIME, END_TIME }
 
-private fun formatTimeDisplay(value: String): String {
-    return runCatching {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).parse(value)?.let {
-            SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(it)
-        } ?: value
-    }.getOrDefault(value)
-}
-
 @Composable
-private fun TimePickerDialog(
-    initialTime: String,
-    title: String,
-    cardBg: Color,
-    textPrimary: Color,
-    textSecondary: Color,
-    onDismiss: () -> Unit,
-    onTimeSelected: (String) -> Unit
-) {
-    val initialMinutes = com.example.feature.session.notification.ScheduleTime
-        .parseToMinutesOrNull(initialTime)
-    val parsedHour = initialMinutes?.let { it / 60 } ?: 21
-    val parsedMinute = initialMinutes?.let { it % 60 } ?: 0
-
-    var isAm by remember(initialTime) { mutableStateOf(parsedHour < 12) }
-    var hour12 by remember(initialTime) {
-        val h = parsedHour % 12
-        mutableIntStateOf(if (h == 0) 12 else h)
-    }
-    var minute by remember(initialTime) { mutableIntStateOf(parsedMinute) }
-    var hourInputText by remember(initialTime) {
-        val h = parsedHour % 12
-        mutableStateOf(String.format(Locale.US, "%02d", if (h == 0) 12 else h))
-    }
-    var minuteInputText by remember(initialTime) {
-        mutableStateOf(String.format(Locale.US, "%02d", parsedMinute))
-    }
-
-    fun stepHour(delta: Int) {
-        var newHour = hour12 + delta
-        if (newHour > 12) {
-            newHour = 1
-        } else if (newHour < 1) {
-            newHour = 12
-        }
-        // Toggle AM/PM when crossing 11 <-> 12
-        if ((hour12 == 11 && newHour == 12) || (hour12 == 12 && newHour == 11)) {
-            isAm = !isAm
-        }
-        hour12 = newHour
-        hourInputText = String.format(Locale.US, "%02d", hour12)
-    }
-
-    fun stepMinute(delta: Int) {
-        val totalDelta = minute + delta
-        when {
-            totalDelta < 0 -> {
-                stepHour(-1)
-                minute = (60 + (totalDelta % 60)) % 60
-            }
-            totalDelta >= 60 -> {
-                stepHour(1)
-                minute = totalDelta % 60
-            }
-            else -> {
-                minute = totalDelta
-            }
-        }
-        minuteInputText = String.format(Locale.US, "%02d", minute)
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(title, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Hour Column
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Hour", color = textSecondary, fontSize = 12.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { stepHour(-1) }) {
-                                Text("◀", color = textSecondary)
-                            }
-                            OutlinedTextField(
-                                value = hourInputText,
-                                onValueChange = { raw ->
-                                    val digits = raw.filter { it.isDigit() }.take(2)
-                                    hourInputText = digits
-                                    val parsed = digits.toIntOrNull()
-                                    if (parsed != null && parsed in 1..12) {
-                                        hour12 = parsed
-                                    } else if (parsed != null && parsed in 13..23) {
-                                        hour12 = parsed - 12
-                                        isAm = false
-                                    } else if (parsed == 0) {
-                                        hour12 = 12
-                                        isAm = true
-                                    }
-                                },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                textStyle = TextStyle(
-                                    color = textPrimary,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
-                                ),
-                                modifier = Modifier.width(68.dp)
-                            )
-                            IconButton(onClick = { stepHour(1) }) {
-                                Text("▶", color = textSecondary)
-                            }
-                        }
-                    }
-
-                    Text(":", color = textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-
-                    // Minute Column (supports exact 1-min and 5-min steps + direct input)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Minute", color = textSecondary, fontSize = 12.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { stepMinute(-1) }) {
-                                Text("◀", color = textSecondary)
-                            }
-                            OutlinedTextField(
-                                value = minuteInputText,
-                                onValueChange = { raw ->
-                                    val digits = raw.filter { it.isDigit() }.take(2)
-                                    minuteInputText = digits
-                                    val parsed = digits.toIntOrNull()
-                                    if (parsed != null && parsed in 0..59) {
-                                        minute = parsed
-                                    }
-                                },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                textStyle = TextStyle(
-                                    color = textPrimary,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
-                                ),
-                                modifier = Modifier.width(68.dp)
-                            )
-                            IconButton(onClick = { stepMinute(1) }) {
-                                Text("▶", color = textSecondary)
-                            }
-                        }
-                    }
-                }
-
-                // Quick minute presets & ±5m steppers
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    listOf("-5m" to -5, ":00" to 0, ":15" to 15, ":30" to 30, ":45" to 45, "+5m" to 5).forEach { (label, value) ->
-                        val isPreset = label.startsWith(":")
-                        val isSelected = isPreset && minute == value
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isSelected) FocusColors.Primary
-                                    else if (LocalFocusColors.current.isDark) Color(0xFF22242B) else Color(0xFFE2E8F0)
-                                )
-                                .clickable {
-                                    if (isPreset) {
-                                        minute = value
-                                        minuteInputText = String.format(Locale.US, "%02d", minute)
-                                    } else {
-                                        stepMinute(value)
-                                    }
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) Color.White else textPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-
-                // AM / PM Toggle
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (LocalFocusColors.current.isDark) Color(0xFF22242B) else Color(0xFFE2E8F0))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isAm) FocusColors.Primary else Color.Transparent)
-                            .clickable { isAm = true }
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
-                    ) {
-                        Text("AM", color = if (isAm) Color.White else textSecondary, fontWeight = FontWeight.Bold)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (!isAm) FocusColors.Primary else Color.Transparent)
-                            .clickable { isAm = false }
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
-                    ) {
-                        Text("PM", color = if (!isAm) Color.White else textSecondary, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val safeHour12 = hourInputText.toIntOrNull()?.coerceIn(1, 12) ?: hour12.coerceIn(1, 12)
-                    val safeMinute = minuteInputText.toIntOrNull()?.coerceIn(0, 59) ?: minute.coerceIn(0, 59)
-                    val final24Hour = if (isAm) {
-                        if (safeHour12 == 12) 0 else safeHour12
-                    } else {
-                        if (safeHour12 == 12) 12 else safeHour12 + 12
-                    }
-                    val formatted = String.format(Locale.US, "%02d:%02d", final24Hour, safeMinute)
-                    onTimeSelected(formatted)
-                }
-            ) {
-                Text("Set Time", color = FocusColors.Primary, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = textSecondary)
-            }
-        },
-        containerColor = cardBg
-    )
-}
-
-@Composable
-private fun BreakPickerDialog(
-    currentNumberOfBreaks: Int,
-    currentBreakMinutes: Int,
-    cardBg: Color,
-    textPrimary: Color,
-    textSecondary: Color,
-    onDismiss: () -> Unit,
-    onSelect: (Int, Int) -> Unit
-) {
-    var breaksCount by remember { mutableIntStateOf(currentNumberOfBreaks) }
-    var breakMins by remember { mutableIntStateOf(currentBreakMinutes.coerceAtLeast(5)) }
-    val countOptions = listOf(0, 1, 2, 3, 4)
-    val durationOptions = listOf(5, 10, 15, 20, 30)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Configure Breaks", color = textPrimary, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "Number of breaks",
-                    color = textSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    countOptions.forEach { count ->
-                        val isSelected = breaksCount == count
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) FocusColors.Primary else FocusColors.SurfaceSubtle)
-                                .clickable { breaksCount = count },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "$count",
-                                color = if (isSelected) Color.White else textPrimary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                if (breaksCount > 0) {
-                    Text(
-                        text = "Break duration",
-                        color = textSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        durationOptions.forEach { mins ->
-                            val isSelected = mins == breakMins
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) FocusColors.Primary.copy(alpha = 0.15f) else Color.Transparent)
-                                    .clickable { breakMins = mins }
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "$mins mins",
-                                    color = if (isSelected) FocusColors.Primary else textPrimary,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp
-                                )
-                                if (isSelected) {
-                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = FocusColors.Primary, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSelect(breaksCount, if (breaksCount == 0) 0 else breakMins) },
-                colors = ButtonDefaults.buttonColors(containerColor = FocusColors.Primary)
-            ) {
-                Text("Confirm", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = textSecondary)
-            }
-        },
-        containerColor = cardBg
-    )
-}
-
-@Composable
-private fun EmojiPickerDialog(
-    currentEmoji: String,
-    cardBg: Color,
-    textPrimary: Color,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Choose Icon", color = textPrimary, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                val chunked = DEFAULT_EMOJIS.chunked(4)
-                chunked.forEach { rowEmojis ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        rowEmojis.forEach { emoji ->
-                            val isSelected = emoji == currentEmoji
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSelected) FocusColors.Primary.copy(alpha = 0.2f) else Color.Transparent)
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 0.dp,
-                                        color = if (isSelected) FocusColors.Primary else Color.Transparent,
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { onSelect(emoji) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(text = emoji, fontSize = 24.sp)
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close", color = FocusColors.Primary)
-            }
-        },
-        containerColor = cardBg
-    )
-}
+private fun formatTimeDisplay(value: String): String = scheduleTimeDisplay(value)

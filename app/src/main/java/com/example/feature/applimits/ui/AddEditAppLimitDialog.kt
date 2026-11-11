@@ -1,828 +1,267 @@
 package com.example.feature.applimits.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
+import com.example.R
 import com.example.core.design.FocusColors
-import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
+import com.example.core.ui.FocusActionRow
+import com.example.core.ui.FocusSearchField
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.FocusSwitchRow
+import com.example.data.repository.AppLimitWriteResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
-/** Upper bound on the emergency-use allowance offered by the stepper. */
-private const val MAX_EMERGENCY_USES = 10
-
-/** The round `−` / `+` control used by the emergency-use stepper. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StepperButton(
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = CircleShape,
-        color = if (enabled) FocusColors.Primary.copy(alpha = 0.14f) else FocusColors.SurfaceSubtle,
-        modifier = Modifier
-            .size(32.dp)
-            .testTag(testTag)
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = if (enabled) FocusColors.Primary else FocusColors.TextMuted
-                )
-            )
-        }
-    }
-}
-
+/** Shared by Blocks and App Limits. The selected app and unsaved fields survive recreation. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddEditAppLimitDialog(
     installedApps: List<InstalledAppChoice>,
     editingItem: AppLimitUiItem?,
     onDismiss: () -> Unit,
-    onSave: (
-        packageName: String,
-        appName: String,
-        dailyLimitMinutes: Int,
-        isStrictOverride: Boolean,
-        emergencyUsesAllowed: Int
-    ) -> Unit
+    onSave: suspend (packageName: String, appName: String, dailyLimitMinutes: Int,
+        isStrictOverride: Boolean, showRemindersBeforeLimit: Boolean, emergencyUsesAllowed: Int,
+        requireExisting: Boolean) -> AppLimitWriteResult,
+    existingLimits: List<AppLimitUiItem> = emptyList(),
+    loadingApps: Boolean = false,
+    appsLoadError: String? = null,
+    onRetryApps: () -> Unit = {},
+    saving: Boolean = false,
+    initialEditingPackage: String? = null,
+    initialAppName: String? = null,
+    forceRequireExisting: Boolean? = null
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    var selectedApp by remember {
-        mutableStateOf(
-            if (editingItem != null) {
-                InstalledAppChoice(
-                    packageName = editingItem.packageName,
-                    appName = editingItem.appName,
-                    icon = editingItem.appIcon
-                )
-            } else null
-        )
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selectedPackage by rememberSaveable { mutableStateOf(editingItem?.packageName ?: initialEditingPackage) }
+    var selectedName by rememberSaveable { mutableStateOf(editingItem?.appName ?: initialAppName) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var feedback by rememberSaveable { mutableStateOf<String?>(null) }
+    var localSaving by remember { mutableStateOf(false) }
+    val busy = localSaving || saving
+    val selectedApp = installedApps.firstOrNull { it.packageName == selectedPackage }
+    val existing = editingItem ?: existingLimits.firstOrNull { it.packageName == selectedPackage }
+    val locked = existing?.isStrictOverride == true || selectedApp?.isStrictLocked == true
+    val fixedApp = editingItem != null || initialEditingPackage != null
+    // Keep the edit intent even if the row disappears while this editor is open. Wellbeing can
+    // open a fixed app that has no limit yet, so it passes the intent explicitly.
+    val requireExisting = rememberSaveable(selectedPackage) {
+        forceRequireExisting ?: (existing != null || fixedApp)
+    }
+    var minutesText by rememberSaveable(selectedPackage) { mutableStateOf((existing?.dailyLimitMinutes ?: 45).toString()) }
+    var strict by rememberSaveable(selectedPackage) { mutableStateOf(existing?.isStrictOverride ?: false) }
+    var reminders by rememberSaveable(selectedPackage) { mutableStateOf(existing?.showRemindersBeforeLimit ?: true) }
+    var emergencyText by rememberSaveable(selectedPackage) { mutableStateOf((existing?.emergencyUsesAllowed ?: 1).toString()) }
+    var minutesError by rememberSaveable(selectedPackage) { mutableStateOf<String?>(null) }
+    var emergencyError by rememberSaveable(selectedPackage) { mutableStateOf<String?>(null) }
+    var confirmStrict by rememberSaveable { mutableStateOf(false) }
+    val minutesFocus = remember { FocusRequester() }
+    val emergencyFocus = remember { FocusRequester() }
+    val maxPickerHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
+    val filteredApps = remember(installedApps, query) {
+        installedApps.filter { it.appName.contains(query, true) || it.packageName.contains(query, true) }
     }
 
-    var searchQuery by remember { mutableStateOf("") }
-    var dailyLimitMinutes by remember {
-        mutableFloatStateOf((editingItem?.dailyLimitMinutes ?: 45).toFloat())
-    }
-    var isStrictOverride by remember {
-        mutableStateOf(editingItem?.isStrictOverride ?: false)
-    }
-    // How many emergency uses this limit grants once it is reached. Chosen here, on the limit
-    // itself — there is deliberately no separate "emergency duration" popup, and no choice of
-    // duration to make: the emergency window is one fixed length, so the only thing the student
-    // configures is how many times it may be used.
-    var emergencyUsesAllowed by remember {
-        mutableStateOf(editingItem?.emergencyUsesAllowed ?: 1)
-    }
-    var showStrictWarningDialog by remember { mutableStateOf(false) }
-
-    val filteredApps = remember(searchQuery, installedApps) {
-        if (searchQuery.isBlank()) {
-            installedApps
-        } else {
-            installedApps.filter {
-                it.appName.contains(searchQuery, ignoreCase = true) ||
-                        it.packageName.contains(searchQuery, ignoreCase = true)
-            }
+    fun dismiss() { if (!busy) onDismiss() }
+    fun save() {
+        if (localSaving || saving || locked) return
+        val minutes = minutesText.toIntOrNull()
+        val emergency = if (strict) 0 else emergencyText.toIntOrNull()
+        if (minutes == null || minutes !in 1..1440) {
+            minutesError = context.getString(R.string.limits_minutes_error)
+            minutesFocus.requestFocus()
+            return
         }
-    }
-
-    val presetMinutes = listOf(10, 15, 20, 30, 45, 60, 90, 120)
-
-    androidx.activity.compose.BackHandler(enabled = true) {
-        if (selectedApp != null && editingItem == null) {
-            selectedApp = null
-        } else {
-            onDismiss()
+        if (emergency == null || emergency !in 0..10) {
+            emergencyError = context.getString(R.string.limits_emergency_error)
+            emergencyFocus.requestFocus()
+            return
+        }
+        if (strict && !confirmStrict) { confirmStrict = true; return }
+        val packageName = selectedPackage ?: return
+        val appName = selectedName ?: selectedApp?.appName ?: existing?.appName ?: initialAppName ?: packageName
+        localSaving = true
+        scope.launch {
+            try {
+                when (val result = onSave(packageName, appName, minutes, strict, reminders, emergency, requireExisting)) {
+                    is AppLimitWriteResult.Applied -> onDismiss()
+                    else -> feedback = result.feedbackMessage(context)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                Log.e("AppLimitEditor", "Unable to save app limit", exception)
+                feedback = context.getString(R.string.limits_save_error)
+            } finally { localSaving = false; confirmStrict = false }
         }
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
+        onDismissRequest = ::dismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+            confirmValueChange = { value -> value != SheetValue.Hidden || !busy }),
         containerColor = FocusColors.Surface,
-        dragHandle = null,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        contentColor = FocusColors.TextPrimary,
+        modifier = Modifier.testTag("app_limit_editor")
     ) {
-        if (editingItem == null && selectedApp == null) {
-            // STEP 1: Full-height app picker with search and scrollable apps list
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.85f)
-                    .navigationBarsPadding()
-                    .padding(horizontal = FocusSpacing.xl, vertical = FocusSpacing.lg)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(FocusColors.PrimaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Timer,
-                                contentDescription = null,
-                                tint = FocusColors.Primary,
-                                modifier = Modifier.size(20.dp)
-                            )
+        if (selectedPackage == null) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxPickerHeight).navigationBarsPadding().imePadding(),
+                verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+                item {
+                    EditorHeading(stringResource(R.string.limits_choose_app), ::dismiss, !busy)
+                    FocusSearchField(value = query, onValueChange = { query = it }, label = stringResource(R.string.limits_search_label),
+                        placeholder = stringResource(R.string.limits_search_example), modifier = Modifier.padding(horizontal = FocusSpacing.screenHorizontal))
+                }
+                item {
+                    Column(Modifier.padding(horizontal = FocusSpacing.screenHorizontal)) {
+                        FocusStatusMessage(feedback, isError = true, onDismiss = { feedback = null })
+                        if (appsLoadError != null) {
+                            Text(appsLoadError, color = FocusColors.BlockedText)
+                            TextButton(onRetryApps, enabled = !loadingApps) { Text(stringResource(R.string.action_retry)) }
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Set App Limit",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = FocusColors.TextPrimary
-                            )
-                        )
-                    }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Close",
-                            tint = FocusColors.TextSecondary
-                        )
+                        if (loadingApps) CircularProgressIndicator()
+                        else Text(pluralStringResource(R.plurals.limits_apps_found, filteredApps.size, filteredApps.size),
+                            color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "1. Choose Application",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            color = FocusColors.TextPrimary
-                        )
-                    )
-                    Text(
-                        text = "${filteredApps.size} apps",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = FocusColors.TextMuted
-                        )
-                    )
+                items(filteredApps, key = { it.packageName }) { app ->
+                    FocusActionRow(title = app.appName,
+                        description = app.packageName,
+                        value = if (app.isStrictLocked) stringResource(R.string.limits_strict_status)
+                            else if (app.isAlreadyLimited) stringResource(R.string.limits_edit_existing) else null,
+                        onClick = {
+                            if (app.isStrictLocked) feedback = context.getString(R.string.limits_strict_locked)
+                            else { selectedPackage = app.packageName; selectedName = app.appName; feedback = null }
+                        }, modifier = Modifier.testTag("limit_app_${app.packageName}"), enabled = !busy)
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search installed apps...", color = FocusColors.TextMuted) },
-                    leadingIcon = {
-                        Icon(Icons.Rounded.Search, contentDescription = "Search", tint = FocusColors.TextSecondary)
-                    },
-                    trailingIcon = if (searchQuery.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Clear search", tint = FocusColors.TextSecondary)
-                            }
-                        }
-                    } else null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("app_limit_search_input"),
-                    shape = FocusShapes.medium,
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = FocusColors.Primary,
-                        unfocusedBorderColor = FocusColors.CardBorder,
-                        focusedTextColor = FocusColors.TextPrimary,
-                        unfocusedTextColor = FocusColors.TextPrimary
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (filteredApps.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (searchQuery.isNotBlank()) "No apps matching \"$searchQuery\"" else "No installed apps found",
-                            style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary)
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(filteredApps, key = { it.packageName }) { app ->
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(FocusShapes.medium)
-                                    .clickable {
-                                        if (app.isStrictLocked) {
-                                            android.widget.Toast.makeText(
-                                                context,
-                                                "Strict Mode Active: ${app.appName} limit is locked and cannot be modified or deleted.",
-                                                android.widget.Toast.LENGTH_LONG
-                                            ).show()
-                                        } else {
-                                            selectedApp = app
-                                        }
-                                    }
-                                    .padding(vertical = 8.dp, horizontal = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (app.icon != null) {
-                                    Image(
-                                        bitmap = app.icon.toBitmap(80, 80).asImageBitmap(),
-                                        contentDescription = app.appName,
-                                        modifier = Modifier.size(36.dp)
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(FocusColors.SurfaceVariant),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Rounded.Apps, contentDescription = null, tint = FocusColors.TextSecondary)
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = app.appName,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = FocusColors.TextPrimary
-                                        )
-                                    )
-                                    Text(
-                                        text = app.packageName,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FocusColors.TextMuted
-                                        ),
-                                        maxLines = 1
-                                    )
-                                }
-
-                                if (app.isStrictLocked) {
-                                    Surface(
-                                        shape = RoundedCornerShape(100.dp),
-                                        color = FocusColors.BlockedRed.copy(alpha = 0.14f)
-                                    ) {
-                                        Text(
-                                            text = "🔒 Strict Locked",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.BlockedRed,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                } else if (app.isAlreadyLimited) {
-                                    Surface(
-                                        shape = RoundedCornerShape(100.dp),
-                                        color = FocusColors.AmberOrange.copy(alpha = 0.12f)
-                                    ) {
-                                        Text(
-                                            text = "Configured",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.AmberOrange,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
+                if (!loadingApps && filteredApps.isEmpty() && appsLoadError == null) item {
+                    Column(Modifier.padding(FocusSpacing.screenHorizontal)) {
+                        Text(stringResource(if (query.isBlank()) R.string.limits_no_apps else R.string.limits_no_results), color = FocusColors.TextSecondary)
+                        TextButton(if (query.isBlank()) onRetryApps else ({ query = "" })) {
+                            Text(stringResource(if (query.isBlank()) R.string.action_retry else R.string.action_clear_search))
                         }
                     }
                 }
             }
-        } else if (selectedApp != null) {
-            // STEP 2: Limit configuration with selected app, presets, slider, and settings
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = FocusSpacing.xl, vertical = FocusSpacing.lg)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(FocusColors.PrimaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Timer,
-                                contentDescription = null,
-                                tint = FocusColors.Primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = if (editingItem != null) "Edit App Limit" else "Set App Limit",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = FocusColors.TextPrimary
-                            )
-                        )
-                    }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Close",
-                            tint = FocusColors.TextSecondary
-                        )
+        } else {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = FocusSpacing.screenHorizontal), verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)) {
+                EditorHeading(stringResource(if (requireExisting) R.string.limits_edit_title else R.string.limits_add_title), ::dismiss, !busy)
+                FocusStatusMessage(feedback ?: if (locked) stringResource(R.string.limits_strict_locked) else null,
+                    isError = true, onDismiss = { feedback = null })
+                Text(selectedName ?: selectedApp?.appName ?: existing?.appName ?: initialAppName
+                    ?: selectedPackage.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                Text(selectedPackage.orEmpty(), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                if (!fixedApp) TextButton(onClick = { if (!busy) selectedPackage = null }, enabled = !busy) {
+                    Text(stringResource(R.string.limits_change_app))
+                }
+                OutlinedTextField(minutesText, { minutesText = it; minutesError = null },
+                    label = { Text(stringResource(R.string.limits_daily_minutes)) }, enabled = !busy && !locked,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true,
+                    isError = minutesError != null,
+                    supportingText = { Text(minutesError ?: stringResource(R.string.limits_minutes_hint)) },
+                    modifier = Modifier.fillMaxWidth().focusRequester(minutesFocus).testTag("limit_minutes_input"))
+                FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                    listOf(10, 15, 30, 45, 60, 90, 120).forEach { minutes ->
+                        FilterChip(selected = minutesText.toIntOrNull() == minutes,
+                            onClick = { minutesText = minutes.toString(); minutesError = null }, enabled = !busy && !locked,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            label = { Text(pluralStringResource(R.plurals.limits_minutes, minutes, minutes)) })
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                // Selected App Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = FocusShapes.card,
-                    colors = CardDefaults.cardColors(containerColor = FocusColors.SurfaceVariant),
-                    border = BorderStroke(1.dp, FocusColors.CardBorderSubtle)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(FocusSpacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (selectedApp!!.icon != null) {
-                            Image(
-                                bitmap = selectedApp!!.icon!!.toBitmap(96, 96).asImageBitmap(),
-                                contentDescription = selectedApp!!.appName,
-                                modifier = Modifier.size(44.dp)
-                            )
-                        } else {
-                            Icon(Icons.Rounded.Apps, contentDescription = null, tint = FocusColors.Primary, modifier = Modifier.size(36.dp))
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = selectedApp!!.appName,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = FocusColors.TextPrimary
-                                )
-                            )
-                            Text(
-                                text = selectedApp!!.packageName,
-                                style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextMuted)
-                            )
-                        }
-
-                        if (editingItem == null) {
-                            TextButton(onClick = { selectedApp = null }) {
-                                Text("Change", color = FocusColors.Primary)
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Step 2: Daily Limit Configuration
-                Text(
-                    text = "Daily Limit Allowance",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Preset Chips
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    presetMinutes.forEach { mins ->
-                        val isSelected = dailyLimitMinutes.toInt() == mins
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { dailyLimitMinutes = mins.toFloat() },
-                            label = { Text("$mins min") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = FocusColors.Primary,
-                                selectedLabelColor = FocusColors.TextOnDark
-                            ),
-                            shape = RoundedCornerShape(100.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Slider
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Total Allowance:",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary)
-                    )
-                    Text(
-                        text = "${dailyLimitMinutes.toInt()} minutes / day",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = FocusColors.Primary
-                        )
-                    )
-                }
-
-                Slider(
-                    value = dailyLimitMinutes,
-                    onValueChange = { dailyLimitMinutes = it },
-                    valueRange = 1f..180f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = FocusColors.Primary,
-                        activeTrackColor = FocusColors.Primary,
-                        inactiveTrackColor = FocusColors.CardBorder
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Emergency-use allowance for this limit. 1 = one unlock opportunity after the
-                // limit is reached; 0 = none, so the limit is absolute. This is a *count*, not a
-                // duration — the emergency window itself is a fixed length.
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(FocusShapes.medium)
-                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.medium),
-                    color = FocusColors.SurfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.Timer,
-                                contentDescription = null,
-                                tint = if (emergencyUsesAllowed > 0) FocusColors.Primary else FocusColors.TextSecondary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "No. of emergency use",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary
-                                    )
-                                )
-                                Text(
-                                    text = if (emergencyUsesAllowed == 0) {
-                                        "None — the limit is absolute once reached."
-                                    } else {
-                                        "How many times this app may be unlocked after the limit."
-                                    },
-                                    style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextSecondary)
-                                )
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            StepperButton(
-                                label = "−",
-                                enabled = emergencyUsesAllowed > 0,
-                                onClick = { emergencyUsesAllowed -= 1 },
-                                testTag = "decrease_emergency_uses"
-                            )
-                            Text(
-                                text = emergencyUsesAllowed.toString(),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = FocusColors.TextPrimary
-                                ),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .width(40.dp)
-                                    .testTag("emergency_uses_value")
-                            )
-                            StepperButton(
-                                label = "+",
-                                enabled = emergencyUsesAllowed < MAX_EMERGENCY_USES,
-                                onClick = { emergencyUsesAllowed += 1 },
-                                testTag = "increase_emergency_uses"
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Strict Mode Override Toggle
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(FocusShapes.medium)
-                        .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.medium),
-                    color = FocusColors.SurfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.Security,
-                                contentDescription = null,
-                                tint = if (isStrictOverride) FocusColors.BlockedRed else FocusColors.TextSecondary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Strict Mode Override",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = FocusColors.TextPrimary
-                                    )
-                                )
-                                Text(
-                                    text = "Disables 5-min emergency uses and leave-block options when daily limit is reached.",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = FocusColors.TextSecondary)
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = isStrictOverride,
-                            onCheckedChange = { isChecked ->
-                                if (isChecked) {
-                                    showStrictWarningDialog = true
-                                } else {
-                                    isStrictOverride = false
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = FocusColors.TextOnDark,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = FocusColors.TextMuted,
-                                uncheckedTrackColor = FocusColors.SurfaceSubtle
-                            )
-                        )
-                    }
-                }
-
-                // Strict Mode Warning Banner
-                if (isStrictOverride) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        shape = FocusShapes.medium,
-                        color = FocusColors.BlockedRed.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, FocusColors.BlockedRed.copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Security,
-                                contentDescription = null,
-                                tint = FocusColors.BlockedRed,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Strict Mode active: This limit cannot be deleted or edited once saved. Choose your limit wisely!",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.TextPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = 16.sp
-                                )
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Save Action
-                ElevatedButton(
-                    onClick = {
-                        val app = selectedApp ?: return@ElevatedButton
-                        onSave(
-                            app.packageName,
-                            app.appName,
-                            dailyLimitMinutes.toInt(),
-                            isStrictOverride,
-                            emergencyUsesAllowed
-                        )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("save_app_limit_button"),
-                    shape = FocusShapes.medium,
-                    colors = ButtonDefaults.elevatedButtonColors(
-                        containerColor = FocusColors.Primary,
-                        contentColor = FocusColors.TextOnDark
-                    )
-                ) {
-                    Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (editingItem != null) "Update App Limit" else "Save App Limit",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                    )
+                FocusSwitchRow(stringResource(R.string.limits_strict_label), strict, { strict = it }, enabled = !busy && !locked,
+                    description = stringResource(R.string.limits_strict_body), modifier = Modifier.testTag("limit_strict_switch"))
+                FocusSwitchRow(stringResource(R.string.limits_reminders), reminders, { reminders = it }, enabled = !busy && !locked,
+                    description = stringResource(R.string.limits_reminders_body))
+                if (!strict) OutlinedTextField(emergencyText, { emergencyText = it; emergencyError = null },
+                    label = { Text(stringResource(R.string.limits_emergency_label)) }, enabled = !busy && !locked,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true,
+                    isError = emergencyError != null,
+                    supportingText = { Text(emergencyError ?: stringResource(R.string.limits_emergency_hint)) },
+                    modifier = Modifier.fillMaxWidth().focusRequester(emergencyFocus).testTag("limit_emergency_input"))
+                Button(onClick = ::save, enabled = !busy && !locked,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(bottom = FocusSpacing.lg).testTag("save_app_limit")) {
+                    Text(stringResource(if (busy) R.string.action_saving else R.string.limits_save))
                 }
             }
         }
     }
+    BackHandler {
+        if (!busy) {
+            if (confirmStrict) confirmStrict = false
+            else if (selectedPackage != null && !fixedApp) selectedPackage = null
+            else onDismiss()
+        }
+    }
+    if (confirmStrict) AlertDialog(
+        onDismissRequest = { if (!busy) confirmStrict = false },
+        title = { Text(stringResource(R.string.limits_strict_confirm_title,
+            selectedName ?: selectedApp?.appName ?: existing?.appName ?: initialAppName
+                ?: selectedPackage.orEmpty())) },
+        text = { Text(stringResource(R.string.limits_strict_confirm_body)) },
+        confirmButton = { Button(onClick = ::save, enabled = !busy) { Text(stringResource(R.string.limits_save_strict)) } },
+        dismissButton = { TextButton({ confirmStrict = false }, enabled = !busy) { Text(stringResource(R.string.action_cancel)) } }
+    )
+}
 
-    // Strict Mode Warning Modal Dialog
-    if (showStrictWarningDialog) {
-        AlertDialog(
-            onDismissRequest = { showStrictWarningDialog = false },
-            containerColor = FocusColors.Surface,
-            titleContentColor = FocusColors.TextPrimary,
-            textContentColor = FocusColors.TextSecondary,
-            icon = {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(FocusColors.BlockedRed.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Security,
-                        contentDescription = null,
-                        tint = FocusColors.BlockedRed,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            },
-            title = {
-                Text(
-                    text = "Strict Mode Warning",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            text = {
-                Text(
-                    text = "Once you enable Strict Mode and save, this app limit CANNOT be deleted, edited, or toggled off during the day. Choose your limit wisely!",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = FocusColors.TextSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        isStrictOverride = true
-                        showStrictWarningDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = FocusColors.BlockedRed,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("I Understand", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        isStrictOverride = false
-                        showStrictWarningDialog = false
-                    }
-                ) {
-                    Text("Cancel", color = FocusColors.TextSecondary)
-                }
-            }
-        )
+@Composable
+private fun EditorHeading(title: String, onClose: () -> Unit, enabled: Boolean) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = FocusSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+        IconButton(onClose, enabled = enabled) { Icon(Icons.Rounded.Close, stringResource(R.string.action_close)) }
     }
 }

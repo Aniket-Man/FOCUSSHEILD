@@ -2,11 +2,14 @@ package com.example.core.util
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 
 /**
  * Owns the on-disk storage for the user's cropped profile photo.
@@ -15,13 +18,9 @@ import java.io.FileOutputStream
  * URIs are handed back as `file://` strings, and writes go to a temp file first so a failed
  * write can never leave a half-written image behind.
  *
- * Two files are kept:
- *  - `staged_crop.jpg` — the result of the crop screen, before the user taps Save.
- *  - `avatar.jpg`      — the committed avatar that is actually persisted and uploaded.
- *
- * Staging exists because the crop result reaches the sheet *before* the user saves: writing
- * straight to `avatar.jpg` would overwrite the saved avatar even when the sheet is cancelled.
- * A single fixed staging name also means crop-then-cancel can never orphan files.
+ * Crops first go to one staging file. Preparing a save copies that crop to a unique avatar file;
+ * the previous avatar is retired only after its replacement URI is persisted. Failed saves keep
+ * both the saved photo and the editable crop intact.
  */
 object ProfilePhotoStorage {
 
@@ -51,7 +50,7 @@ object ProfilePhotoStorage {
             val tempFile = File(dir, "$STAGED_FILE_NAME.tmp")
 
             FileOutputStream(tempFile).use { fos ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)) { "Unable to encode cropped photo" }
                 fos.flush()
             }
 
@@ -62,8 +61,10 @@ object ProfilePhotoStorage {
                 tempFile.delete()
                 null
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            Log.e(TAG, "Error writing staged crop: ${e.message}")
+            Log.e(TAG, "Error writing staged crop", e)
             null
         }
     }
@@ -77,40 +78,56 @@ object ProfilePhotoStorage {
     }
 
     /**
-     * Promotes the staged crop to the committed avatar, discarding the previous one.
-     * Returns the `file://` URI of the committed avatar, or null when there is nothing staged.
+     * Prepare a candidate without touching the saved avatar or the editable staging file.
+     * Throw on failure; never persist a staging URI as a fallback.
      */
-    fun commitStagedCrop(context: Context): String? {
-        return try {
-            val staged = File(getPhotoDirectory(context), STAGED_FILE_NAME)
-            if (!staged.exists()) return null
-
-            val avatar = File(getPhotoDirectory(context), AVATAR_FILE_NAME)
-            if (avatar.exists()) avatar.delete()
-
-            if (staged.renameTo(avatar)) {
-                toFileUri(avatar)
-            } else {
-                Log.w(TAG, "Failed to commit staged crop")
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error committing staged crop: ${e.message}")
-            null
+    suspend fun preparePhoto(context: Context, selectedUri: String?): String? = withContext(Dispatchers.IO) {
+        if (!isStaged(context, selectedUri)) return@withContext selectedUri
+        val directory = getPhotoDirectory(context)
+        val staged = File(directory, STAGED_FILE_NAME)
+        check(staged.isFile && staged.length() > 0L) { "Cropped photo is unavailable. Choose the photo again." }
+        val candidate = File(directory, "avatar_${UUID.randomUUID()}.jpg")
+        try {
+            staged.copyTo(candidate, overwrite = false)
+            toFileUri(candidate)
+        } catch (exception: Exception) {
+            candidate.delete()
+            throw exception
         }
     }
 
     /**
-     * Removes both the staged and the committed photo. Called only when the user saves with the
-     * photo removed, so cancelling the sheet never destroys the saved avatar.
+     * Retire only the old file owned by this store. Content URIs and cloud caches belong elsewhere.
+     * Cleanup failure wastes space, not saved data, and must not turn a successful save into a retry.
      */
-    fun deleteStoredPhotos(context: Context) {
+    suspend fun finishPhoto(context: Context, previousUri: String?, savedUri: String?, retainedUris: Set<String> = emptySet()) {
+        if (previousUri != savedUri && previousUri !in retainedUris) discardOwnedPhoto(context, previousUri)
+        // The editor discards staging on explicit dismissal. If its activity is recreated just
+        // after persistence, its restored form can still retry using the original crop.
+    }
+
+    suspend fun discardOwnedPhoto(context: Context, uri: String?) = withContext(Dispatchers.IO) {
         try {
-            val dir = getPhotoDirectory(context)
-            File(dir, STAGED_FILE_NAME).delete()
-            File(dir, AVATAR_FILE_NAME).delete()
+            val parsed = uri?.let(Uri::parse) ?: return@withContext
+            if (parsed.scheme != "file") return@withContext
+            val file = parsed.path?.let(::File)?.canonicalFile ?: return@withContext
+            val directory = getPhotoDirectory(context).canonicalFile
+            val ownedName = file.name == AVATAR_FILE_NAME ||
+                (file.name.startsWith("avatar_") && file.name.endsWith(".jpg"))
+            if (file.parentFile == directory && ownedName && file.exists() && !file.delete()) {
+                Log.w(TAG, "Unable to retire previous profile photo")
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error deleting stored photos: ${e.message}")
+            Log.w(TAG, "Unable to clean up profile photo", e)
+        }
+    }
+
+    suspend fun discardStagedCrop(context: Context) = withContext(Dispatchers.IO) {
+        try {
+            val staged = File(getPhotoDirectory(context), STAGED_FILE_NAME)
+            if (staged.exists() && !staged.delete()) Log.w(TAG, "Unable to discard staged profile photo")
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to discard staged profile photo", e)
         }
     }
 }

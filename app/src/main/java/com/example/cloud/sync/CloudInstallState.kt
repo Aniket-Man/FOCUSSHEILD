@@ -1,9 +1,13 @@
 package com.example.cloud.sync
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.UUID
+
+data class PendingProfilePhoto(val userId: String, val photoUri: String?, val token: String)
 
 /**
  * Per-install cloud-sync bookkeeping, stored in a private SharedPreferences file.
@@ -38,6 +42,8 @@ open class CloudInstallState(context: Context) {
         const val KEY_PREFS_DIRTY = "dirty_preferences"
         const val KEY_INSTALL_ID = "installId"
         const val WATERMARK_PREFIX = "wm:"
+        const val PHOTO_URI_PREFIX = "pendingPhotoUri:"
+        const val PHOTO_TOKEN_PREFIX = "pendingPhotoToken:"
     }
 
     open suspend fun installId(): String = mutex.withLock {
@@ -104,6 +110,39 @@ open class CloudInstallState(context: Context) {
 
     open suspend fun setProfileDirty(dirty: Boolean) = mutex.withLock {
         prefs.edit().putBoolean(KEY_PROFILE_DIRTY, dirty).apply()
+    }
+
+    /** A token distinguishes no pending edit from a pending removal (whose URI is null). */
+    open suspend fun setPendingProfilePhoto(uid: String, photoUri: String?) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val edit = prefs.edit().putString(PHOTO_TOKEN_PREFIX + uid, UUID.randomUUID().toString())
+            if (photoUri == null) edit.remove(PHOTO_URI_PREFIX + uid) else edit.putString(PHOTO_URI_PREFIX + uid, photoUri)
+            check(edit.commit()) { "Unable to queue profile photo backup" }
+        }
+    }
+
+    open suspend fun pendingProfilePhoto(uid: String): PendingProfilePhoto? = mutex.withLock {
+        prefs.getString(PHOTO_TOKEN_PREFIX + uid, null)?.let { token ->
+            PendingProfilePhoto(uid, prefs.getString(PHOTO_URI_PREFIX + uid, null), token)
+        }
+    }
+
+    /** Photos queued for a different account must survive another account's local edit. */
+    open suspend fun pendingProfilePhotoUris(): Set<String> = mutex.withLock {
+        prefs.all.keys.filter { it.startsWith(PHOTO_TOKEN_PREFIX) }.mapNotNull { key ->
+            prefs.getString(PHOTO_URI_PREFIX + key.removePrefix(PHOTO_TOKEN_PREFIX), null)
+        }.toSet()
+    }
+
+    /** A completed upload must not clear a newer photo edit made while the request was in flight. */
+    open suspend fun clearPendingProfilePhoto(pending: PendingProfilePhoto) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (prefs.getString(PHOTO_TOKEN_PREFIX + pending.userId, null) == pending.token) {
+                check(prefs.edit().remove(PHOTO_TOKEN_PREFIX + pending.userId).remove(PHOTO_URI_PREFIX + pending.userId).commit()) {
+                    "Unable to record completed profile photo backup"
+                }
+            }
+        }
     }
 
     open suspend fun prefsDirty(): Boolean = mutex.withLock {

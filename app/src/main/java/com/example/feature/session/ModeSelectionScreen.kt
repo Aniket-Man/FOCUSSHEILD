@@ -2,7 +2,6 @@ package com.example.feature.session
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,23 +10,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.HourglassBottom
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
-import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,19 +34,25 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.core.ui.FocusPrimaryButton
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.sessionModeSubtitle
+import com.example.core.ui.sessionModeTitle
 import com.example.data.model.SessionMode
 
 /**
  * Screen 3: Mode Selection Screen.
- * Provides deep-dive comparison and selection across Timer, Stopwatch, and Pomodoro.
+ * Provides a deeper comparison of Timer, Stopwatch and Pomodoro.
  */
 @Composable
 fun ModeSelectionScreen(
@@ -63,49 +65,31 @@ fun ModeSelectionScreen(
 
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.sm, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(FocusSpacing.xs))
-                Text(
-                    text = "Session Modes",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary
-                    )
-                )
-            }
+            FocusScreenHeader(
+                title = stringResource(R.string.session_modes_title),
+                onBack = onNavigateBack,
+                subtitle = stringResource(R.string.session_modes_select_body),
+                modifier = Modifier.statusBarsPadding(),
+                backButtonModifier = Modifier.testTag("back_button")
+            )
         },
         bottomBar = {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(FocusColors.Surface)
+                    .navigationBarsPadding()
                     .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.base)
             ) {
                 FocusPrimaryButton(
-                    text = "Configure Session",
+                    text = stringResource(R.string.session_modes_configure),
                     onClick = onNavigateToSetup,
                     testTag = "configure_session_button"
                 )
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.navigationBarsPadding().testTag("mode_selection_screen")
+        modifier = modifier.testTag("mode_selection_screen")
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -115,11 +99,10 @@ fun ModeSelectionScreen(
                 .padding(horizontal = FocusSpacing.screenHorizontal),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
         ) {
-            // Header explanation
             Column {
                 Text(
-                    text = "Select Focus Mode",
-                    style = androidx.compose.material3.MaterialTheme.typography.headlineMedium.copy(
+                    text = stringResource(R.string.session_modes_select_title),
+                    style = MaterialTheme.typography.headlineMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = FocusColors.TextPrimary,
                         fontSize = 22.sp
@@ -127,56 +110,51 @@ fun ModeSelectionScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Three distinct methods to master JEE/NEET preparation.",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium.copy(
-                        color = FocusColors.TextSecondary
-                    )
+                    text = stringResource(R.string.session_modes_select_body),
+                    style = MaterialTheme.typography.bodyMedium.copy(color = FocusColors.TextSecondary)
                 )
             }
 
-            // Mode 1: Timer Card
             ModeCardDetailed(
                 mode = SessionMode.TIMER,
-                title = "TIMER",
-                subtitle = "Fixed-duration countdown",
-                badgeText = "Most Popular for JEE",
+                title = sessionModeTitle(SessionMode.TIMER),
+                subtitle = sessionModeSubtitle(SessionMode.TIMER),
+                badgeText = stringResource(R.string.session_modes_timer_badge),
                 badgeColor = FocusColors.Primary,
                 features = listOf(
-                    "Set exact focus time (25m - 120m)",
-                    "Builds real exam time endurance",
-                    "Enforces strict countdown discipline"
+                    stringResource(R.string.session_modes_timer_feature_time),
+                    stringResource(R.string.session_modes_timer_feature_endurance),
+                    stringResource(R.string.session_modes_timer_feature_countdown)
                 ),
                 isSelected = uiState.selectedMode == SessionMode.TIMER,
                 onClick = { viewModel.selectMode(SessionMode.TIMER) }
             )
 
-            // Mode 2: Stopwatch Card
             ModeCardDetailed(
                 mode = SessionMode.STOPWATCH,
-                title = "STOPWATCH",
-                subtitle = "Track open-ended study time",
-                badgeText = "Deep Flow State",
+                title = sessionModeTitle(SessionMode.STOPWATCH),
+                subtitle = sessionModeSubtitle(SessionMode.STOPWATCH),
+                badgeText = stringResource(R.string.session_modes_stopwatch_badge),
                 badgeColor = FocusColors.CyanBlue,
                 features = listOf(
-                    "Uncapped, pressure-free session",
-                    "Ideal for long numerical solving",
-                    "Track total continuous study hours"
+                    stringResource(R.string.session_modes_stopwatch_feature_time),
+                    stringResource(R.string.session_modes_stopwatch_feature_numericals),
+                    stringResource(R.string.session_modes_stopwatch_feature_total)
                 ),
                 isSelected = uiState.selectedMode == SessionMode.STOPWATCH,
                 onClick = { viewModel.selectMode(SessionMode.STOPWATCH) }
             )
 
-            // Mode 3: Pomodoro Card
             ModeCardDetailed(
                 mode = SessionMode.POMODORO,
-                title = "POMODORO",
-                subtitle = "Focus and break cycles",
-                badgeText = "Anti-Burnout",
+                title = sessionModeTitle(SessionMode.POMODORO),
+                subtitle = sessionModeSubtitle(SessionMode.POMODORO),
+                badgeText = stringResource(R.string.session_modes_pomodoro_badge),
                 badgeColor = FocusColors.EmeraldSuccess,
                 features = listOf(
-                    "25m Study + 5m Refreshing Break",
-                    "Maintains peak mental energy",
-                    "Scheduled long breaks every 4 cycles"
+                    stringResource(R.string.session_modes_pomodoro_feature_cycle),
+                    stringResource(R.string.session_modes_pomodoro_feature_energy),
+                    stringResource(R.string.session_modes_pomodoro_feature_long)
                 ),
                 isSelected = uiState.selectedMode == SessionMode.POMODORO,
                 onClick = { viewModel.selectMode(SessionMode.POMODORO) }
@@ -199,7 +177,10 @@ private fun ModeCardDetailed(
     onClick: () -> Unit
 ) {
     val borderColor = if (isSelected) FocusColors.Primary else FocusColors.CardBorderSubtle
-    val backgroundColor = if (isSelected) FocusColors.PrimaryContainer.copy(alpha = 0.35f) else FocusColors.Surface
+    val backgroundColor =
+        if (isSelected) FocusColors.PrimaryContainer.copy(alpha = 0.35f) else FocusColors.Surface
+    val selectedLabel =
+        if (isSelected) stringResource(R.string.session_mode_selected) else stringResource(R.string.session_mode_not_selected)
 
     Box(
         modifier = Modifier
@@ -217,7 +198,7 @@ private fun ModeCardDetailed(
                 color = borderColor,
                 shape = FocusShapes.card
             )
-            .clickable(onClick = onClick)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(FocusSpacing.lg)
             .testTag("mode_card_${mode.name.lowercase()}")
     ) {
@@ -227,20 +208,17 @@ private fun ModeCardDetailed(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Mode Title & Icon
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (isSelected) FocusColors.Primary else FocusColors.SurfaceVariant
-                            ),
+                            .background(if (isSelected) FocusColors.Primary else FocusColors.SurfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = mode.icon,
-                            contentDescription = title,
+                            contentDescription = null,
                             tint = if (isSelected) Color.White else FocusColors.Primary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -251,7 +229,7 @@ private fun ModeCardDetailed(
                     Column {
                         Text(
                             text = title,
-                            style = androidx.compose.material3.MaterialTheme.typography.titleMedium.copy(
+                            style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = FocusColors.TextPrimary,
                                 fontSize = 16.sp
@@ -259,7 +237,7 @@ private fun ModeCardDetailed(
                         )
                         Text(
                             text = subtitle,
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                            style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextSecondary,
                                 fontSize = 12.sp
                             )
@@ -267,10 +245,9 @@ private fun ModeCardDetailed(
                     }
                 }
 
-                // Radio Check indicator
                 Icon(
                     imageVector = if (isSelected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                    contentDescription = if (isSelected) "Selected" else "Unselected",
+                    contentDescription = selectedLabel,
                     tint = if (isSelected) FocusColors.Primary else FocusColors.TextMuted,
                     modifier = Modifier.size(24.dp)
                 )
@@ -278,7 +255,6 @@ private fun ModeCardDetailed(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Badge Pill
             Box(
                 modifier = Modifier
                     .clip(FocusShapes.pill)
@@ -287,7 +263,7 @@ private fun ModeCardDetailed(
             ) {
                 Text(
                     text = badgeText,
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
+                    style = MaterialTheme.typography.labelSmall.copy(
                         color = badgeColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
@@ -297,7 +273,6 @@ private fun ModeCardDetailed(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Key features checklist
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 features.forEach { feature ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -310,7 +285,7 @@ private fun ModeCardDetailed(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = feature,
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                            style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextSecondary,
                                 fontSize = 12.5.sp
                             )
