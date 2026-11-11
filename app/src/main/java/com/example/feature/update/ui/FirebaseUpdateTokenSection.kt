@@ -148,7 +148,7 @@ private fun ReleaseHistoryItemCard(
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = statusColor,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 9.sp
+                                    fontSize = 11.sp
                                 )
                             )
                         }

@@ -1,0 +1,28 @@
+<resources>
+    <string name="protection_split_label">Block distracting apps in split screen</string>
+    <string name="protection_split_body">Detects blocked apps in split screen during focus sessions. Accessibility access is required; detection can vary by device.</string>
+    <string name="protection_floating_label">Block distracting apps in floating windows</string>
+    <string name="protection_floating_body">Detects blocked apps in picture-in-picture and floating windows during focus sessions. Accessibility access is required; detection can vary by device.</string>
+    <string name="protection_save_error">Unable to save protection settings. The previous settings are unchanged. Try again.</string>
+    <string name="session_save_error">Unable to save this session to your history. Your summary is still here, so try again.</string>
+    <string name="session_browser_study_error">Unable to save Browser Study Mode. Its setting was restored. Try again.</string>
+    <string name="session_subject_add_error">The subject is kept for this session, but the tag could not be added to your library. Try again.</string>
+    <string name="session_subject_rename_error">Unable to rename this subject tag. Its previous name is unchanged.</string>
+    <string name="session_subject_delete_error">Unable to delete this subject tag. It is still available.</string>
+    <string name="protection_locked_error">Protection cannot be weakened while a strict focus session is active. Wait for the session to finish or keep protection enabled.</string>
+    <string name="protection_wait_error">Protection settings are still loading or saving. Wait for them to finish, then start the session.</string>
+    <string name="strict_title">Strict Mode</string>
+    <string name="strict_default_label">Use Strict Mode for new sessions</string>
+    <string name="strict_default_body">Timer and Pomodoro sessions cannot be paused or ended early. Stopwatch sessions are not locked.</string>
+    <string name="strict_breaks_body">Scheduled Pomodoro breaks and manual breaks remain available. A focus phase cannot be skipped in Strict Mode.</string>
+    <string name="strict_scope_body">This setting applies to new focus sessions. It does not lock daily app limits, approve study channels, or enable website and short-video blocking.</string>
+    <string name="strict_active_title">Current session is locked</string>
+    <string name="strict_active_body">The current session keeps its saved protection settings until it ends. Keep protection enabled while it runs.</string>
+    <string name="strict_enable_title">Use Strict Mode for new sessions?</string>
+    <string name="strict_enable_body">Timer and Pomodoro sessions started with Strict Mode cannot be paused or ended early. Manual and Pomodoro breaks remain available. This does not lock your app limits.</string>
+    <string name="strict_enable_action">Enable Strict Mode</string>
+    <string name="strict_actual_section">What Strict Mode protects</string>
+    <string name="strict_other_section">Other protection settings</string>
+    <string name="strict_limits_body">Lock each app limit separately from Blocks. A locked app limit has no in-app unlock and does not expire at midnight.</string>
+    <string name="strict_android_body">Android controls accessibility and device-admin permissions. FocusShield cannot guarantee protection against system-level removal or permission changes.</string>
+</resources>

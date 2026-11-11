@@ -1,0 +1,98 @@
+<resources>
+    <string name="blocked_apps_title">Distracting apps</string>
+    <plurals name="blocked_apps_subtitle">
+        <item quantity="one">%1$d app can be blocked during focus sessions</item>
+        <item quantity="other">%1$d apps can be blocked during focus sessions</item>
+    </plurals>
+    <string name="blocked_apps_search_label">Search installed apps</string>
+    <string name="blocked_apps_search_placeholder">App or package name</string>
+    <string name="blocked_apps_empty_search">No apps match “%1$s”. Clear the search to see all apps.</string>
+    <string name="blocked_apps_empty_all">No installed apps found. Reopen this screen to scan again.</string>
+    <string name="blocked_apps_access_on_title">Distraction shield active</string>
+    <string name="blocked_apps_access_on_body">Foreground detection is running. Apps you turn on here are blocked during focus sessions.</string>
+    <string name="blocked_apps_access_off_title">Accessibility access required</string>
+    <string name="blocked_apps_access_off_body">FocusShield needs accessibility access to detect and block distracting apps during sessions.</string>
+    <string name="blocked_apps_enable_access">Open accessibility settings</string>
+    <string name="blocked_apps_switch_description">Block %1$s during focus sessions</string>
+    <string name="blocked_apps_save_error">Unable to save this app’s block. Its saved setting is unchanged. Try again.</string>
+    <string name="blocked_apps_follow_up_error">The block is saved on this device, but its cloud backup could not be queued. Try again to retry the backup.</string>
+    <string name="blocked_apps_load_error">Unable to scan installed apps. Reopen this screen to try again.</string>
+    <string name="blocks_help">Blocks and app limits guide</string>
+    <string name="blocks_help_body">App limits cap daily use on this device. Locking a limit is separate from session Strict Mode and has no in-app unlock. Short-video blocking detects Shorts and Reels when accessibility access is available. Website and notification protection have their own settings. Android controls the permissions these features need.</string>
+    <string name="blocks_short_video_section">Short-video blocking</string>
+    <string name="blocks_youtube_shorts">Block YouTube Shorts</string>
+    <string name="blocks_instagram_reels">Block Instagram Reels</string>
+    <string name="blocks_facebook_reels">Block Facebook Reels</string>
+    <string name="blocks_short_video_body">Detects short-video players and returns you from them. Accessibility access is required; detection can vary with app updates.</string>
+    <string name="blocks_other_section">Website and notification protection</string>
+    <string name="blocks_websites">Manage blocked websites</string>
+    <string name="blocks_websites_body">Choose blocked websites and adult-content filtering.</string>
+    <string name="blocks_notifications">Manage silenced notifications</string>
+    <string name="blocks_notifications_body">Choose distracting apps and when their alerts are silenced.</string>
+    <plurals name="blocks_notification_apps">
+        <item quantity="one">%d app selected</item>
+        <item quantity="other">%d apps selected</item>
+    </plurals>
+    <string name="action_clear_search">Clear search</string>
+    <string name="status_searching">Searching</string>
+    <string name="notification_sheet_title">Silence distracting app notifications during your study</string>
+    <string name="notification_search_label">Search apps to silence</string>
+    <string name="notification_search_example">WhatsApp or Instagram</string>
+    <string name="notification_permission_title">Notification access required</string>
+    <string name="notification_permission_body">Allow FocusShield to silence distracting alerts during sessions.</string>
+    <string name="action_grant_notification_access">Grant notification access</string>
+    <string name="notification_shield_label">Silence app notifications</string>
+    <string name="notification_shield_paused">Paused. Turn on to silence selected apps.</string>
+    <string name="notification_silenced_status">Notifications will be silenced</string>
+    <string name="notification_allowed_status">Notifications allowed</string>
+    <string name="notification_vault_title">Silenced notification vault</string>
+    <string name="notification_vault_subtitle">Notifications saved while you study</string>
+    <string name="notification_vault_empty_title">No silenced notifications yet</string>
+    <string name="notification_vault_empty_body">Start a focus session with notifications blocked. Alerts from selected apps will appear here.</string>
+    <string name="notification_lock_master">This notification blocker is locked while a strict focus session is running. Wait for the session to finish.</string>
+    <string name="notification_lock_app">This app’s notification blocking is locked while a strict focus session is running.</string>
+    <string name="notification_lock_always">24/7 silencing for this app is locked while a strict focus session is running.</string>
+    <string name="notification_lock_clear">Blocked notification apps are locked while a strict focus session is running.</string>
+    <string name="notification_sender">Sender: %1$s</string>
+    <string name="notification_silenced_badge">Silenced</string>
+    <string name="action_test_notification">Add a sample notification</string>
+    <string name="notification_delete_title">Delete notification from %1$s?</string>
+    <string name="notification_delete_body">This removes the saved notification from the vault. It cannot be recovered.</string>
+    <string name="action_delete_notification">Delete notification</string>
+    <string name="notification_scanning">Scanning installed apps…</string>
+    <string name="notification_no_apps">No installed apps found. Reopen this sheet to scan again.</string>
+    <string name="notification_no_search_results">No apps match “%1$s”. Clear the search to see all apps.</string>
+    <string name="notification_installed_apps">Installed apps</string>
+    <string name="notification_search_results">Search results</string>
+    <string name="notification_preset_social">Social and messaging</string>
+    <string name="notification_preset_entertainment">Entertainment and games</string>
+    <string name="notification_allow_all">Allow all apps</string>
+    <plurals name="notification_active_apps">
+        <item quantity="one">Active · %1$d app silent</item>
+        <item quantity="other">Active · %1$d apps silent</item>
+    </plurals>
+    <plurals name="notification_session_active_apps">
+        <item quantity="one">Session active · %1$d app silent</item>
+        <item quantity="other">Session active · %1$d apps silent</item>
+    </plurals>
+    <plurals name="notification_apps_tab">
+        <item quantity="one">Blocked apps (%1$d)</item>
+        <item quantity="other">Blocked apps (%1$d)</item>
+    </plurals>
+    <plurals name="notification_vault_tab">
+        <item quantity="one">Silenced vault (%1$d)</item>
+        <item quantity="other">Silenced vault (%1$d)</item>
+    </plurals>
+    <plurals name="notification_silenced_count">
+        <item quantity="one">%1$d app silenced</item>
+        <item quantity="other">%1$d apps silenced</item>
+    </plurals>
+    <plurals name="notification_silence_all">
+        <item quantity="one">Silence all (%1$d)</item>
+        <item quantity="other">Silence all (%1$d)</item>
+    </plurals>
+    <plurals name="notification_clear_vault_body">
+        <item quantity="one">This permanently deletes %1$d saved notification. It cannot be recovered.</item>
+        <item quantity="other">This permanently deletes %1$d saved notifications. They cannot be recovered.</item>
+    </plurals>
+</resources>

@@ -34,6 +34,7 @@ data class FocusColorPalette(
     val surfaceSubtle: Color,
     val cardBorder: Color,
     val cardBorderSubtle: Color,
+    val controlBorder: Color,
     val textPrimary: Color,
     val textSecondary: Color,
     val textMuted: Color,
@@ -42,7 +43,28 @@ data class FocusColorPalette(
     val pomodoroGreen: Color,
     val channelsAmber: Color,
     val blockedRed: Color,
+    val blockedLight: Color,
     val historyPurple: Color,
+    // Text-safe status steps. Hues above are for icons, fills and borders;
+    // these steps are for 11-14sp labels so they clear WCAG 1.4.3.
+    val emeraldText: Color,
+    val amberText: Color,
+    val coralText: Color,
+    val cyanText: Color,
+    val blockedText: Color,
+    // Shared overlay surfaces for the blocker bottom sheets.
+    val overlayBackground: Color,
+    val overlaySurface: Color,
+    val overlayBorder: Color,
+    val overlayTextPrimary: Color,
+    val overlayTextSecondary: Color,
+    // Focus session hero banner.
+    val heroGradientStart: Color,
+    val heroGradientMid: Color,
+    val heroGradientEnd: Color,
+    val heroOnColor: Color,
+    val heroOnColorMuted: Color,
+    val heroActionContent: Color,
     val isDark: Boolean = false
 )
 
@@ -78,15 +100,33 @@ object FocusColors {
         surfaceSubtle = Color(0xFFECE0FD),
         cardBorder = Color(0xFFE0D0F7),
         cardBorderSubtle = Color(0xFFEBE0FA),
+        controlBorder = Color(0xFF877398),
         textPrimary = Color(0xFF1E152A), // rich dark slate purple
         textSecondary = Color(0xFF5C4B75),
-        textMuted = Color(0xFF8E7AA8),
+        textMuted = Color(0xFF6E5B87), // 5.98:1 on white, 5.20:1 on background
         textOnDark = Color(0xFFFFFFFF),
         textOnDarkMuted = Color(0xFFF3E8FF),
         pomodoroGreen = Color(0xFF16A34A),
         channelsAmber = Color(0xFFD97706),
         blockedRed = Color(0xFFDC2626),
+        blockedLight = Color(0xFFFEE2E2),
         historyPurple = Color(0xFF7C3AED),
+        emeraldText = Color(0xFF166534), // green-800, 6.2:1 on background
+        amberText = Color(0xFF92400E), // amber-800, 6.16:1 on background
+        coralText = Color(0xFF9A3412), // orange-800, 6.35:1 on background
+        cyanText = Color(0xFF075985), // sky-800, 6.57:1 on background and safe over cyan tints
+        blockedText = Color(0xFFB91C1C), // red-700, text-safe on light surfaces
+        overlayBackground = Color(0xFFFFFFFF),
+        overlaySurface = Color(0xFFF8F2FF),
+        overlayBorder = Color(0xFFE0D0F7),
+        overlayTextPrimary = Color(0xFF1E152A),
+        overlayTextSecondary = Color(0xFF5C4B75),
+        heroGradientStart = Color(0xFF5823D8),
+        heroGradientMid = Color(0xFF6225D5),
+        heroGradientEnd = Color(0xFF6B2DE0),
+        heroOnColor = Color(0xFFFFFFFF),
+        heroOnColorMuted = Color(0xFFFFFFFF), // small text remains readable beneath the ambient glows
+        heroActionContent = Color(0xFF6B36F6),
         isDark = false
     )
 
@@ -114,6 +154,7 @@ object FocusColors {
         surfaceSubtle = Color(0xFF3D2A54), // chip/border background
         cardBorder = Color(0xFF4C3668), // card border
         cardBorderSubtle = Color(0xFF3B2754),
+        controlBorder = Color(0xFFA592BF),
         textPrimary = Color(0xFFFFFFFF), // pure white text
         textSecondary = Color(0xFFD4C4EA), // soft lavender
         textMuted = Color(0xFFA592BF),
@@ -122,7 +163,24 @@ object FocusColors {
         pomodoroGreen = Color(0xFF22C55E),
         channelsAmber = Color(0xFFFBBF24),
         blockedRed = Color(0xFFEF4444),
+        blockedLight = Color(0xFF3B1518),
         historyPurple = Color(0xFFA78BFA),
+        emeraldText = Color(0xFF4ADE80), // green-400, text-safe on dark surfaces
+        amberText = Color(0xFFFBBF24),
+        coralText = Color(0xFFFB923C),
+        cyanText = Color(0xFF7DD3FC),
+        blockedText = Color(0xFFF87171),
+        overlayBackground = Color(0xFF1A1025), // neutral-purple sheet below the app surface
+        overlaySurface = Color(0xFF2B1D3D),
+        overlayBorder = Color(0xFF4C3668),
+        overlayTextPrimary = Color(0xFFFFFFFF),
+        overlayTextSecondary = Color(0xFFD4C4EA),
+        heroGradientStart = Color(0xFF5823D8),
+        heroGradientMid = Color(0xFF6225D5),
+        heroGradientEnd = Color(0xFF6B2DE0),
+        heroOnColor = Color(0xFFFFFFFF),
+        heroOnColorMuted = Color(0xFFFFFFFF),
+        heroActionContent = Color(0xFF6B36F6),
         isDark = true
     )
 
@@ -237,6 +295,12 @@ object FocusColors {
         @ReadOnlyComposable
         get() = LocalFocusColors.current.cardBorderSubtle
 
+    /** Form and control boundaries, distinct from decorative card separators. */
+    val ControlBorder: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.controlBorder
+
     val TextPrimary: Color
         @Composable
         @ReadOnlyComposable
@@ -277,10 +341,95 @@ object FocusColors {
         @ReadOnlyComposable
         get() = LocalFocusColors.current.blockedRed
 
+    val BlockedLight: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.blockedLight
+
     val HistoryPurple: Color
         @Composable
         @ReadOnlyComposable
         get() = LocalFocusColors.current.historyPurple
+
+    val EmeraldText: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.emeraldText
+
+    val AmberText: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.amberText
+
+    val CoralText: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.coralText
+
+    val CyanText: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.cyanText
+
+    val BlockedText: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.blockedText
+
+    val OverlayBackground: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.overlayBackground
+
+    val OverlaySurface: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.overlaySurface
+
+    val OverlayBorder: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.overlayBorder
+
+    val OverlayTextPrimary: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.overlayTextPrimary
+
+    val OverlayTextSecondary: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.overlayTextSecondary
+
+    val HeroGradientStart: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroGradientStart
+
+    val HeroGradientMid: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroGradientMid
+
+    val HeroGradientEnd: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroGradientEnd
+
+    val HeroOnColor: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroOnColor
+
+    val HeroOnColorMuted: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroOnColorMuted
+
+    val HeroActionContent: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFocusColors.current.heroActionContent
 
     val ProGold = Color(0xFFFBBF24)
     val ProGoldText = Color(0xFF000000)
@@ -289,20 +438,20 @@ object FocusColors {
     val OnboardingPurple = Color(0xFF6D28D9)
     val OnboardingLavender = Color(0xFF1E1235)
 
-    // Universal Toggle Button Green (#31C831)
-    val ToggleGreen = Color(0xFF31C831)
+    // Universal Toggle Button Green. #16A34A clears 3:1 against white (1.4.11)
+    // while keeping the same hue as the pomodoro accent.
+    val ToggleGreen = Color(0xFF16A34A)
 
     val SwitchColors: androidx.compose.material3.SwitchColors
         @Composable
         get() {
-            val isDark = LocalFocusColors.current.isDark
             return androidx.compose.material3.SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = ToggleGreen,
-                uncheckedThumbColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF94A3B8),
-                uncheckedTrackColor = if (isDark) Color(0xFF24242A) else Color(0xFFE2E8F0),
-                uncheckedBorderColor = Color.Transparent,
-                checkedBorderColor = Color.Transparent
+                uncheckedThumbColor = TextMuted,
+                uncheckedTrackColor = SurfaceSubtle,
+                uncheckedBorderColor = ControlBorder,
+                checkedBorderColor = ControlBorder
             )
         }
 }
@@ -311,4 +460,3 @@ val MaterialTheme.focusColors: FocusColorPalette
     @Composable
     @ReadOnlyComposable
     get() = LocalFocusColors.current
-

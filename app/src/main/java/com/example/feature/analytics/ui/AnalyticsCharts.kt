@@ -98,7 +98,7 @@ fun WeeklyStudyHoursChartCard(
 
     val verticalAxisValueFormatter = remember {
         AxisValueFormatter<com.patrykandpatrick.vico.core.axis.AxisPosition.Vertical.Start> { value, _ ->
-            if (value == 0f) "0h" else String.format(Locale.US, "%.1fh", value)
+            if (value == 0f) "0h" else String.format(Locale.getDefault(), "%.1fh", value)
         }
     }
 
@@ -130,7 +130,7 @@ fun WeeklyStudyHoursChartCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${summary.dateRangeLabel} • Goal: ${String.format(Locale.US, "%.1fh", goalHours)}/day",
+                    text = "${summary.dateRangeLabel} • Goal: ${String.format(Locale.getDefault(), "%.1fh", goalHours)}/day",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = FocusColors.TextSecondary,
                         fontSize = 13.sp
@@ -182,11 +182,11 @@ fun WeeklyStudyHoursChartCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             GridlessChartMetric(
-                value = String.format(Locale.US, "%.1fh", totalHours),
+                value = String.format(Locale.getDefault(), "%.1fh", totalHours),
                 label = "Total study"
             )
             GridlessChartMetric(
-                value = String.format(Locale.US, "%.1fh", avgHours),
+                value = String.format(Locale.getDefault(), "%.1fh", avgHours),
                 label = "Avg / day"
             )
             GridlessChartMetric(
@@ -444,7 +444,7 @@ fun FocusStreakChartCard(
                             Text(
                                 text = "• Active today",
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    color = FocusColors.EmeraldSuccess,
+                                    color = FocusColors.EmeraldText,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp
                                 )
@@ -513,7 +513,7 @@ fun FocusStreakChartCard(
                                     text = "${minutes}m",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = FocusColors.TextPrimary,
-                                        fontSize = 9.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 )

@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.util.TimeFormatter
 import com.example.data.local.entity.FocusScheduleEntity
@@ -17,6 +18,7 @@ import com.example.data.model.QuickActionType
 import com.example.data.model.SessionMode
 import com.example.data.model.StudyPlanItem
 import com.example.data.repository.AnalyticsRepository
+import com.example.data.repository.FocusScheduleRepository
 import com.example.data.repository.StudyPlanRepository
 import com.example.feature.analytics.domain.AnalyticsPeriod
 import com.example.feature.analytics.domain.PeriodAnalyticsSummary
@@ -26,6 +28,7 @@ import com.example.feature.session.domain.FocusSession
 import com.example.feature.session.domain.SessionState
 import com.example.feature.session.engine.FocusSessionManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -499,7 +502,7 @@ class HomeViewModel(
         viewModelScope.launch {
             val deletedSchedule = app.focusScheduleRepository.deleteSchedule(planId)
             if (!deletedSchedule) {
-                _scheduleSaveError.value = "Active Schedule Locked: Cannot delete a schedule while its focus window is currently running."
+                _scheduleSaveError.value = app.getString(R.string.planner_active_delete_error)
                 return@launch
             }
             studyPlanRepository.deletePlan(planId)
@@ -517,12 +520,12 @@ class HomeViewModel(
      */
     val scheduleSaveError: StateFlow<String?> = _scheduleSaveError.asStateFlow()
 
-    /** Clears [scheduleSaveError] once it has been shown. */
+    /** Clears persistent planner feedback only when dismissed by the user. */
     fun consumeScheduleSaveError() {
         _scheduleSaveError.value = null
     }
 
-    fun addFocusSchedule(
+    suspend fun addFocusSchedule(
         title: String,
         daysOfWeek: String,
         startTime: String,
@@ -535,10 +538,12 @@ class HomeViewModel(
         breakMinutes: Int = 5,
         description: String = "",
         blockedAppPackages: Set<String> = emptySet(),
-        blockNotifications: Boolean = false
-    ) {
-        viewModelScope.launch {
-            val schedule = FocusScheduleEntity(
+        blockNotifications: Boolean = false,
+        id: String = java.util.UUID.randomUUID().toString(),
+        saveDefaults: suspend () -> Unit = {}
+    ): FocusScheduleRepository.SaveResult {
+        val schedule = FocusScheduleEntity(
+                id = id,
                 title = title,
                 daysOfWeek = daysOfWeek,
                 startTime = startTime,
@@ -554,38 +559,22 @@ class HomeViewModel(
                 blockedAppPackages = blockedAppPackages.joinToString(","),
                 blockNotifications = blockNotifications
             )
-            when (val result = app.focusScheduleRepository.addSchedule(schedule)) {
-                // A rejection the dialog cannot pre-check (an overlap with another schedule) has to
-                // reach the user: a Save button that quietly does nothing is worse than the bug it
-                // is preventing (issue #28).
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected -> {
-                    android.util.Log.w("HomeViewModel", "Schedule not saved: ${result.reason}")
-                    _scheduleSaveError.value = result.reason
-                }
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved ->
-                    _scheduleSaveError.value = null
-            }
-        }
+        return app.focusScheduleRepository.addSchedule(schedule, saveDefaults)
     }
 
-    fun updateFocusSchedule(schedule: FocusScheduleEntity) {
-        viewModelScope.launch {
-            when (val result = app.focusScheduleRepository.updateSchedule(schedule)) {
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Rejected -> {
-                    android.util.Log.w("HomeViewModel", "Schedule not updated: ${result.reason}")
-                    _scheduleSaveError.value = result.reason
-                }
-                is com.example.data.repository.FocusScheduleRepository.SaveResult.Saved ->
-                    _scheduleSaveError.value = null
-            }
-        }
-    }
+    suspend fun updateFocusSchedule(schedule: FocusScheduleEntity, saveDefaults: suspend () -> Unit = {}): FocusScheduleRepository.SaveResult =
+        app.focusScheduleRepository.updateSchedule(schedule, saveDefaults)
 
     fun toggleFocusSchedule(id: String, isEnabled: Boolean) {
         viewModelScope.launch {
-            val updated = app.focusScheduleRepository.toggleScheduleEnabled(id, isEnabled)
-            if (!updated) {
-                _scheduleSaveError.value = "Active Schedule Locked: Cannot turn off a schedule while its focus window is currently running."
+            try {
+                val updated = app.focusScheduleRepository.toggleScheduleEnabled(id, isEnabled)
+                if (!updated) _scheduleSaveError.value = app.getString(R.string.planner_active_toggle_error)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("HomeViewModel", "Unable to change schedule state", exception)
+                _scheduleSaveError.value = app.getString(R.string.planner_toggle_error)
             }
         }
     }
@@ -598,9 +587,14 @@ class HomeViewModel(
 
     fun deleteFocusSchedule(id: String) {
         viewModelScope.launch {
-            val deleted = app.focusScheduleRepository.deleteSchedule(id)
-            if (!deleted) {
-                _scheduleSaveError.value = "Active Schedule Locked: Cannot delete a schedule while its focus window is currently running."
+            try {
+                val deleted = app.focusScheduleRepository.deleteSchedule(id)
+                if (!deleted) _scheduleSaveError.value = app.getString(R.string.planner_active_delete_error)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("HomeViewModel", "Unable to delete schedule", exception)
+                _scheduleSaveError.value = app.getString(R.string.planner_delete_error)
             }
         }
     }
@@ -622,4 +616,3 @@ class HomeViewModel(
         }
     }
 }
-

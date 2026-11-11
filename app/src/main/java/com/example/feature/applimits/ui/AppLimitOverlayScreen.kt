@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -195,15 +196,15 @@ fun AppLimitOverlayScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Lock,
-                                contentDescription = "Strict Mode Enforced",
+                                contentDescription = null,
                                 tint = FocusColors.CoralWarning,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = "Strict Locked",
+                                text = stringResource(R.string.limits_lock_badge),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.SemiBold,
-                                    color = FocusColors.CoralWarning,
+                                    color = FocusColors.DarkPalette.coralText,
                                     fontSize = 12.sp
                                 )
                             )
@@ -244,7 +245,7 @@ fun AppLimitOverlayScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Strict Mode Banner (Amber "Introducing Strict Mode" / "Strict Mode Active")
+            // Lock option for this app limit (separate from Focus Session Strict Mode).
             if (!strictModeEnabledState) {
                 Box(
                     modifier = Modifier
@@ -272,7 +273,7 @@ fun AppLimitOverlayScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "Introducing Strict Mode",
+                                text = stringResource(R.string.limits_lock_promo_title),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White,
@@ -286,7 +287,7 @@ fun AppLimitOverlayScreen(
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                text = "Try now",
+                                text = stringResource(R.string.limits_lock_promo_action),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color(0xFFFACC15),
@@ -327,7 +328,7 @@ fun AppLimitOverlayScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "Strict Mode Active",
+                                text = stringResource(R.string.limits_lock_badge),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White,
@@ -590,7 +591,7 @@ fun AppLimitOverlayScreen(
                         text = "Daily Limit Reached",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            color = FocusColors.CoralWarning,
+                            color = FocusColors.DarkPalette.coralText,
                             fontSize = 16.sp
                         )
                     )
@@ -598,7 +599,7 @@ fun AppLimitOverlayScreen(
                     val emergencyRemaining = (emergencyUsesAllowed - emergencyUsesCount).coerceAtLeast(0)
                     Text(
                         text = if (strictModeEnabledState) {
-                            "Strict Mode is active and today's allowance is exhausted. No emergency extensions are available until tomorrow."
+                            stringResource(R.string.limits_lock_exhausted_body)
                         } else {
                             "You have exhausted today's allowance. Take a deep breath and close the app to protect your discipline streak."
                         },
@@ -691,7 +692,7 @@ fun AppLimitOverlayScreen(
             },
             title = {
                 Text(
-                    text = "Enable Strict Mode for $appName",
+                    text = stringResource(R.string.limits_lock_confirm_title, appName),
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -702,14 +703,14 @@ fun AppLimitOverlayScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "When Strict Mode is active:",
+                        text = stringResource(R.string.limits_lock_scope_title),
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = FocusColors.TextPrimary
                         )
                     )
                     Text(
-                        text = "• The 'Turn off' option will be completely disabled.\n• Once the daily limit is exhausted, the app is strictly locked until tomorrow.\n• No emergency extensions are permitted.",
+                        text = stringResource(R.string.limits_lock_confirm_body),
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = FocusColors.TextSecondary,
                             lineHeight = 20.sp
@@ -733,7 +734,7 @@ fun AppLimitOverlayScreen(
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Turn On Strict Mode", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.limits_lock_action), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -869,7 +870,7 @@ private fun MotivationalQuitReflectionDialog(
                                 text = "Streak Reset Warning",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = FocusColors.CoralWarning,
+                                    color = FocusColors.DarkPalette.coralText,
                                     fontSize = 13.sp
                                 )
                             )
@@ -912,7 +913,7 @@ private fun MotivationalQuitReflectionDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = FocusColors.Primary,
-                    contentColor = Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -932,7 +933,7 @@ private fun MotivationalQuitReflectionDialog(
                     if (countdownSeconds == 0) FocusColors.CoralWarning.copy(alpha = 0.6f) else Color(0xFF333333)
                 ),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = FocusColors.CoralWarning,
+                    contentColor = FocusColors.DarkPalette.coralText,
                     disabledContentColor = Color(0xFF666666)
                 ),
                 shape = RoundedCornerShape(12.dp),

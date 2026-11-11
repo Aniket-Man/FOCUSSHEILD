@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -19,13 +18,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import com.example.core.design.FocusColors
+import com.example.core.design.rememberFocusInfiniteFloat
 
 /**
  * Applies an animated shimmer gradient across a placeholder surface.
  */
 fun Modifier.shimmerEffect(): Modifier = composed {
-    val transition = rememberInfiniteTransition(label = "shimmer_transition")
-    val translateAnim by transition.animateFloat(
+    val translateAnim by rememberFocusInfiniteFloat(
         initialValue = 0f,
         targetValue = 1000f,
         animationSpec = infiniteRepeatable(
@@ -35,7 +34,8 @@ fun Modifier.shimmerEffect(): Modifier = composed {
             ),
             repeatMode = RepeatMode.Restart
         ),
-        label = "shimmer_translate"
+        label = "shimmer_translate",
+        staticValue = 500f
     )
 
     val shimmerColors = listOf(

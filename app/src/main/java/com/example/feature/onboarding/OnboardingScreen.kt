@@ -10,7 +10,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -61,6 +60,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -85,14 +85,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -112,6 +110,8 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.cloud.auth.GoogleWebClientId
 import com.example.core.design.FocusColors
+import com.example.core.design.LocalFocusMotion
+import com.example.core.design.rememberFocusInfiniteFloat
 import com.example.core.design.LocalFocusColors
 import com.example.core.design.FocusSpacing
 import com.example.core.permission.AwaitPermissionGrantEffect
@@ -351,29 +351,9 @@ fun OnboardingScreen(
 private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
     val purple = FocusColors.OnboardingPurple
     val darkViolet = FocusColors.OnboardingLavender
-    val holdDurationMillis = 1500
-    var isHolding by remember { mutableStateOf(false) }
     var committed by remember { mutableStateOf(false) }
 
-    val fillProgress by animateFloatAsState(
-        targetValue = if (isHolding || committed) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = if (isHolding) holdDurationMillis else 260,
-            easing = LinearEasing
-        ),
-        label = "commitFill"
-    )
-
-    // Fire onCommitted once the hold-driven fill actually reaches the top.
-    LaunchedEffect(fillProgress, isHolding) {
-        if (isHolding && fillProgress >= 1f && !committed) {
-            committed = true
-            onCommitted()
-        }
-    }
-
-    val infinite = rememberInfiniteTransition(label = "commitPulse")
-    val idlePulse by infinite.animateFloat(
+    val idlePulse by rememberFocusInfiniteFloat(
         initialValue = 1f,
         targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
@@ -436,7 +416,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Press-and-hold commit dial: a ring fills as it is held.
+            // Native activation works with touch, keyboard, switch access and TalkBack.
             Box(
                 modifier = Modifier.size(150.dp),
                 contentAlignment = Alignment.Center
@@ -444,7 +424,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                 androidx.compose.foundation.Canvas(
                     modifier = Modifier
                         .fillMaxSize()
-                        .scale(if (isHolding) 1f else idlePulse)
+                        .scale(idlePulse)
                 ) {
                     // Track
                     drawCircle(
@@ -455,7 +435,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                     drawArc(
                         color = purple,
                         startAngle = -90f,
-                        sweepAngle = 360f * fillProgress,
+                        sweepAngle = if (committed) 360f else 0f,
                         useCenter = false,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(
                             width = 10.dp.toPx(),
@@ -464,28 +444,24 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
                     )
                 }
 
-                Box(
+                IconButton(
+                    onClick = {
+                        if (!committed) {
+                            committed = true
+                            onCommitted()
+                        }
+                    },
+                    enabled = !committed,
                     modifier = Modifier
                         .size(112.dp)
-                        .scale(if (isHolding) 1f else idlePulse)
+                        .scale(idlePulse)
                         .clip(CircleShape)
                         .background(purple)
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    awaitFirstDown()
-                                    isHolding = true
-                                    // Wait until the finger lifts / leaves.
-                                    waitForUpOrCancellation()
-                                    if (!committed) isHolding = false
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
+                        .testTag("onboarding_commit_button")
                 ) {
                     Icon(
                         imageVector = FocusBrandMark,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.action_commit_to_focus),
                         tint = Color.White,
                         modifier = Modifier.size(46.dp)
                     )
@@ -495,7 +471,7 @@ private fun OnboardingCommitmentPage(onCommitted: () -> Unit) {
             Spacer(modifier = Modifier.height(28.dp))
 
             Text(
-                text = if (isHolding) "Keep holding…" else "Tap and hold to commit",
+                text = stringResource(R.string.onboarding_commit_hint),
                 style = MaterialTheme.typography.titleMedium.copy(
                     color = Color.White.copy(alpha = 0.92f),
                     fontWeight = FontWeight.SemiBold,
@@ -1559,8 +1535,7 @@ private fun OnboardingGoogleSignInPage(
             .navigationBarsPadding()
     ) {
         // Slow-drifting soft purple aura blobs on #1E1235 canvas
-        val drift = rememberInfiniteTransition(label = "signInAurora")
-        val blobOneX by drift.animateFloat(
+        val blobOneX by rememberFocusInfiniteFloat(
             initialValue = -140f,
             targetValue = -40f,
             animationSpec = infiniteRepeatable(
@@ -1569,7 +1544,7 @@ private fun OnboardingGoogleSignInPage(
             ),
             label = "blobOneX"
         )
-        val blobOneY by drift.animateFloat(
+        val blobOneY by rememberFocusInfiniteFloat(
             initialValue = 40f,
             targetValue = 180f,
             animationSpec = infiniteRepeatable(
@@ -1578,7 +1553,7 @@ private fun OnboardingGoogleSignInPage(
             ),
             label = "blobOneY"
         )
-        val blobOneAlpha by drift.animateFloat(
+        val blobOneAlpha by rememberFocusInfiniteFloat(
             initialValue = 0.18f,
             targetValue = 0.34f,
             animationSpec = infiniteRepeatable(
@@ -1587,7 +1562,7 @@ private fun OnboardingGoogleSignInPage(
             ),
             label = "blobOneAlpha"
         )
-        val blobTwoX by drift.animateFloat(
+        val blobTwoX by rememberFocusInfiniteFloat(
             initialValue = 190f,
             targetValue = 60f,
             animationSpec = infiniteRepeatable(
@@ -1596,7 +1571,7 @@ private fun OnboardingGoogleSignInPage(
             ),
             label = "blobTwoX"
         )
-        val blobTwoY by drift.animateFloat(
+        val blobTwoY by rememberFocusInfiniteFloat(
             initialValue = 320f,
             targetValue = 210f,
             animationSpec = infiniteRepeatable(
@@ -1695,7 +1670,7 @@ private fun OnboardingGoogleSignInPage(
                 if (errorMessage != null) {
                     Text(
                         text = errorMessage ?: "",
-                        style = MaterialTheme.typography.bodySmall.copy(color = FocusColors.BlockedRed),
+                        style = MaterialTheme.typography.bodySmall.copy(color = FocusColors.BlockedText),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
@@ -1727,8 +1702,7 @@ private fun OnboardingGoogleSignInPage(
                     }
                 } else {
                     // Google-branded pill in #6D28D9 with a subtle specular sweep
-                    val shimmer = rememberInfiniteTransition(label = "signInShimmer")
-                    val sweep by shimmer.animateFloat(
+                    val sweep by rememberFocusInfiniteFloat(
                         initialValue = -1.2f,
                         targetValue = 2.2f,
                         animationSpec = infiniteRepeatable(
@@ -1849,8 +1823,7 @@ private fun SecurityVaultCenterpieceAnimation(
     val purple = FocusColors.OnboardingPurple
     val darkViolet = FocusColors.OnboardingLavender
 
-    val infinite = rememberInfiniteTransition(label = "vaultCenterpiece")
-    val orbitAngle by infinite.animateFloat(
+    val orbitAngle by rememberFocusInfiniteFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -1859,7 +1832,7 @@ private fun SecurityVaultCenterpieceAnimation(
         ),
         label = "orbitAngle"
     )
-    val reverseOrbitAngle by infinite.animateFloat(
+    val reverseOrbitAngle by rememberFocusInfiniteFloat(
         initialValue = 360f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
@@ -1868,23 +1841,25 @@ private fun SecurityVaultCenterpieceAnimation(
         ),
         label = "reverseOrbitAngle"
     )
-    val pulseFactor by infinite.animateFloat(
+    val pulseFactor by rememberFocusInfiniteFloat(
         initialValue = 0.92f,
         targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
             animation = tween(2200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulseFactor"
+        label = "pulseFactor",
+        staticValue = 1f
     )
-    val floatOffset by infinite.animateFloat(
+    val floatOffset by rememberFocusInfiniteFloat(
         initialValue = -6f,
         targetValue = 6f,
         animationSpec = infiniteRepeatable(
             animation = tween(2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "floatOffset"
+        label = "floatOffset",
+        staticValue = 0f
     )
 
     Box(
@@ -2101,19 +2076,20 @@ private fun SecurityVaultCenterpieceAnimation(
  */
 @Composable
 private fun Modifier.staggerIn(delayMillis: Int): Modifier {
+    val reduceMotion = LocalFocusMotion.current.reduceMotion
     var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(delayMillis) {
-        kotlinx.coroutines.delay(delayMillis.toLong())
+    LaunchedEffect(delayMillis, reduceMotion) {
+        if (!reduceMotion) kotlinx.coroutines.delay(delayMillis.toLong())
         shown = true
     }
     val progress by animateFloatAsState(
         targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = if (reduceMotion) 120 else 300, easing = FastOutSlowInEasing),
         label = "stagger"
     )
     return this.graphicsLayer {
         alpha = progress
-        translationY = (1f - progress) * 26.dp.toPx()
+        translationY = if (reduceMotion) 0f else (1f - progress) * 12.dp.toPx()
     }
 }
 
@@ -2127,17 +2103,17 @@ private fun ShieldHero(
 ) {
     val purple = FocusColors.OnboardingPurple
     val darkViolet = FocusColors.OnboardingLavender
-    val pulse = rememberInfiniteTransition(label = "shieldHero")
-    val haloScale by pulse.animateFloat(
+    val haloScale by rememberFocusInfiniteFloat(
         initialValue = 0.92f,
         targetValue = 1.1f,
         animationSpec = infiniteRepeatable(
             animation = tween(3400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "haloScale"
+        label = "haloScale",
+        staticValue = 1f
     )
-    val haloAlpha by pulse.animateFloat(
+    val haloAlpha by rememberFocusInfiniteFloat(
         initialValue = 0.24f,
         targetValue = 0.48f,
         animationSpec = infiniteRepeatable(
@@ -2146,7 +2122,7 @@ private fun ShieldHero(
         ),
         label = "haloAlpha"
     )
-    val ringProgress by pulse.animateFloat(
+    val ringProgress by rememberFocusInfiniteFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -2211,15 +2187,15 @@ private fun SignedInCloudCard(
     modifier: Modifier = Modifier
 ) {
     val purple = FocusColors.OnboardingPurple
-    val dot = rememberInfiniteTransition(label = "connectedDot")
-    val dotAlpha by dot.animateFloat(
+    val dotAlpha by rememberFocusInfiniteFloat(
         initialValue = 0.45f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(1100, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "dotAlpha"
+        label = "dotAlpha",
+        staticValue = 1f
     )
 
     Box(
@@ -2289,5 +2265,3 @@ private fun SignedInCloudCard(
         }
     }
 }
-
-

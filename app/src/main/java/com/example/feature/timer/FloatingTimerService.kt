@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.os.Build
@@ -17,52 +18,16 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -75,6 +40,8 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.FocusShieldApp
 import com.example.MainActivity
 import com.example.R
+import com.example.core.design.FocusShieldTheme
+import com.example.data.preferences.FocusPreferences
 import com.example.data.model.SessionMode
 import com.example.feature.session.domain.SessionState
 import com.example.feature.session.engine.FocusSessionManager
@@ -113,16 +80,15 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private var overlayView: View? = null
     private var windowLayoutParams: WindowManager.LayoutParams? = null
     private var dockedOnRightEdge by mutableStateOf(false)
+    private var isExpanded by mutableStateOf(false)
+    private var overlayError by mutableStateOf<String?>(null)
 
     companion object {
         private const val TAG = "FloatingTimerService"
         private const val NOTIFICATION_ID = 8802
         private const val CHANNEL_ID = "floating_timer_channel"
 
-        private const val COLLAPSED_WIDTH_DP = 28
-        private const val COLLAPSED_HEIGHT_DP = 52
-        private const val EXPANDED_WIDTH_DP = 234
-        private const val EXPANDED_HEIGHT_DP = 68
+        private const val ACTION_EXPAND = "com.example.focusshield.EXPAND_FLOATING_TIMER"
 
         private val _isOverlayShowing = MutableStateFlow(false)
         val isOverlayShowing: StateFlow<Boolean> = _isOverlayShowing.asStateFlow()
@@ -198,7 +164,13 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             setupOverlayWindow()
             observeSessionState()
         }
+        if (intent?.action == ACTION_EXPAND) setOverlayExpanded(true)
         return START_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateOverlayWindow(isExpanded)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -257,10 +229,10 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Floating Focus Timer",
+                getString(R.string.floating_timer_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows live focus countdown overlay over other apps"
+                description = getString(R.string.floating_timer_channel_description)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -280,11 +252,17 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val expandIntent = PendingIntent.getService(
+            this, 102, Intent(this, FloatingTimerService::class.java).setAction(ACTION_EXPAND),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.floating_timer_notification_title))
-            .setContentText(getString(R.string.floating_timer_notification_content))
+            .setContentText(overlayError ?: getString(R.string.floating_timer_notification_content))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(overlayError ?: getString(R.string.floating_timer_notification_content)))
             .setSmallIcon(R.drawable.ic_focus_shield_app_icon)
             .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_focus_shield_app_icon, getString(R.string.floating_timer_expand), expandIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -303,18 +281,20 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
         val screenHeight = resources.displayMetrics.heightPixels
         val initialY = (screenHeight * 0.42f).roundToInt()
+        val dimensions = overlayDimensions(expanded = isExpanded)
 
         windowLayoutParams = WindowManager.LayoutParams(
-            dpToPx(COLLAPSED_WIDTH_DP),
-            dpToPx(COLLAPSED_HEIGHT_DP),
+            dimensions.width,
+            dimensions.height,
             overlayType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            // Physical edge docking must not reverse in an RTL locale.
+            gravity = Gravity.TOP or Gravity.LEFT
             x = 0
-            y = initialY
+            y = FloatingTimerLayout.clampY(initialY, screenHeight, dimensions.height, dpToPx(24), dpToPx(48))
             title = "FocusShieldFloatingTimer"
         }
 
@@ -324,42 +304,36 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             setViewTreeLifecycleOwner(this@FloatingTimerService)
             setViewTreeSavedStateRegistryOwner(this@FloatingTimerService)
             setContent {
-                FloatingTimerOverlayRoot(
-                    isDockedRight = dockedOnRightEdge,
-                    onExpandedChanged = { expanded ->
-                        val lp = this@FloatingTimerService.windowLayoutParams ?: return@FloatingTimerOverlayRoot
-                        val targetW = dpToPx(if (expanded) EXPANDED_WIDTH_DP else COLLAPSED_WIDTH_DP)
-                        val targetH = dpToPx(if (expanded) EXPANDED_HEIGHT_DP else COLLAPSED_HEIGHT_DP)
-                        if (lp.width != targetW || lp.height != targetH) {
-                            lp.width = targetW
-                            lp.height = targetH
-                            try {
-                                windowManager?.updateViewLayout(overlayView, lp)
-                            } catch (_: Exception) {
-                            }
-                        }
-                    },
+                val app = applicationContext as FocusShieldApp
+                val prefs by app.preferencesRepository.preferencesFlow.collectAsState(initial = FocusPreferences())
+                val darkTheme = when (prefs.themeMode) {
+                    "DARK" -> true
+                    "LIGHT" -> false
+                    else -> isSystemInDarkTheme()
+                }
+                FocusShieldTheme(darkTheme = darkTheme) {
+                    FloatingTimerOverlayRoot(
                     onDragStart = {
                         dragOffsetX = 0f
                     },
                     onDragBy = { dx, dy ->
-                        val lp = this@FloatingTimerService.windowLayoutParams ?: return@FloatingTimerOverlayRoot
+                        val lp = copyOverlayLayout() ?: return@FloatingTimerOverlayRoot
                         val metrics = resources.displayMetrics
-                        val maxHeight = (metrics.heightPixels - dpToPx(120)).coerceAtLeast(dpToPx(80))
-                        val newY = (lp.y + dy.roundToInt()).coerceIn(dpToPx(60), maxHeight)
+                        val newY = FloatingTimerLayout.clampY(lp.y + dy.roundToInt(), metrics.heightPixels, lp.height, dpToPx(24), dpToPx(48))
 
                         dragOffsetX += dx
                         val screenWidth = metrics.widthPixels
                         var edgeChanged = false
+                        var targetRightEdge = dockedOnRightEdge
                         if (!dockedOnRightEdge && dragOffsetX > screenWidth * 0.35f) {
-                            dockedOnRightEdge = true
-                            lp.gravity = Gravity.TOP or Gravity.END
+                            targetRightEdge = true
+                            lp.gravity = Gravity.TOP or Gravity.RIGHT
                             lp.x = 0
                             dragOffsetX = 0f
                             edgeChanged = true
                         } else if (dockedOnRightEdge && dragOffsetX < -screenWidth * 0.35f) {
-                            dockedOnRightEdge = false
-                            lp.gravity = Gravity.TOP or Gravity.START
+                            targetRightEdge = false
+                            lp.gravity = Gravity.TOP or Gravity.LEFT
                             lp.x = 0
                             dragOffsetX = 0f
                             edgeChanged = true
@@ -367,23 +341,13 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
                         if (newY != lp.y || edgeChanged) {
                             lp.y = newY
-                            try {
-                                windowManager?.updateViewLayout(overlayView, lp)
-                            } catch (_: Exception) {
-                            }
+                            if (applyOverlayLayout(lp)) dockedOnRightEdge = targetRightEdge
                         }
                     },
-                    onDragEnd = {
-                        val lp = this@FloatingTimerService.windowLayoutParams ?: return@FloatingTimerOverlayRoot
-                        if (lp.x != 0) {
-                            lp.x = 0
-                            try {
-                                windowManager?.updateViewLayout(overlayView, lp)
-                            } catch (_: Exception) {
-                            }
-                        }
-                    }
-                )
+                    onDragEnd = { dragOffsetX = 0f },
+                    onMove = ::moveOverlay
+                    )
+                }
             }
         }
 
@@ -397,6 +361,75 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             overlayView = null
             _isOverlayShowing.value = false
             stopSelf()
+        }
+    }
+
+    private fun overlayDimensions(expanded: Boolean): FloatingTimerDimensions {
+        val metrics = resources.displayMetrics
+        return FloatingTimerLayout.dimensions(expanded, metrics.widthPixels, metrics.heightPixels, metrics.density, resources.configuration.fontScale)
+    }
+
+    private fun copyOverlayLayout(): WindowManager.LayoutParams? = windowLayoutParams?.let { current ->
+        WindowManager.LayoutParams().apply { copyFrom(current) }
+    }
+
+    private fun setOverlayExpanded(expanded: Boolean) {
+        if (updateOverlayWindow(expanded)) isExpanded = expanded
+    }
+
+    private fun updateOverlayWindow(expanded: Boolean): Boolean {
+        val lp = copyOverlayLayout() ?: return false
+        val dimensions = overlayDimensions(expanded)
+        lp.width = dimensions.width
+        lp.height = dimensions.height
+        lp.y = FloatingTimerLayout.clampY(lp.y, resources.displayMetrics.heightPixels, lp.height, dpToPx(24), dpToPx(48))
+        lp.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            (if (expanded) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        return applyOverlayLayout(lp).also { applied ->
+            if (applied && expanded) overlayView?.requestFocus()
+        }
+    }
+
+    private fun applyOverlayLayout(lp: WindowManager.LayoutParams): Boolean {
+        val view = overlayView ?: return false
+        val manager = windowManager ?: return false
+        try {
+            manager.updateViewLayout(view, lp)
+            windowLayoutParams = lp
+            return true
+        } catch (exception: Exception) {
+            reportOverlayFailure(exception)
+            return false
+        }
+    }
+
+    private fun moveOverlay(move: FloatingTimerMove) {
+        val lp = copyOverlayLayout() ?: return
+        var targetRightEdge = dockedOnRightEdge
+        when (move) {
+            FloatingTimerMove.UP -> lp.y -= dpToPx(48)
+            FloatingTimerMove.DOWN -> lp.y += dpToPx(48)
+            FloatingTimerMove.LEFT_EDGE -> targetRightEdge = false
+            FloatingTimerMove.RIGHT_EDGE -> targetRightEdge = true
+        }
+        lp.y = FloatingTimerLayout.clampY(lp.y, resources.displayMetrics.heightPixels, lp.height, dpToPx(24), dpToPx(48))
+        lp.gravity = Gravity.TOP or (if (targetRightEdge) Gravity.RIGHT else Gravity.LEFT)
+        lp.x = 0
+        if (applyOverlayLayout(lp)) dockedOnRightEdge = targetRightEdge
+    }
+
+    private fun reportOverlayFailure(exception: Exception) {
+        Log.e(TAG, "Unable to update floating timer window", exception)
+        showOverlayError(getString(R.string.floating_timer_layout_error))
+    }
+
+    private fun showOverlayError(message: String?) {
+        overlayError = message
+        // A failed expansion cannot display the card, so recovery also stays in the notification.
+        try {
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+        } catch (exception: Exception) {
+            Log.w(TAG, "Unable to update floating timer notification", exception)
         }
     }
 
@@ -419,8 +452,10 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             } catch (_: PendingIntent.CanceledException) {
                 startActivity(intent)
             }
+            setOverlayExpanded(false)
         } catch (e: Exception) {
-            Log.w(TAG, "Could not launch MainActivity from floating overlay: ${e.message}")
+            Log.w(TAG, "Could not launch MainActivity from floating overlay", e)
+            showOverlayError(getString(R.string.floating_timer_open_error))
         }
     }
 
@@ -453,21 +488,13 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     @Composable
     private fun FloatingTimerOverlayRoot(
-        isDockedRight: Boolean,
-        onExpandedChanged: (Boolean) -> Unit,
         onDragStart: () -> Unit,
         onDragBy: (Float, Float) -> Unit,
-        onDragEnd: () -> Unit
+        onDragEnd: () -> Unit,
+        onMove: (FloatingTimerMove) -> Unit
     ) {
         val activeSession by FocusSessionManager.instance.activeSession.collectAsState()
         val sessionState by FocusSessionManager.instance.sessionState.collectAsState()
-
-        var isExpanded by remember { mutableStateOf(false) }
-
-        LaunchedEffect(isExpanded) {
-            onExpandedChanged(isExpanded)
-        }
-
         val session = activeSession
         val isPaused = sessionState == SessionState.PAUSED
         val isStopwatch = session?.mode == SessionMode.STOPWATCH
@@ -476,249 +503,42 @@ class FloatingTimerService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         } else {
             session?.remainingDurationMillis ?: 0L
         }
-        val subtitleText = if (isStopwatch) "Time elapsed" else "Time remaining"
-
-        Box(
-            modifier = Modifier
-                .size(
-                    width = if (isExpanded) EXPANDED_WIDTH_DP.dp else COLLAPSED_WIDTH_DP.dp,
-                    height = if (isExpanded) EXPANDED_HEIGHT_DP.dp else COLLAPSED_HEIGHT_DP.dp
-                )
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { onDragStart() },
-                        onDragEnd = { onDragEnd() },
-                        onDragCancel = { onDragEnd() },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            onDragBy(dragAmount.x, dragAmount.y)
-                        }
-                    )
+        FloatingTimerOverlay(
+            expanded = isExpanded,
+            dockedRight = dockedOnRightEdge,
+            formattedTime = FocusWidgetSnapshot.formatCountdown(displayMillis),
+            paused = isPaused,
+            strict = session?.isStrictModeEnabled == true && !isStopwatch,
+            stopwatch = isStopwatch,
+            onExpand = { setOverlayExpanded(true) },
+            onCollapse = { setOverlayExpanded(false) },
+            onTogglePause = {
+                val changed = if (isPaused) FocusSessionManager.instance.resumeSession()
+                    else FocusSessionManager.instance.pauseSession()
+                if (changed) {
+                    FocusSessionManager.instance.saveActiveSessionToDisk(this@FloatingTimerService)
+                    serviceScope.launch {
+                        FocusShieldWidgetUpdater.updateAll(this@FloatingTimerService, force = true)
+                    }
+                } else {
+                    showOverlayError(getString(R.string.floating_timer_pause_error))
                 }
-        ) {
-            if (!isExpanded) {
-                CollapsedEdgeTab(
-                    isPaused = isPaused,
-                    isDockedRight = isDockedRight,
-                    onExpand = { isExpanded = true }
-                )
-            } else {
-                ExpandedCountdownBanner(
-                    formattedTime = FocusWidgetSnapshot.formatCountdown(displayMillis),
-                    subtitleText = subtitleText,
-                    isPaused = isPaused,
-                    isStrict = session?.isStrictModeEnabled == true && !isStopwatch,
-                    isDockedRight = isDockedRight,
-                    onTogglePause = {
-                        if (isPaused) {
-                            FocusSessionManager.instance.resumeSession()
-                        } else {
-                            FocusSessionManager.instance.pauseSession()
-                        }
-                        FocusSessionManager.instance.saveActiveSessionToDisk(this@FloatingTimerService)
-                        serviceScope.launch {
-                            FocusShieldWidgetUpdater.updateAll(this@FloatingTimerService, force = true)
-                        }
-                    },
-                    onOpenApp = {
-                        isExpanded = false
-                        openApp()
-                    },
-                    onCollapse = {
-                        isExpanded = false
+            },
+            onOpenApp = { openApp() },
+            onMove = onMove,
+            errorMessage = overlayError,
+            onDismissError = { showOverlayError(null) },
+            dragModifier = Modifier.pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { onDragStart() },
+                    onDragEnd = onDragEnd,
+                    onDragCancel = onDragEnd,
+                    onDrag = { change, amount ->
+                        change.consume()
+                        onDragBy(amount.x, amount.y)
                     }
                 )
             }
-        }
-    }
-
-    /**
-     * Collapsed vertical edge tab (`>` on left edge, `<` on right edge) with a solid purple body
-     * and pure white chevron icon.
-     */
-    @Composable
-    private fun CollapsedEdgeTab(
-        isPaused: Boolean,
-        isDockedRight: Boolean,
-        onExpand: () -> Unit
-    ) {
-        val tabShape = if (isDockedRight) {
-            RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp, topEnd = 0.dp, bottomEnd = 0.dp)
-        } else {
-            RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 10.dp, bottomEnd = 10.dp)
-        }
-
-        val containerColor by animateColorAsState(
-            targetValue = if (isPaused) {
-                com.example.core.design.FocusColors.LightPalette.primaryDark // Deep Purple #6D28D9
-            } else {
-                com.example.core.design.FocusColors.LightPalette.primary // Vibrant Purple #7C3AED
-            },
-            animationSpec = tween(180),
-            label = "edge_tab_bg"
         )
-
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(tabShape)
-                .background(containerColor)
-                .border(
-                    1.dp,
-                    com.example.core.design.FocusColors.LightPalette.surface.copy(alpha = 0.4f),
-                    tabShape
-                )
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onExpand
-                )
-                .testTag("floating_timer_edge_tab")
-        ) {
-            Icon(
-                imageVector = if (isDockedRight) {
-                    Icons.AutoMirrored.Rounded.KeyboardArrowLeft
-                } else {
-                    Icons.AutoMirrored.Rounded.KeyboardArrowRight
-                },
-                contentDescription = "Expand Countdown Timer",
-                tint = com.example.core.design.FocusColors.LightPalette.surface, // Pure White #FFFFFF
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-
-    /**
-     * Expanded countdown banner with:
-     * - Whole body in FocusShield Purple (`#7C3AED` / `#6D28D9`)
-     * - Pure White (`#FFFFFF`) circular Pause/Play button with Purple (`#6D28D9`) icon
-     * - Pure White (`#FFFFFF`) countdown numerals and soft white `"Time remaining"` subtitle
-     * - Pure White (`#FFFFFF`) circular Close (`✕`) button with Purple (`#6D28D9`) icon
-     */
-    @Composable
-    private fun ExpandedCountdownBanner(
-        formattedTime: String,
-        subtitleText: String,
-        isPaused: Boolean,
-        isStrict: Boolean,
-        isDockedRight: Boolean,
-        onTogglePause: () -> Unit,
-        onOpenApp: () -> Unit,
-        onCollapse: () -> Unit
-    ) {
-        val bannerShape = if (isDockedRight) {
-            RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp, topEnd = 0.dp, bottomEnd = 0.dp)
-        } else {
-            RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp)
-        }
-
-        val bannerBackground by animateColorAsState(
-            targetValue = if (isPaused) {
-                com.example.core.design.FocusColors.LightPalette.primaryDark // Royal Purple #6D28D9
-            } else {
-                com.example.core.design.FocusColors.LightPalette.primary // Vibrant Purple #7C3AED
-            },
-            animationSpec = tween(200),
-            label = "banner_bg_color"
-        )
-
-        val whiteColor = com.example.core.design.FocusColors.LightPalette.surface // Pure White #FFFFFF
-        val purpleIconColor = com.example.core.design.FocusColors.LightPalette.primaryDark // #6D28D9
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(bannerShape)
-                .background(bannerBackground)
-                .border(1.dp, whiteColor.copy(alpha = 0.35f), bannerShape)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .testTag("floating_timer_overlay_card")
-        ) {
-            // Left Circular Play / Pause Button (Pure White circle with Purple icon)
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(whiteColor)
-                    .clickable(
-                        enabled = !isStrict,
-                        onClick = {
-                            if (!isStrict) {
-                                onTogglePause()
-                            } else {
-                                onOpenApp()
-                            }
-                        }
-                    )
-                    .testTag("floating_timer_pause_resume_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                    contentDescription = if (isPaused) "Resume Session" else "Pause Session",
-                    tint = purpleIconColor,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Center Countdown + "Time remaining" Column (Tap forwards to FocusShield app)
-            Column(
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onOpenApp
-                    )
-                    .testTag("floating_timer_open_app_area")
-            ) {
-                Text(
-                    text = formattedTime,
-                    style = TextStyle(
-                        color = whiteColor,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.2.sp,
-                        fontFeatureSettings = "tnum"
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip
-                )
-                Spacer(modifier = Modifier.height(1.dp))
-                Text(
-                    text = subtitleText,
-                    color = whiteColor.copy(alpha = 0.9f),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Right Circular Close / Collapse (`✕`) Button (Pure White circle with Purple icon)
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(whiteColor)
-                    .clickable(onClick = onCollapse)
-                    .testTag("floating_timer_collapse_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Close,
-                    contentDescription = "Collapse Countdown to Edge Tab",
-                    tint = purpleIconColor,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
     }
 }

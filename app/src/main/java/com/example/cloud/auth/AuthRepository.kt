@@ -25,7 +25,7 @@ open class AuthRepository(
     private val _authState = MutableStateFlow<AuthState>(mapUserToState(auth?.currentUser))
     open val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-    open val isConfigured: Boolean get() = true
+    open val isConfigured: Boolean get() = auth != null
 
     init {
         auth?.addAuthStateListener { firebaseAuth ->

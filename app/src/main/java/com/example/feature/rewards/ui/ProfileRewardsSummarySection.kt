@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,11 +42,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusContrast
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.feature.rewards.domain.RewardBadge
@@ -143,7 +146,7 @@ fun ProfileRewardsSummarySection(
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
-                        contentDescription = "View all",
+                        contentDescription = null,
                         tint = FocusColors.Primary,
                         modifier = Modifier.size(11.dp)
                     )
@@ -157,7 +160,7 @@ fun ProfileRewardsSummarySection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(FocusShapes.card)
-                    .clickable { selectedBadgeForDetail = claimableBadges.first() }
+                    .clickable(role = Role.Button) { selectedBadgeForDetail = claimableBadges.first() }
                     .testTag("profile_rewards_claimable_banner"),
                 color = FocusColors.AmberOrange.copy(alpha = 0.12f),
                 border = BorderStroke(1.dp, FocusColors.AmberOrange.copy(alpha = 0.35f))
@@ -178,7 +181,7 @@ fun ProfileRewardsSummarySection(
                                 text = "${claimableBadges.size} ${if (claimableBadges.size == 1) "Reward" else "Rewards"} Ready to Claim!",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = FocusColors.AmberOrange,
+                                    color = FocusColors.AmberText,
                                     fontSize = 13.sp
                                 )
                             )
@@ -286,12 +289,13 @@ private fun CurrentAchievedBadgeCard(
             .clip(FocusShapes.card)
             .background(FocusColors.Surface)
             .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(14.dp)
             .testTag("profile_current_achieved_card")
     ) {
         if (badge != null) {
             val primaryColor = Color(badge.primaryColorHex)
+            val accentText = FocusContrast.readableAccent(primaryColor, FocusColors.Surface)
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Pill header: Status & Date
                 Row(
@@ -318,9 +322,9 @@ private fun CurrentAchievedBadgeCard(
                             Text(
                                 text = "CURRENT ACHIEVED",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusColors.EmeraldSuccess,
+                                    color = FocusColors.EmeraldText,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 9.5.sp,
+                                    fontSize = 11.sp,
                                     letterSpacing = 0.5.sp
                                 )
                             )
@@ -368,7 +372,7 @@ private fun CurrentAchievedBadgeCard(
                             Text(
                                 text = badge.tier.label,
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = primaryColor,
+                                    color = accentText,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.5.sp
                                 )
@@ -401,13 +405,13 @@ private fun CurrentAchievedBadgeCard(
                             shape = FocusShapes.pill,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = primaryColor,
-                                contentColor = Color.White
+                                contentColor = FocusContrast.foregroundFor(primaryColor)
                             ),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                                 horizontal = 12.dp,
                                 vertical = 4.dp
                             ),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text(
                                 text = "Claim",
@@ -499,12 +503,13 @@ private fun UpcomingRewardBadgeCard(
             .clip(FocusShapes.card)
             .background(FocusColors.Surface)
             .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(14.dp)
             .testTag("profile_upcoming_reward_card")
     ) {
         if (badge != null) {
             val primaryColor = Color(badge.primaryColorHex)
+            val accentText = FocusContrast.readableAccent(primaryColor, FocusColors.Surface)
             val progressRatio = badge.getProgressRatio(totalLifetimeStudyMillis)
             val remainingMillis = (badge.requiredDurationMillis - totalLifetimeStudyMillis).coerceAtLeast(0L)
             val remainingMinutes = remainingMillis / (60 * 1000L)
@@ -540,9 +545,9 @@ private fun UpcomingRewardBadgeCard(
                             Text(
                                 text = "UPCOMING REWARD",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusColors.AmberOrange,
+                                    color = FocusColors.AmberText,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 9.5.sp,
+                                    fontSize = 11.sp,
                                     letterSpacing = 0.5.sp
                                 )
                             )
@@ -589,7 +594,7 @@ private fun UpcomingRewardBadgeCard(
                             Text(
                                 text = badge.tier.label,
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = primaryColor,
+                                    color = accentText,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.5.sp
                                 )
@@ -606,7 +611,7 @@ private fun UpcomingRewardBadgeCard(
                         Text(
                             text = "${badge.reward.emoji} Unlocks: ${badge.reward.title}",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.AmberOrange,
+                                color = FocusColors.AmberText,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium
                             ),
@@ -624,7 +629,7 @@ private fun UpcomingRewardBadgeCard(
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(FocusShapes.pill),
-                        color = primaryColor,
+                        color = FocusContrast.readableAccent(primaryColor, FocusColors.SurfaceSubtle, 3f),
                         trackColor = FocusColors.SurfaceSubtle
                     )
                     Row(
@@ -708,7 +713,7 @@ private fun ExploreAllBadgesRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(FocusShapes.card)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag("profile_explore_all_rewards_card"),
         color = FocusColors.Surface,
         border = BorderStroke(1.dp, FocusColors.CardBorderSubtle)

@@ -46,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
@@ -416,7 +415,7 @@ fun UsageLimitPickerSheet(
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = FocusColors.Primary,
-                contentColor = Color.White,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 disabledContainerColor = FocusColors.SurfaceVariant,
                 disabledContentColor = FocusColors.TextMuted
             ),

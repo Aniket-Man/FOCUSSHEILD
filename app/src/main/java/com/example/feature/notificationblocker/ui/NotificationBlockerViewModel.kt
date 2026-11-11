@@ -6,6 +6,7 @@ import android.graphics.drawable.Drawable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.core.permission.FocusPermissionManager
 import com.example.feature.notificationblocker.domain.NotificationBlockMode
 import com.example.feature.notificationblocker.domain.SilencedNotificationRecord
@@ -147,7 +148,7 @@ class NotificationBlockerViewModel(
     fun toggleMaster(enabled: Boolean) {
         viewModelScope.launch {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Notification blocker cannot be disabled while Strict Mode is active."
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.notification_lock_master)
                 return@launch
             }
             engine.setMasterEnabled(enabled)
@@ -161,7 +162,7 @@ class NotificationBlockerViewModel(
     fun toggleApp(packageName: String, blocked: Boolean) {
         viewModelScope.launch {
             if (!blocked && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Cannot unblock app notifications while Strict Mode is active."
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.notification_lock_app)
                 return@launch
             }
             engine.toggleApp(packageName, blocked)
@@ -171,7 +172,7 @@ class NotificationBlockerViewModel(
     fun toggleAlwaysSilent(packageName: String, alwaysSilent: Boolean) {
         viewModelScope.launch {
             if (!alwaysSilent && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Cannot disable 24/7 notification silencing while Strict Mode is active."
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.notification_lock_always)
                 return@launch
             }
             engine.toggleAlwaysSilent(packageName, alwaysSilent)
@@ -181,7 +182,7 @@ class NotificationBlockerViewModel(
     fun setAllAppsBlocked(packages: Set<String>) {
         viewModelScope.launch {
             if (packages.isEmpty() && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Cannot clear blocked notification apps while Strict Mode is active."
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.notification_lock_clear)
                 return@launch
             }
             engine.setBlockedPackages(packages)

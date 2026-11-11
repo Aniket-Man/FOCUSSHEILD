@@ -6,7 +6,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.core.design.FocusColors
+import com.example.core.design.LocalFocusMotion
+import com.example.core.design.rememberFocusInfiniteFloat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -69,23 +70,26 @@ fun SplashScreen(
     val badgesAlpha = remember { Animatable(1f) }
 
     // Subtle ambient breathing glow animation
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
+    val pulseScale by rememberFocusInfiniteFloat(
         initialValue = 0.96f,
         targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulseScale"
+        label = "pulseScale",
+        staticValue = 1f
     )
 
-    LaunchedEffect(Unit) {
+    val reduceMotion = LocalFocusMotion.current.reduceMotion
+    LaunchedEffect(reduceMotion) {
         launch {
-            scale.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
-            )
+            if (reduceMotion) scale.snapTo(1f) else {
+                scale.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                )
+            }
         }
 
         // Brief minimum flash display while Home screen & fast startup data load in background,

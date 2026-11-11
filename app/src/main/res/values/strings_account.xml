@@ -1,0 +1,32 @@
+<resources>
+    <string name="action_back">Go back</string>
+    <string name="account_title">Account and cloud sync</string>
+    <string name="account_user_fallback">FocusShield user</string>
+    <string name="account_google_active">Google account connected</string>
+    <string name="account_backup_title">Cloud backup</string>
+    <string name="account_backup_ready">Sync your study progress, goals and notes with this account. Local data stays available offline.</string>
+    <string name="account_backup_synced">Study data is synced with this account. New changes will be backed up when auto-save is enabled and a connection is available.</string>
+    <string name="account_sync_now">Sync now</string>
+    <string name="account_syncing">Syncing…</string>
+    <string name="account_sync_complete">Study data synced.</string>
+    <string name="account_sync_error">Unable to sync study data. Local data is still available. Check your connection, then use Sync now to retry.</string>
+    <string name="account_sync_offline">You are offline. Local data is still available. Connect to the internet to sync this account.</string>
+    <string name="account_guest_title">Use FocusShield without an account</string>
+    <string name="account_guest_body">Study sessions work locally. Sign in with Google to back up your progress, streaks and notes across devices.</string>
+    <string name="account_sign_in">Sign in with Google</string>
+    <string name="account_signing_in">Signing in…</string>
+    <string name="account_signed_in">Google account connected.</string>
+    <string name="account_sign_in_cancelled">Sign-in canceled. You can continue locally or select Sign in with Google to try again.</string>
+    <string name="account_sign_in_error">Unable to sign in with Google. Check your connection and Google account, then try Sign in with Google again.</string>
+    <string name="account_no_google_account">No Google account is available. Add a Google account in Android settings, then try Sign in with Google again.</string>
+    <string name="account_configuration_error">Google sign-in is unavailable in this build. Continue locally, or install a build with Google sign-in configured.</string>
+    <string name="account_activity_error">Unable to open Google sign-in. Close and reopen this screen, then try again.</string>
+    <string name="account_credential_error">Google returned an unsupported sign-in result. Try Sign in with Google again and choose a Google account.</string>
+    <string name="account_profile_import_error">You are signed in, but your profile could not be updated. Check your connection and use Sync now, or edit your profile locally.</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_signing_out">Signing out…</string>
+    <string name="account_sign_out_title">Sign out of Google?</string>
+    <string name="account_sign_out_hint">Signing out stops cloud sync. Local study data and existing cloud backups are kept. Sign in again to resume syncing.</string>
+    <string name="account_signed_out">Signed out. Local study data is still available.</string>
+    <string name="account_sign_out_error">Unable to sign out. Check the account status, then try Sign out again.</string>
+</resources>

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,11 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -46,7 +51,7 @@ fun FocusSessionCard(
     modifier: Modifier = Modifier,
     isActive: Boolean = true,
     timeString: String = "00:00:00",
-    subjectName: String = "Physics",
+    subjectName: String = "",
     subtitleText: String? = null,
     isPaused: Boolean = false,
     isStrictMode: Boolean = false,
@@ -55,6 +60,7 @@ fun FocusSessionCard(
     onStartSessionClick: () -> Unit = {}
 ) {
     val heroShape = RoundedCornerShape(26.dp)
+    val openTimerLabel = stringResource(R.string.action_open_timer)
 
     Box(
         modifier = modifier
@@ -62,20 +68,23 @@ fun FocusSessionCard(
             .shadow(
                 elevation = 8.dp,
                 shape = heroShape,
-                ambientColor = Color(0xFF6B36F6).copy(alpha = 0.35f),
-                spotColor = Color(0xFF9E48FF).copy(alpha = 0.30f)
+                ambientColor = FocusColors.HeroActionContent.copy(alpha = 0.35f),
+                spotColor = FocusColors.HeroGradientEnd.copy(alpha = 0.30f)
             )
             .clip(heroShape)
             .background(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        Color(0xFF6832F6),
-                        Color(0xFF8641F8),
-                        Color(0xFF9D49FF)
+                        FocusColors.HeroGradientStart,
+                        FocusColors.HeroGradientMid,
+                        FocusColors.HeroGradientEnd
                     )
                 )
             )
-            .clickable(onClick = onCardClick)
+            .then(
+                if (isActive) Modifier.clickable(role = Role.Button, onClickLabel = openTimerLabel, onClick = onCardClick)
+                else Modifier
+            )
             .testTag("focus_session_card")
     ) {
         // Decorative ambient background glow circles
@@ -84,7 +93,7 @@ fun FocusSessionCard(
                 .size(200.dp)
                 .offset(x = (-40).dp, y = (-60).dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.08f))
+                .background(FocusColors.HeroOnColor.copy(alpha = 0.08f))
         )
         Box(
             modifier = Modifier
@@ -92,7 +101,7 @@ fun FocusSessionCard(
                 .align(Alignment.BottomEnd)
                 .offset(x = 50.dp, y = 60.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.07f))
+                .background(FocusColors.HeroOnColor.copy(alpha = 0.07f))
         )
         Box(
             modifier = Modifier
@@ -100,7 +109,7 @@ fun FocusSessionCard(
                 .align(Alignment.BottomStart)
                 .offset(x = (-30).dp, y = 40.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.05f))
+                .background(FocusColors.HeroOnColor.copy(alpha = 0.05f))
         )
 
         Column(
@@ -111,17 +120,20 @@ fun FocusSessionCard(
         ) {
             // Top Label
             val headerLabel = when {
-                isActive && isStrictMode -> "STRICT FOCUS • ${subjectName.uppercase()}"
-                isActive && isPaused -> "PAUSED SESSION • ${subjectName.uppercase()}"
-                isActive -> "FOCUS SESSION • ${subjectName.uppercase()}"
-                else -> "READY TO FOCUS"
+                isActive && isStrictMode ->
+                    stringResource(R.string.focus_session_header_strict, subjectName.uppercase())
+                isActive && isPaused ->
+                    stringResource(R.string.focus_session_header_paused, subjectName.uppercase())
+                isActive ->
+                    stringResource(R.string.focus_session_header_active, subjectName.uppercase())
+                else -> stringResource(R.string.focus_session_header_ready)
             }
             Text(
                 text = headerLabel,
-                style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
-                    color = Color.White.copy(alpha = 0.88f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = FocusColors.HeroOnColorMuted,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
                     letterSpacing = 1.8.sp
                 )
             )
@@ -129,16 +141,27 @@ fun FocusSessionCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Main Large Countdown Timer Display
-            Text(
-                text = timeString,
-                style = androidx.compose.material3.MaterialTheme.typography.displayLarge.copy(
-                    color = Color.White,
+            FocusTimerText(
+                time = timeString,
+                style = MaterialTheme.typography.displayLarge.copy(
+                    color = FocusColors.HeroOnColor,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 46.sp,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.sp,
+                    fontFeatureSettings = "tnum"
                 ),
-                modifier = Modifier.testTag("session_timer_display")
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("session_timer_display")
             )
+
+            if (!subtitleText.isNullOrBlank()) {
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FocusColors.HeroOnColorMuted,
+                    textAlign = TextAlign.Center
+                )
+            }
 
             Spacer(modifier = Modifier.height(18.dp))
 
@@ -156,8 +179,8 @@ fun FocusSessionCard(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color(0xFF6B36F6)
+                    containerColor = FocusColors.HeroOnColor,
+                    contentColor = FocusColors.HeroActionContent
                 ),
                 shape = CircleShape,
                 elevation = ButtonDefaults.buttonElevation(
@@ -169,7 +192,7 @@ fun FocusSessionCard(
                     vertical = 12.dp
                 ),
                 modifier = Modifier
-                    .height(46.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("session_action_button")
             ) {
                 Row(
@@ -177,25 +200,26 @@ fun FocusSessionCard(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     val showPlayIcon = !isActive || isPaused || isStrictMode
-                    val buttonLabel = when {
-                        !isActive -> "Start Session"
-                        isPaused -> "Resume"
-                        isStrictMode -> "Open Timer"
-                        else -> "Pause"
-                    }
+                    val buttonLabel = stringResource(
+                        when {
+                            !isActive -> R.string.action_start_session
+                            isPaused -> R.string.action_resume
+                            isStrictMode -> R.string.action_open_timer
+                            else -> R.string.action_pause
+                        }
+                    )
                     Icon(
                         imageVector = if (showPlayIcon) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                        contentDescription = buttonLabel,
-                        tint = Color(0xFF6B36F6),
+                        contentDescription = null,
+                        tint = FocusColors.HeroActionContent,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = buttonLabel,
-                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge.copy(
+                        style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF6B36F6),
-                            fontSize = 14.sp
+                            color = FocusColors.HeroActionContent
                         )
                     )
                 }

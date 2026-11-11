@@ -61,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -82,6 +83,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.core.design.FocusCardStyle
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusSpacing
 import com.example.core.ui.BottomTab
 import com.example.core.ui.FocusBottomNavigation
 import com.example.data.preferences.FocusPreferences
@@ -120,6 +122,7 @@ fun AnalyticsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    val dockState = com.example.core.design.rememberFocusDockState()
     var showGoalDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -138,10 +141,10 @@ fun AnalyticsScreen(
                     .fillMaxSize()
                     .align(Alignment.TopCenter),
                 contentPadding = PaddingValues(
-                    start = 24.dp,
-                    end = 24.dp,
+                    start = FocusSpacing.screenHorizontal,
+                    end = FocusSpacing.screenHorizontal,
                     top = 20.dp,
-                    bottom = FocusCardStyle.BottomNavClearance + 36.dp
+                    bottom = dockState.contentPadding
                 ),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -281,7 +284,9 @@ fun AnalyticsScreen(
             FocusBottomNavigation(
                 selectedTab = BottomTab.STATS,
                 onTabSelected = onTabSelected,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged(dockState::onSizeChanged)
             )
         }
     }
@@ -1707,7 +1712,7 @@ private fun GoalConfigDialog(
                         Text(
                             text = "${thresholdMinutesSlider.toInt()} mins",
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = FocusColors.AmberOrange,
+                                color = FocusColors.AmberText,
                                 fontWeight = FontWeight.Bold
                             )
                         )

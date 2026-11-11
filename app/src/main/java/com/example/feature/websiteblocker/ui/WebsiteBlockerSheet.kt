@@ -18,14 +18,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -46,6 +48,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -54,6 +58,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,9 +79,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -89,9 +106,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.core.design.FocusColors
+import com.example.R
+import com.example.core.design.FocusSpacing
+import com.example.core.design.LocalFocusMotion
 import com.example.core.design.FocusShapes
 import com.example.core.design.LocalFocusColors
 import com.example.data.local.entity.BlockedWebsiteEntity
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.FocusSwitchRow
 
 /**
  * Clean dashed border around rounded rectangle matching the YouTube Channel popup theme.
@@ -130,9 +153,8 @@ fun WebsiteBlockerSheet(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val isDark = LocalFocusColors.current.isDark
-    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val sheetBg = FocusColors.OverlayBackground
+    val textPrimary = FocusColors.OverlayTextPrimary
 
     val handleDismiss: () -> Unit = {
         focusManager.clearFocus()
@@ -181,20 +203,26 @@ fun WebsiteBlockerSheetContent(
     val keyboardController = LocalSoftwareKeyboardController.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val isDark = LocalFocusColors.current.isDark
-    val sheetBg = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
-    val dragHandleColor = if (isDark) Color(0xFF4E4E52) else Color(0xFFCBD5E1)
-    val cardBg = if (isDark) Color(0xFF18181B) else Color(0xFFF8FAFC)
-    val cardBorder = if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)
-    val searchBg = if (isDark) Color(0xFF1E1E20) else Color(0xFFF1F5F9)
-    val searchBorder = if (isDark) Color(0xFF2E2E32) else Color(0xFFE2E8F0)
-    val searchPlaceholder = if (isDark) Color(0xFF7E7E82) else Color(0xFF94A3B8)
-    val doneBtnBg = if (isDark) Color.White else Color(0xFF0F172A)
-    val doneBtnText = if (isDark) Color.Black else Color.White
-    val stoneBtnBg = if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)
-    val stoneBtnBorder = if (isDark) Color(0xFF3F3F46) else Color(0xFFCBD5E1)
+    val urlFocusRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    val sheetBg = FocusColors.OverlayBackground
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
+    val dragHandleColor = FocusColors.OverlayBorder
+    val cardBg = FocusColors.OverlaySurface
+    val cardBorder = FocusColors.OverlayBorder
+    val doneBtnBg = FocusColors.OverlayTextPrimary
+    val doneBtnText = FocusColors.OverlayBackground
+
+    LaunchedEffect(state.errorMessage) {
+        if (state.errorMessage != null) listState.scrollToItem(1)
+    }
+    LaunchedEffect(state.successMessage) {
+        if (state.successMessage != null && state.addWebsiteInput.isEmpty()) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -232,21 +260,29 @@ fun WebsiteBlockerSheetContent(
         )
 
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.base),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             // Main title matching YouTube popup typography
             item {
                 Text(
-                    text = "Block distracting websites\nacross your browser",
+                    text = stringResource(R.string.website_sheet_title),
                     color = textPrimary,
-                    fontSize = 22.sp,
-                    lineHeight = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.padding(bottom = FocusSpacing.base).semantics { heading() }
+                )
+            }
+
+            item {
+                FocusStatusMessage(
+                    message = state.errorMessage ?: state.successMessage,
+                    isError = state.errorMessage != null,
+                    onDismiss = viewModel::clearMessages,
+                    modifier = Modifier.padding(bottom = if (state.errorMessage != null || state.successMessage != null) FocusSpacing.base else 0.dp)
                 )
             }
 
@@ -258,11 +294,11 @@ fun WebsiteBlockerSheetContent(
                             .fillMaxWidth()
                             .padding(bottom = 18.dp)
                             .sheetDashedBorder(
-                                color = Color(0xFFFF6D2C),
+                                color = FocusColors.CoralText,
                                 cornerRadius = 16.dp
                             )
                             .background(
-                                color = if (isDark) Color(0xFF2A1B14) else Color(0xFFFFF7ED),
+                                color = FocusColors.CoralLight,
                                 shape = RoundedCornerShape(16.dp)
                             )
                             .padding(16.dp)
@@ -276,63 +312,48 @@ fun WebsiteBlockerSheetContent(
                                     modifier = Modifier
                                         .size(36.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFFF6D2C).copy(alpha = 0.15f)),
+                                        .background(FocusColors.CoralWarning.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Security,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF6D2C),
+                                        tint = FocusColors.CoralText,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Accessibility Permission Required",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            color = textPrimary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = "Inspect browser address bars in real time",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = textSecondary,
-                                            fontSize = 12.sp
-                                        )
+                                        text = stringResource(R.string.website_permission_title),
+                                        color = textPrimary,
+                                        style = MaterialTheme.typography.titleMedium
                                     )
                                 }
                             }
 
                             Text(
-                                text = "FocusShield needs Accessibility Service to detect URL changes and block restricted web pages.",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = textSecondary,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
+                                text = stringResource(R.string.website_permission_body),
+                                color = textSecondary,
+                                style = MaterialTheme.typography.bodyMedium
                             )
 
-                            Button(
+                            OutlinedButton(
                                 onClick = {
                                     try {
                                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                         context.startActivity(intent)
                                     } catch (e: Exception) {
-                                        // Fallback
+                                        android.util.Log.w("WebsiteBlocker", "Unable to open accessibility settings", e)
+                                        viewModel.reportPermissionLaunchFailure()
                                     }
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = stoneBtnBg,
-                                    contentColor = textPrimary
-                                ),
-                                border = BorderStroke(1.dp, stoneBtnBorder),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = textPrimary),
+                                border = BorderStroke(1.dp, FocusColors.ControlBorder),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(44.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("website_blocker_grant_permission_btn")
                             ) {
                                 Row(
@@ -342,16 +363,13 @@ fun WebsiteBlockerSheetContent(
                                     Icon(
                                         imageVector = Icons.Rounded.Shield,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF6D2C),
+                                        tint = FocusColors.CoralText,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Grant Accessibility Permission",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp
-                                        )
+                                        text = stringResource(R.string.website_permission_grant),
+                                        style = MaterialTheme.typography.labelLarge
                                     )
                                 }
                             }
@@ -363,11 +381,11 @@ fun WebsiteBlockerSheetContent(
                             .fillMaxWidth()
                             .padding(bottom = 18.dp)
                             .sheetDashedBorder(
-                                color = Color(0xFF10B981),
+                                color = FocusColors.EmeraldText,
                                 cornerRadius = 14.dp
                             )
                             .background(
-                                color = if (isDark) Color(0xFF0E2218) else Color(0xFFECFDF5),
+                                color = FocusColors.EmeraldLight,
                                 shape = RoundedCornerShape(14.dp)
                             )
                             .padding(horizontal = 14.dp, vertical = 10.dp)
@@ -379,17 +397,15 @@ fun WebsiteBlockerSheetContent(
                             Icon(
                                 imageVector = Icons.Rounded.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF10B981),
+                                tint = FocusColors.EmeraldText,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Browser address bar inspector active & protecting",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color(0xFF10B981),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 12.sp
-                                )
+                                text = stringResource(R.string.website_permission_active),
+                                modifier = Modifier.weight(1f),
+                                color = FocusColors.EmeraldText,
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
@@ -399,183 +415,69 @@ fun WebsiteBlockerSheetContent(
             // Adult Site Blocking (18+ Shield) On/Off Toggle Card
             item {
                 val isAdultOn = state.isAdultBlockingEnabled
-                val accentColor = if (isAdultOn) FocusColors.Primary else textSecondary
-
-                Box(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 18.dp)
+                        .padding(bottom = FocusSpacing.base)
+                        .testTag("adult_site_blocking_card")
                         .sheetDashedBorder(
                             color = if (isAdultOn) FocusColors.Primary else cardBorder,
                             cornerRadius = 16.dp
-                        )
-                        .background(cardBg, RoundedCornerShape(16.dp))
-                        .clickable { viewModel.toggleAdultBlocking(!isAdultOn) }
-                        .padding(16.dp)
-                        .testTag("adult_site_blocking_card")
+                        ),
+                    shape = FocusShapes.medium,
+                    color = cardBg
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isAdultOn) FocusColors.Primary.copy(alpha = 0.16f)
-                                    else searchBg
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Shield,
-                                contentDescription = "Adult Site Blocking",
-                                tint = accentColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                    FocusSwitchRow(
+                        title = stringResource(R.string.website_adult_label),
+                        checked = isAdultOn,
+                        onCheckedChange = viewModel::toggleAdultBlocking,
+                        description = stringResource(if (isAdultOn) R.string.website_adult_on else R.string.website_adult_off),
+                        modifier = Modifier.testTag("adult_site_blocking_toggle")
+                    )
+                }
+            }
 
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Block Adult Sites (18+)",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        color = textPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(50),
-                                    color = if (isAdultOn) Color(0xFF10B981).copy(alpha = 0.15f)
-                                    else searchBg
-                                ) {
-                                    Text(
-                                        text = if (isAdultOn) "ON" else "OFF",
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = if (isAdultOn) Color(0xFF10B981) else textSecondary,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 10.sp
-                                        )
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = if (isAdultOn) {
-                                    "Blocking 18+ adult sites, NSFW domains & Family-DNS filters across browsers"
-                                } else {
-                                    "Toggle ON to automatically block 18+ adult & NSFW websites"
-                                },
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = if (isAdultOn) Color(0xFF10B981) else textSecondary,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        Switch(
-                            checked = isAdultOn,
-                            onCheckedChange = { enabled ->
-                                viewModel.toggleAdultBlocking(enabled)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = FocusColors.ToggleGreen,
-                                uncheckedThumbColor = textSecondary,
-                                uncheckedTrackColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
-                            ),
-                            modifier = Modifier.testTag("adult_site_blocking_toggle")
-                        )
-                    }
+            item {
+                Surface(color = cardBg, shape = FocusShapes.medium, modifier = Modifier.padding(bottom = FocusSpacing.base)) {
+                    FocusSwitchRow(
+                        title = stringResource(R.string.website_manual_label),
+                        description = stringResource(R.string.website_manual_body),
+                        checked = state.isManualBlockingEnabled,
+                        onCheckedChange = viewModel::toggleManualBlocking,
+                        modifier = Modifier.testTag("manual_website_blocking_toggle")
+                    )
                 }
             }
 
             // Custom Blocklist & Quick Add
                 // Input box styled like YouTube channels search bar
                 item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(searchBg)
-                            .border(1.dp, searchBorder, RoundedCornerShape(14.dp))
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.CenterStart
+                    OutlinedTextField(
+                        value = state.addWebsiteInput,
+                        onValueChange = viewModel::updateAddWebsiteInput,
+                        label = { Text(stringResource(R.string.website_url_label)) },
+                        placeholder = { Text(stringResource(R.string.website_url_example)) },
+                        supportingText = { Text(state.inputErrorMessage ?: stringResource(R.string.website_url_hint)) },
+                        isError = state.inputErrorMessage != null,
+                        enabled = !state.isAdding,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Ltr),
+                        shape = FocusShapes.medium,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { viewModel.addWebsite(state.addWebsiteInput) }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester)
+                            .semantics { state.inputErrorMessage?.let { error(it) } }
+                            .testTag("add_website_text_input")
+                    )
+                    Button(
+                        onClick = { viewModel.addWebsite(state.addWebsiteInput) },
+                        enabled = !state.isAdding,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("add_website_button")
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = "Website URL",
-                                tint = searchPlaceholder,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Box(modifier = Modifier.weight(1f)) {
-                                if (state.addWebsiteInput.isEmpty()) {
-                                    Text(
-                                        text = "Enter website link (e.g. reddit.com)",
-                                        color = searchPlaceholder,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                BasicTextField(
-                                    value = state.addWebsiteInput,
-                                    onValueChange = { viewModel.updateAddWebsiteInput(it) },
-                                    singleLine = true,
-                                    textStyle = TextStyle(
-                                        color = textPrimary,
-                                        fontSize = 14.sp
-                                    ),
-                                    cursorBrush = SolidColor(if (isDark) Color.White else FocusColors.Primary),
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(
-                                        onDone = {
-                                            if (state.addWebsiteInput.isNotBlank()) {
-                                                viewModel.addWebsite(state.addWebsiteInput)
-                                                focusManager.clearFocus()
-                                                keyboardController?.hide()
-                                            }
-                                        }
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("add_website_text_input")
-                                )
-                            }
-
-                            if (state.addWebsiteInput.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        viewModel.addWebsite(state.addWebsiteInput)
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Add,
-                                        contentDescription = "Add Website",
-                                        tint = textPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
+                        Text(stringResource(if (state.isAdding) R.string.website_adding else R.string.website_add_action))
+                    }
+                    LaunchedEffect(state.inputErrorMessage) {
+                        if (state.inputErrorMessage != null) urlFocusRequester.requestFocus()
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -590,12 +492,9 @@ fun WebsiteBlockerSheetContent(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "Quick add distracting sites:",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = textSecondary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp
-                            )
+                            text = stringResource(R.string.website_quick_add),
+                            color = textSecondary,
+                            style = MaterialTheme.typography.labelLarge
                         )
 
                         FlowRow(
@@ -604,30 +503,13 @@ fun WebsiteBlockerSheetContent(
                         ) {
                             samplePills.forEach { pill ->
                                 val isAdded = state.manualBlockedWebsites.any { it.domain.equals(pill, ignoreCase = true) }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isAdded) searchBg.copy(alpha = 0.5f) else searchBg)
-                                        .border(
-                                            1.dp,
-                                            if (isAdded) searchBorder.copy(alpha = 0.4f) else searchBorder,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable(enabled = !isAdded) {
-                                            viewModel.addWebsite(pill)
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                OutlinedButton(
+                                    onClick = { viewModel.addWebsite(pill) },
+                                    enabled = !isAdded && !state.isAdding,
+                                    border = BorderStroke(1.dp, FocusColors.ControlBorder),
+                                    shape = FocusShapes.pill
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = if (isAdded) "✓ $pill" else "+ $pill",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = if (isAdded) textSecondary else textPrimary,
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 11.sp
-                                            )
-                                        )
-                                    }
+                                    Text(stringResource(if (isAdded) R.string.website_quick_added else R.string.website_quick_add_action, pill))
                                 }
                             }
                         }
@@ -644,16 +526,16 @@ fun WebsiteBlockerSheetContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Blocked Websites",
+                            text = stringResource(R.string.website_list_title),
                             color = textPrimary,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f).semantics { heading() }
                         )
                         if (state.manualBlockedWebsites.isNotEmpty()) {
                             Text(
-                                text = "${state.manualBlockedWebsites.size} Total",
+                                text = pluralStringResource(R.plurals.website_count, state.manualBlockedWebsites.size, state.manualBlockedWebsites.size),
                                 color = textSecondary,
-                                fontSize = 13.sp
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
@@ -684,14 +566,14 @@ fun WebsiteBlockerSheetContent(
                                     modifier = Modifier.size(32.dp)
                                 )
                                 Text(
-                                    text = "No custom websites added yet",
+                                    text = stringResource(R.string.website_list_empty_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         color = textPrimary,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 )
                                 Text(
-                                    text = "Enter a URL above to block it across browsers.",
+                                    text = stringResource(R.string.website_list_empty_body),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         color = textSecondary,
                                         fontSize = 12.sp
@@ -707,6 +589,7 @@ fun WebsiteBlockerSheetContent(
                             website = website,
                             onToggle = { isEnabled -> viewModel.toggleWebsite(website.domain, isEnabled) },
                             onDelete = { viewModel.deleteWebsite(website.domain) },
+                            isBlockingAvailable = state.isManualBlockingEnabled && state.isAccessibilityEnabled,
                             modifier = Modifier.padding(bottom = 10.dp)
                         )
                     }
@@ -718,7 +601,8 @@ fun WebsiteBlockerSheetContent(
             color = sheetBg,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)
+                .padding(horizontal = FocusSpacing.screenHorizontal)
+                .padding(top = FocusSpacing.sm, bottom = FocusSpacing.lg)
         ) {
             Button(
                 onClick = onDismiss,
@@ -729,13 +613,12 @@ fun WebsiteBlockerSheetContent(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .heightIn(min = 52.dp)
                     .testTag("website_blocker_done_button")
             ) {
                 Text(
-                    text = "Done",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
+                    text = stringResource(R.string.action_done),
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
         }
@@ -749,9 +632,9 @@ fun WebsiteFaviconView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val isDark = LocalFocusColors.current.isDark
-    val iconBg = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    val motion = LocalFocusMotion.current
+    val iconBg = FocusColors.SurfaceSubtle
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     val cleanDomain = remember(domain) {
         domain.trim().lowercase()
@@ -775,9 +658,9 @@ fun WebsiteFaviconView(
         SubcomposeAsyncImage(
             model = ImageRequest.Builder(context)
                 .data(faviconUrl)
-                .crossfade(true)
+                .crossfade(!motion.reduceMotion)
                 .build(),
-            contentDescription = "$domain icon",
+            contentDescription = null,
             modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape),
@@ -820,13 +703,14 @@ private fun WebsiteItemCard(
     website: BlockedWebsiteEntity,
     onToggle: (Boolean) -> Unit,
     onDelete: () -> Unit,
+    isBlockingAvailable: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val isDark = LocalFocusColors.current.isDark
-    val cardBg = if (isDark) Color(0xFF18181B) else Color(0xFFF8FAFC)
-    val cardBorder = if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF8E8E93) else Color(0xFF64748B)
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val cardBg = FocusColors.OverlaySurface
+    val cardBorder = FocusColors.OverlayBorder
+    val textPrimary = FocusColors.OverlayTextPrimary
+    val textSecondary = FocusColors.OverlayTextSecondary
 
     Box(
         modifier = modifier
@@ -838,8 +722,12 @@ private fun WebsiteItemCard(
             .background(cardBg, RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth()
+                .clip(FocusShapes.medium)
+                .toggleable(value = website.isEnabled, role = Role.Switch, onValueChange = onToggle)
+                .padding(vertical = FocusSpacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             WebsiteFaviconView(
@@ -854,45 +742,44 @@ private fun WebsiteItemCard(
                     text = website.domain,
                     style = MaterialTheme.typography.titleSmall.copy(
                         color = textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                        textDirection = TextDirection.Ltr
+                    )
                 )
                 Text(
-                    text = if (website.isEnabled) "Blocking active" else "Paused",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = if (website.isEnabled) Color(0xFF10B981) else textSecondary,
-                        fontSize = 12.sp
-                    )
+                    text = stringResource(if (website.isEnabled && isBlockingAvailable) R.string.website_blocking_active else R.string.website_blocking_paused),
+                    color = if (website.isEnabled && isBlockingAvailable) FocusColors.EmeraldText else textSecondary,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
             Switch(
                 checked = website.isEnabled,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.ToggleGreen,
-                    uncheckedThumbColor = textSecondary,
-                    uncheckedTrackColor = if (isDark) Color(0xFF242426) else Color(0xFFE2E8F0)
-                )
+                onCheckedChange = null,
+                colors = FocusColors.SwitchColors,
+                modifier = Modifier.clearAndSetSemantics { }
             )
-
-            Spacer(modifier = Modifier.width(6.dp))
+        }
 
             IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(32.dp)
+                onClick = { showDeleteConfirmation = true },
+                modifier = Modifier.size(48.dp).align(Alignment.End)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.DeleteOutline,
-                    contentDescription = "Delete",
-                    tint = Color(0xFFFF6D2C),
+                    contentDescription = stringResource(R.string.website_delete_action, website.domain),
+                    tint = FocusColors.BlockedText,
                     modifier = Modifier.size(20.dp)
                 )
             }
         }
+    }
+    if (showDeleteConfirmation) {
+        FocusDestructiveDialog(
+            title = stringResource(R.string.website_delete_title, website.domain),
+            message = stringResource(R.string.website_delete_body),
+            confirmLabel = stringResource(R.string.website_remove_action),
+            onConfirm = onDelete,
+            onDismiss = { showDeleteConfirmation = false }
+        )
     }
 }

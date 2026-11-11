@@ -1,0 +1,16 @@
+<resources>
+    <string name="accessibility_required_title">Accessibility required</string>
+    <string name="accessibility_required_body">To turn on %1$s, FocusShield needs Accessibility access to protect against %2$s during focus sessions.</string>
+    <string name="accessibility_privacy_body">On-device only. FocusShield never records keystrokes, personal information or screen content.</string>
+    <string name="accessibility_enable_settings">Enable in Settings</string>
+    <string name="accessibility_help_guide">Help with restricted settings</string>
+    <string name="accessibility_guide_title">Accessibility service guide</string>
+    <string name="accessibility_guide_active">Service is active and working</string>
+    <string name="accessibility_guide_inactive">Fix a greyed-out or restricted setting</string>
+    <string name="accessibility_step_1_title">Android 13, 14 and 15 restricted setting</string>
+    <string name="accessibility_step_1_body">If the phone shows “Restricted setting: for your security, this setting is currently unavailable”:\n• Tap “Open App info” below\n• Tap the three-dot menu in the top corner\n• Choose “Allow restricted settings”\n• Return here and turn on Accessibility</string>
+    <string name="accessibility_step_2_title">Xiaomi, MIUI, Samsung and Vivo</string>
+    <string name="accessibility_step_2_body">If the service turns off when the app closes:\n• Open App info and allow Autostart\n• Set Battery saver to No restrictions\n• Keep FocusShield in the recent apps list</string>
+    <string name="accessibility_open_settings">1. Open Accessibility settings</string>
+    <string name="accessibility_open_app_info">2. Open App info to allow restricted settings</string>
+</resources>

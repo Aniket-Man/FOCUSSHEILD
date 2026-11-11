@@ -797,14 +797,29 @@ class AppLimitManager private constructor(
     suspend fun leaveBlockForToday(packageName: String, alsoDisableLimit: Boolean = false): Boolean {
         return try {
             val limit = appLimitRepository.getLimitByPackage(packageName)
-            if (limit?.isStrictOverride == true) {
-                Log.w(tag, "Strict Mode Active: Cannot bypass or disable limit for $packageName")
+            if (limit == null) {
+                Log.w(tag, "Cannot bypass $packageName: its limit is gone")
                 return false
             }
-            val todayDate = appLimitRepository.getTodayDateString()
-            appLimitRepository.setBypassedForToday(packageName, todayDate, true)
+            if (limit.isStrictOverride) {
+                Log.w(tag, "Locked limit: cannot bypass or disable limit for $packageName")
+                return false
+            }
+            val bypass = appLimitRepository.bypassLimitForToday(packageName)
+            if (bypass !is com.example.data.repository.AppLimitWriteResult.Applied) {
+                Log.e(tag, "Failed to bypass $packageName for today: $bypass")
+                return false
+            }
+            bypass.followUpFailure?.let {
+                Log.w(tag, "Bypassed $packageName, but its live blocking state could not be refreshed", it)
+            }
             if (alsoDisableLimit) {
-                appLimitRepository.setLimitEnabled(packageName, false)
+                val disabled = appLimitRepository.setLimitEnabledResult(packageName, false)
+                if (disabled !is com.example.data.repository.AppLimitWriteResult.Applied) {
+                    // The bypass committed, so today's request is honored. Report the failed
+                    // disable instead of claiming the limit was removed.
+                    Log.e(tag, "Bypassed $packageName, but disabling the limit failed: $disabled")
+                }
             }
             reentryGate.clear(packageName)
             // Only retire the live session if it belongs to this app. Turning off app B for
@@ -829,17 +844,31 @@ class AppLimitManager private constructor(
      *
      * Refuses deletion if Strict Mode is active for the limit.
      */
-    fun removeLimitPermanently(packageName: String) {
-        scope.launch {
+    suspend fun removeLimitPermanently(packageName: String): Boolean {
+        return try {
             val limit = appLimitRepository.getLimitByPackage(packageName)
             if (limit?.isStrictOverride == true) {
-                Log.w(tag, "Strict Mode Active: Refusing to permanently remove app limit for $packageName")
-                return@launch
+                Log.w(tag, "Locked limit: refusing to permanently remove app limit for $packageName")
+                return false
             }
-            val deleted = appLimitRepository.deleteLimit(packageName)
-            if (deleted) {
-                Log.i(tag, "App limit for $packageName permanently removed")
+            when (val result = appLimitRepository.deleteLimitResult(packageName)) {
+                is com.example.data.repository.AppLimitWriteResult.Applied -> {
+                    result.followUpFailure?.let {
+                        Log.w(tag, "Deleted $packageName, but live blocking state could not be refreshed", it)
+                    }
+                    Log.i(tag, "App limit for $packageName permanently removed")
+                    true
+                }
+                else -> {
+                    Log.e(tag, "Failed to remove app limit for $packageName: $result")
+                    false
+                }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (exception: Exception) {
+            Log.e(tag, "Failed to remove app limit for $packageName", exception)
+            false
         }
     }
 

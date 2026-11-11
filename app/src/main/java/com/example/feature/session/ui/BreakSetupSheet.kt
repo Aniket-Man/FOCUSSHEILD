@@ -20,11 +20,13 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.Divider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,11 +35,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.core.design.FocusColors
+import com.example.core.design.FocusSpacing
+import com.example.core.ui.FocusPrimaryButton
 
 @Composable
 fun BreakSetupSheet(
@@ -49,12 +57,13 @@ fun BreakSetupSheet(
     modifier: Modifier = Modifier
 ) {
     var showDurationPicker by remember { mutableStateOf(false) }
+    val canConfigureDuration = numberOfBreaks > 0
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(FocusColors.Surface)
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .padding(horizontal = FocusSpacing.screenHorizontal, vertical = 16.dp)
     ) {
         // Grab Handle
         Box(
@@ -80,17 +89,19 @@ fun BreakSetupSheet(
             ) {
                 IconButton(
                     onClick = onBack,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("break_setup_back_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.action_back),
                         tint = FocusColors.TextPrimary
                     )
                 }
 
                 Text(
-                    text = "Break Settings",
+                    text = stringResource(R.string.session_break_settings),
                     style = MaterialTheme.typography.titleLarge.copy(
                         color = FocusColors.TextPrimary,
                         fontWeight = FontWeight.Bold,
@@ -99,9 +110,9 @@ fun BreakSetupSheet(
                 )
             }
 
-            androidx.compose.material3.TextButton(onClick = onBack) {
+            TextButton(onClick = onBack) {
                 Text(
-                    text = "Done",
+                    text = stringResource(R.string.action_done),
                     style = MaterialTheme.typography.labelLarge.copy(
                         color = FocusColors.Primary,
                         fontWeight = FontWeight.Bold
@@ -120,14 +131,14 @@ fun BreakSetupSheet(
             color = FocusColors.SurfaceVariant
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Row 1: No. of breaks
+                // Row 1: Number of breaks
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "No. of breaks",
+                        text = stringResource(R.string.session_break_count),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = FocusColors.TextPrimary,
                             fontWeight = FontWeight.Medium
@@ -143,13 +154,22 @@ fun BreakSetupSheet(
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
                         IconButton(
-                            onClick = { if (numberOfBreaks > 0) onNumberOfBreaksChange(numberOfBreaks - 1) },
+                            onClick = {
+                                if (numberOfBreaks > 0) {
+                                    onNumberOfBreaksChange(numberOfBreaks - 1)
+                                }
+                            },
+                            enabled = numberOfBreaks > 0,
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Remove,
-                                contentDescription = "Decrease",
-                                tint = if (numberOfBreaks > 0) FocusColors.TextPrimary else FocusColors.TextMuted
+                                contentDescription = stringResource(R.string.session_break_decrease),
+                                tint = if (numberOfBreaks > 0) {
+                                    FocusColors.TextPrimary
+                                } else {
+                                    FocusColors.TextMuted
+                                }
                             )
                         }
 
@@ -169,7 +189,7 @@ fun BreakSetupSheet(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Add,
-                                contentDescription = "Increase",
+                                contentDescription = stringResource(R.string.session_break_increase),
                                 tint = FocusColors.TextPrimary
                             )
                         }
@@ -184,38 +204,56 @@ fun BreakSetupSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showDurationPicker = !showDurationPicker },
+                        .clickable(enabled = canConfigureDuration, role = Role.Button) {
+                            showDurationPicker = !showDurationPicker
+                        },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Break duration",
+                        text = stringResource(R.string.session_break_duration),
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            color = FocusColors.TextPrimary,
+                            color = if (canConfigureDuration) {
+                                FocusColors.TextPrimary
+                            } else {
+                                FocusColors.TextMuted
+                            },
                             fontWeight = FontWeight.Medium
                         )
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "$breakDurationMinutes mins",
+                            text = pluralStringResource(
+                                R.plurals.session_break_minutes,
+                                breakDurationMinutes,
+                                breakDurationMinutes
+                            ),
                             style = MaterialTheme.typography.bodyLarge.copy(
-                                color = FocusColors.Primary,
+                                color = if (canConfigureDuration) {
+                                    FocusColors.Primary
+                                } else {
+                                    FocusColors.TextMuted
+                                },
                                 fontWeight = FontWeight.SemiBold
                             )
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = "Select duration",
-                            tint = FocusColors.TextMuted,
+                            contentDescription = stringResource(R.string.session_break_select_duration),
+                            tint = if (canConfigureDuration) {
+                                FocusColors.TextMuted
+                            } else {
+                                FocusColors.CardBorder
+                            },
                             modifier = Modifier.size(20.dp)
                         )
                     }
                 }
 
                 // Quick Duration Selector if Expanded
-                if (showDurationPicker) {
+                if (showDurationPicker && canConfigureDuration) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -223,26 +261,25 @@ fun BreakSetupSheet(
                     ) {
                         listOf(3, 5, 10, 15).forEach { mins ->
                             val isSelected = breakDurationMinutes == mins
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) FocusColors.Primary else FocusColors.Surface)
-                                    .clickable {
-                                        onBreakDurationChange(mins)
-                                        showDurationPicker = false
-                                    }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "$mins m",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = if (isSelected) Color.White else FocusColors.TextSecondary,
-                                        fontWeight = FontWeight.Bold
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    onBreakDurationChange(mins)
+                                    showDurationPicker = false
+                                },
+                                label = {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.session_break_minutes_short,
+                                            mins
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     )
-                                )
-                            }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
@@ -251,23 +288,10 @@ fun BreakSetupSheet(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Back / Confirm button
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(CircleShape)
-                .background(FocusColors.Primary)
-                .clickable { onBack() }
-                .padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Done",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            )
-        }
+        FocusPrimaryButton(
+            text = stringResource(R.string.action_done),
+            onClick = onBack,
+            testTag = "break_setup_done_button"
+        )
     }
 }

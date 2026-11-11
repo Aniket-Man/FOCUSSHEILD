@@ -136,7 +136,7 @@ fun StudyChannelsScreen(
             FloatingActionButton(
                 onClick = { viewModel.showAddDialog() },
                 containerColor = FocusColors.Primary,
-                contentColor = Color.White,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = CircleShape,
                 modifier = Modifier.testTag("add_channel_fab")
             ) {

@@ -262,14 +262,26 @@ class AppLimitOverlayActivity : ComponentActivity() {
                             // optimistically while a swallowed exception left the DB unchanged
                             // and the user believing strict mode was on (issue #27, item 7).
                             lifecycleScope.launch {
-                                try {
-                                    FocusShieldApp.instance.appLimitRepository.updateStrictMode(data.packageName, true)
-                                    onResult(true)
+                                val result = try {
+                                    FocusShieldApp.instance.appLimitRepository
+                                        .updateStrictMode(data.packageName, true)
                                 } catch (e: Exception) {
-                                    android.util.Log.e("AppLimitOverlay", "Failed to enable strict mode for ${data.packageName}", e)
+                                    android.util.Log.e("AppLimitOverlay", "Failed to lock app limit for ${data.packageName}", e)
+                                    com.example.data.repository.AppLimitWriteResult.Failed(e)
+                                }
+                                if (result is com.example.data.repository.AppLimitWriteResult.Applied) {
+                                    if (result.followUpFailure != null) {
+                                        Toast.makeText(
+                                            applicationContext,
+                                            R.string.limits_lock_follow_up,
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                    onResult(true)
+                                } else {
                                     Toast.makeText(
                                         applicationContext,
-                                        "Couldn't enable Strict Mode for ${data.appName}. Please try again.",
+                                        R.string.limits_lock_error,
                                         Toast.LENGTH_LONG
                                     ).show()
                                     onResult(false)
@@ -297,7 +309,7 @@ class AppLimitOverlayActivity : ComponentActivity() {
                                 } else {
                                     Toast.makeText(
                                         applicationContext,
-                                        "Couldn't turn off ${data.appName}'s limit. Please try again.",
+                                        R.string.limits_turn_off_error,
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }

@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -55,7 +57,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -69,6 +70,11 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.example.R
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
@@ -82,6 +88,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.design.FocusColors
+import com.example.core.ui.FocusDestructiveDialog
+import com.example.core.ui.FocusPrimaryButton
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.sessionModeTitle
 import com.example.core.util.InstalledAppItem
 import com.example.core.util.InstalledAppsProvider
 import com.example.data.local.entity.SubjectEntity
@@ -147,7 +157,20 @@ fun FocusSessionSetupSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
+    val protectionError by viewModel.protectionError.collectAsStateWithLifecycle()
     val customSubjects by viewModel.customSubjects.collectAsStateWithLifecycle()
+    val isSavingProtection by viewModel.isSavingProtection.collectAsStateWithLifecycle()
+
+    val youtubePromptTitle = stringResource(R.string.session_sheet_youtube_prompt)
+    val youtubePromptReason = stringResource(R.string.session_sheet_youtube_reason)
+    val browserPromptTitle = stringResource(R.string.session_sheet_browser_prompt)
+    val browserPromptReason = stringResource(R.string.session_sheet_browser_reason)
+    val uninstallPromptTitle = stringResource(R.string.session_sheet_uninstall_prompt)
+    val uninstallPromptReason = stringResource(R.string.session_sheet_uninstall_reason)
+    val splitPromptTitle = stringResource(R.string.session_sheet_split_prompt)
+    val splitPromptReason = stringResource(R.string.session_sheet_split_reason)
+    val floatingPromptTitle = stringResource(R.string.session_sheet_floating_prompt)
+    val floatingPromptReason = stringResource(R.string.session_sheet_floating_reason)
 
     // rememberSaveable, not remember: a rotation (or any configuration change) used to throw the
     // user back to the main page of the sheet, losing whichever sub-sheet they were filling in
@@ -269,8 +292,8 @@ fun FocusSessionSetupSheet(
                         onToggleYouTubeStudyMode = { enabled ->
                             if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "YouTube Study Mode",
-                                    description = "YouTube study channels and distractive video feeds",
+                                    title = youtubePromptTitle,
+                                    description = youtubePromptReason,
                                     onGranted = { viewModel.toggleYouTubeStudyMode(true) }
                                 )
                             } else {
@@ -280,8 +303,8 @@ fun FocusSessionSetupSheet(
                         onToggleBrowserStudyMode = { enabled ->
                             if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "Browser Study Mode",
-                                    description = "distracting websites while allowing study sites",
+                                    title = browserPromptTitle,
+                                    description = browserPromptReason,
                                     onGranted = { viewModel.toggleBrowserStudyMode(true) }
                                 )
                             } else {
@@ -292,8 +315,8 @@ fun FocusSessionSetupSheet(
                         onToggleBlockUninstall = { enabled ->
                             if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "App Uninstall Protection",
-                                    description = "system settings to prevent FocusShield from being uninstalled",
+                                    title = uninstallPromptTitle,
+                                    description = uninstallPromptReason,
                                     onGranted = { viewModel.toggleBlockUninstall(true) }
                                 )
                             } else {
@@ -303,8 +326,8 @@ fun FocusSessionSetupSheet(
                         onToggleBlockSplitScreen = { enabled ->
                             if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "Split Screen Blocker",
-                                    description = "split screen multi-window mode",
+                                    title = splitPromptTitle,
+                                    description = splitPromptReason,
                                     onGranted = { viewModel.toggleBlockSplitScreen(true) }
                                 )
                             } else {
@@ -314,8 +337,8 @@ fun FocusSessionSetupSheet(
                         onToggleBlockFloatingWindow = { enabled ->
                             if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "Floating Window Blocker",
-                                    description = "picture-in-picture and floating windows",
+                                    title = floatingPromptTitle,
+                                    description = floatingPromptReason,
                                     onGranted = { viewModel.toggleBlockFloatingWindow(true) }
                                 )
                             } else {
@@ -323,6 +346,12 @@ fun FocusSessionSetupSheet(
                             }
                         },
                         onToggleDeepFocusExpanded = { viewModel.toggleDeepFocusExpanded() },
+                        isSavingProtection = isSavingProtection,
+                        errorMessage = protectionError ?: setupState.validationError,
+                        onDismissError = {
+                            viewModel.clearProtectionError()
+                            viewModel.clearSetupError()
+                        },
                         onStartFocusNow = {
                             val started = viewModel.startSession()
                             if (started) {
@@ -369,8 +398,8 @@ fun FocusSessionSetupSheet(
                         onYoutubeOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "YouTube Study Mode",
-                                    description = "YouTube study channels and distractive video feeds",
+                                    title = youtubePromptTitle,
+                                    description = youtubePromptReason,
                                     onGranted = { viewModel.setYoutubeOption(SpecialAppOption.STUDY_MODE) }
                                 )
                             } else {
@@ -380,8 +409,8 @@ fun FocusSessionSetupSheet(
                         onBrowserOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = "Browser Study Mode",
-                                    description = "distracting websites and search results",
+                                    title = browserPromptTitle,
+                                    description = browserPromptReason,
                                     onGranted = { viewModel.setBrowserOption(SpecialAppOption.STUDY_MODE) }
                                 )
                             } else {
@@ -456,6 +485,9 @@ private fun FocusSetupMainContent(
     onToggleBlockSplitScreen: (Boolean) -> Unit,
     onToggleBlockFloatingWindow: (Boolean) -> Unit,
     onToggleDeepFocusExpanded: () -> Unit,
+    isSavingProtection: Boolean,
+    errorMessage: String?,
+    onDismissError: () -> Unit,
     onStartFocusNow: () -> Unit
 ) {
     val context = LocalContext.current
@@ -464,6 +496,7 @@ private fun FocusSetupMainContent(
     var newTagName by remember { mutableStateOf("") }
     var editingSubject by remember { mutableStateOf<SubjectEntity?>(null) }
     var editTagName by remember { mutableStateOf("") }
+    var pendingDeleteTag by remember { mutableStateOf<SubjectEntity?>(null) }
 
     LaunchedEffect(Unit) {
         installedBrowsers = InstalledAppsProvider.getInstalledBrowsers(context)
@@ -480,7 +513,7 @@ private fun FocusSetupMainContent(
             textContentColor = FocusColors.TextSecondary,
             title = {
                 Text(
-                    text = "New Subject Tag",
+                    text = stringResource(R.string.session_sheet_new_tag_title),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
@@ -488,7 +521,8 @@ private fun FocusSetupMainContent(
                 OutlinedTextField(
                     value = newTagName,
                     onValueChange = { newTagName = it },
-                    placeholder = { Text("e.g. Coding, Math, Reading") },
+                    label = { Text(stringResource(R.string.session_sheet_tag_name)) },
+                    placeholder = { Text(stringResource(R.string.session_sheet_tag_example)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -512,10 +546,13 @@ private fun FocusSetupMainContent(
                     enabled = newTagName.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = FocusColors.Primary,
-                        contentColor = Color.White
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Save Tag", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = stringResource(R.string.session_sheet_save_tag),
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
@@ -525,7 +562,7 @@ private fun FocusSetupMainContent(
                         newTagName = ""
                     }
                 ) {
-                    Text("Cancel", color = FocusColors.TextSecondary)
+                    Text(stringResource(R.string.action_cancel), color = FocusColors.TextSecondary)
                 }
             }
         )
@@ -539,7 +576,7 @@ private fun FocusSetupMainContent(
             textContentColor = FocusColors.TextSecondary,
             title = {
                 Text(
-                    text = "Edit Subject Tag",
+                    text = stringResource(R.string.session_sheet_edit_tag_title),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
@@ -548,7 +585,8 @@ private fun FocusSetupMainContent(
                     OutlinedTextField(
                         value = editTagName,
                         onValueChange = { editTagName = it },
-                        placeholder = { Text("Tag name") },
+                        label = { Text(stringResource(R.string.session_sheet_tag_name)) },
+                        placeholder = { Text(stringResource(R.string.session_sheet_tag_example)) },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -565,8 +603,8 @@ private fun FocusSetupMainContent(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(FocusColors.CoralWarning.copy(alpha = 0.12f))
-                            .clickable {
-                                onDeleteSubjectTag(subjectToEdit)
+                            .clickable(role = Role.Button) {
+                                pendingDeleteTag = subjectToEdit
                                 editingSubject = null
                             }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -575,15 +613,15 @@ private fun FocusSetupMainContent(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.DeleteOutline,
-                            contentDescription = "Delete tag",
+                            contentDescription = null,
                             tint = FocusColors.CoralWarning,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Delete Tag",
+                            text = stringResource(R.string.session_sheet_delete_tag),
                             style = MaterialTheme.typography.labelLarge.copy(
-                                color = FocusColors.CoralWarning,
+                                color = FocusColors.CoralText,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -601,17 +639,29 @@ private fun FocusSetupMainContent(
                     enabled = editTagName.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = FocusColors.Primary,
-                        contentColor = Color.White
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Save", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.action_save), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { editingSubject = null }) {
-                    Text("Cancel", color = FocusColors.TextSecondary)
+                    Text(stringResource(R.string.action_cancel), color = FocusColors.TextSecondary)
                 }
             }
+        )
+    }
+
+    pendingDeleteTag?.let { tag ->
+        FocusDestructiveDialog(
+            title = stringResource(R.string.session_sheet_delete_tag),
+            message = stringResource(R.string.session_sheet_delete_tag_message, tag.name),
+            onConfirm = {
+                onDeleteSubjectTag(tag)
+                pendingDeleteTag = null
+            },
+            onDismiss = { pendingDeleteTag = null }
         )
     }
 
@@ -634,6 +684,15 @@ private fun FocusSetupMainContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        if (errorMessage != null) {
+            FocusStatusMessage(
+                message = errorMessage,
+                isError = true,
+                onDismiss = onDismissError,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+
         // Top Segmented Tab Picker: [ Timer | Stopwatch | Pomodoro ]
         Row(
             modifier = Modifier
@@ -644,22 +703,26 @@ private fun FocusSetupMainContent(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             listOf(
-                SessionMode.TIMER to "Timer",
-                SessionMode.STOPWATCH to "Stopwatch",
-                SessionMode.POMODORO to "Pomodoro"
-            ).forEach { (mode, label) ->
+                SessionMode.TIMER,
+                SessionMode.STOPWATCH,
+                SessionMode.POMODORO
+            ).forEach { mode ->
                 val isSelected = setupState.selectedMode == mode
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .clip(CircleShape)
                         .background(if (isSelected) FocusColors.PrimaryContainer else Color.Transparent)
-                        .clickable { onModeSelected(mode) }
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.Tab,
+                            onClick = { onModeSelected(mode) }
+                        )
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = label,
+                        text = sessionModeTitle(mode),
                         style = MaterialTheme.typography.bodyMedium.copy(
                             color = if (isSelected) FocusColors.Primary else FocusColors.TextSecondary,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
@@ -694,7 +757,7 @@ private fun FocusSetupMainContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Session Tag & Topic",
+                            text = stringResource(R.string.session_sheet_tag_section),
                             style = MaterialTheme.typography.titleSmall.copy(
                                 color = FocusColors.TextPrimary,
                                 fontWeight = FontWeight.Bold,
@@ -704,14 +767,14 @@ private fun FocusSetupMainContent(
                     }
                     if (setupState.selectedSubject.isNotBlank() || setupState.selectedTopic.isNotBlank()) {
                         Text(
-                            text = "Clear",
+                            text = stringResource(R.string.session_sheet_clear),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 color = FocusColors.Primary,
                                 fontWeight = FontWeight.SemiBold
                             ),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .clickable {
+                                .clickable(role = Role.Button) {
                                     if (setupState.selectedSubject.isNotBlank()) {
                                         onToggleSubjectTag(setupState.selectedSubject)
                                     }
@@ -723,7 +786,7 @@ private fun FocusSetupMainContent(
                         )
                     } else {
                         Text(
-                            text = "Optional",
+                            text = stringResource(R.string.session_sheet_optional),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocusColors.TextMuted
                             )
@@ -734,7 +797,7 @@ private fun FocusSetupMainContent(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Subject Tag",
+                    text = stringResource(R.string.session_sheet_subject_tag),
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.Medium
@@ -749,7 +812,7 @@ private fun FocusSetupMainContent(
                 ) {
                     customSubjects.forEach { subject ->
                         val isSelected = setupState.selectedSubject.equals(subject.name, ignoreCase = true)
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .background(
@@ -760,36 +823,36 @@ private fun FocusSetupMainContent(
                                     color = if (isSelected) FocusColors.Primary else FocusColors.CardBorderSubtle,
                                     shape = CircleShape
                                 )
-                                .clickable { onToggleSubjectTag(subject.name) }
-                                .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp)
+                                .padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = subject.name,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = if (isSelected) FocusColors.Primary else FocusColors.TextPrimary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 13.sp
-                                    )
+                            Text(
+                                text = subject.name,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = if (isSelected) FocusColors.Primary else FocusColors.TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 13.sp
+                                ),
+                                modifier = Modifier
+                                    .clickable(role = Role.Button) { onToggleSubjectTag(subject.name) }
+                                    .padding(vertical = 8.dp)
+                            )
+                            IconButton(
+                                onClick = {
+                                    editingSubject = subject
+                                    editTagName = subject.name
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Edit,
+                                    contentDescription = stringResource(
+                                        R.string.session_sheet_edit_tag_description,
+                                        subject.name
+                                    ),
+                                    tint = if (isSelected) FocusColors.Primary else FocusColors.TextMuted,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            editingSubject = subject
-                                            editTagName = subject.name
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Edit,
-                                        contentDescription = "Edit ${subject.name}",
-                                        tint = if (isSelected) FocusColors.Primary else FocusColors.TextMuted,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                }
                             }
                         }
                     }
@@ -804,7 +867,7 @@ private fun FocusSetupMainContent(
                                 .clip(CircleShape)
                                 .background(FocusColors.PrimaryContainer)
                                 .border(1.dp, FocusColors.Primary, CircleShape)
-                                .clickable { onToggleSubjectTag(setupState.selectedSubject) }
+                                .clickable(role = Role.Button) { onToggleSubjectTag(setupState.selectedSubject) }
                                 .padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Text(
@@ -828,7 +891,7 @@ private fun FocusSetupMainContent(
                                 color = FocusColors.Primary.copy(alpha = 0.5f),
                                 shape = CircleShape
                             )
-                            .clickable {
+                            .clickable(role = Role.Button) {
                                 newTagName = ""
                                 showAddTagDialog = true
                             }
@@ -837,13 +900,13 @@ private fun FocusSetupMainContent(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Rounded.Add,
-                                contentDescription = "Add Tag",
+                                contentDescription = null,
                                 tint = FocusColors.Primary,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Add Tag",
+                                text = stringResource(R.string.session_sheet_add_tag),
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     color = FocusColors.Primary,
                                     fontWeight = FontWeight.SemiBold,
@@ -857,7 +920,7 @@ private fun FocusSetupMainContent(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Topic",
+                    text = stringResource(R.string.session_sheet_topic),
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.Medium
@@ -871,7 +934,7 @@ private fun FocusSetupMainContent(
                     onValueChange = onTopicChange,
                     placeholder = {
                         Text(
-                            text = "Enter topic (e.g., Chapter 1, Problem Set)...",
+                            text = stringResource(R.string.session_sheet_topic_example),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusColors.TextMuted,
                                 fontSize = 13.sp
@@ -887,7 +950,7 @@ private fun FocusSetupMainContent(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
-                                    contentDescription = "Clear topic",
+                                    contentDescription = stringResource(R.string.session_sheet_clear_topic),
                                     tint = FocusColors.TextMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -922,12 +985,21 @@ private fun FocusSetupMainContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = setupState.selectedMode != SessionMode.STOPWATCH) { onOpenFocusTimePicker() },
+                        .clickable(
+                            enabled = setupState.selectedMode != SessionMode.STOPWATCH,
+                            role = Role.Button
+                        ) { onOpenFocusTimePicker() },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (setupState.selectedMode == SessionMode.STOPWATCH) "Total duration" else "Focus Time",
+                        text = stringResource(
+                            if (setupState.selectedMode == SessionMode.STOPWATCH) {
+                                R.string.session_sheet_total_duration
+                            } else {
+                                R.string.session_sheet_focus_time
+                            }
+                        ),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = FocusColors.TextPrimary,
                             fontWeight = FontWeight.Medium
@@ -935,11 +1007,20 @@ private fun FocusSetupMainContent(
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val focusMinutes = when (setupState.selectedMode) {
+                            SessionMode.TIMER -> setupState.durationMinutes
+                            SessionMode.POMODORO -> setupState.pomodoroFocusMinutes
+                            SessionMode.STOPWATCH -> null
+                        }
                         Text(
-                            text = when (setupState.selectedMode) {
-                                SessionMode.TIMER -> "${setupState.durationMinutes} mins"
-                                SessionMode.STOPWATCH -> "0 -> ∞"
-                                SessionMode.POMODORO -> "${setupState.pomodoroFocusMinutes} mins"
+                            text = if (focusMinutes == null) {
+                                stringResource(R.string.session_sheet_open_ended)
+                            } else {
+                                pluralStringResource(
+                                    R.plurals.session_sheet_minutes,
+                                    focusMinutes,
+                                    focusMinutes
+                                )
                             },
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 color = FocusColors.Primary,
@@ -951,7 +1032,7 @@ private fun FocusSetupMainContent(
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 imageVector = Icons.Rounded.ChevronRight,
-                                contentDescription = "Select focus time",
+                                contentDescription = null,
                                 tint = FocusColors.TextMuted,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -967,12 +1048,12 @@ private fun FocusSetupMainContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenBreakPicker() },
+                        .clickable(role = Role.Button) { onOpenBreakPicker() },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Breaks",
+                        text = stringResource(R.string.session_sheet_breaks),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = FocusColors.TextPrimary,
                             fontWeight = FontWeight.Medium
@@ -981,7 +1062,11 @@ private fun FocusSetupMainContent(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "${setupState.numberOfBreaks} break${if (setupState.numberOfBreaks != 1) "s" else ""}",
+                            text = pluralStringResource(
+                                R.plurals.session_sheet_break_count,
+                                setupState.numberOfBreaks,
+                                setupState.numberOfBreaks
+                            ),
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 color = FocusColors.Primary,
                                 fontWeight = FontWeight.SemiBold
@@ -990,7 +1075,7 @@ private fun FocusSetupMainContent(
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = "Configure breaks",
+                            contentDescription = null,
                             tint = FocusColors.TextMuted,
                             modifier = Modifier.size(20.dp)
                         )
@@ -1005,12 +1090,12 @@ private fun FocusSetupMainContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenSelectApps() },
+                        .clickable(role = Role.Button) { onOpenSelectApps() },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Blocked Apps",
+                        text = stringResource(R.string.session_sheet_blocked_apps),
                         style = MaterialTheme.typography.bodyLarge.copy(
                             color = FocusColors.TextPrimary,
                             fontWeight = FontWeight.Medium
@@ -1072,7 +1157,11 @@ private fun FocusSetupMainContent(
                         }
 
                         Text(
-                            text = "${setupState.blockedAppPackages.size} apps",
+                            text = pluralStringResource(
+                                R.plurals.session_sheet_blocked_app_count,
+                                setupState.blockedAppPackages.size,
+                                setupState.blockedAppPackages.size
+                            ),
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 color = FocusColors.Primary,
                                 fontWeight = FontWeight.SemiBold
@@ -1082,7 +1171,7 @@ private fun FocusSetupMainContent(
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = "Select blocked apps",
+                            contentDescription = null,
                             tint = FocusColors.TextMuted,
                             modifier = Modifier.size(20.dp)
                         )
@@ -1105,40 +1194,22 @@ private fun FocusSetupMainContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onToggleDeepFocusExpanded() },
+                        .clickable(role = Role.Button) { onToggleDeepFocusExpanded() },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Deep Focus Settings",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                color = FocusColors.TextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            )
+                    Text(
+                        text = stringResource(R.string.session_sheet_deep_focus),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            color = FocusColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFFE5B800))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "PRO",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                )
-                            )
-                        }
-                    }
+                    )
 
                     Icon(
                         imageVector = if (setupState.isDeepFocusExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "Expand",
+                        contentDescription = stringResource(R.string.session_sheet_expand),
                         tint = FocusColors.TextMuted
                     )
                 }
@@ -1156,9 +1227,10 @@ private fun FocusSetupMainContent(
                         // Switch 1: Strict Mode (Only for Timer & Pomodoro, not for Stopwatch)
                         if (setupState.selectedMode != SessionMode.STOPWATCH) {
                             DeepFocusSwitchRow(
-                                title = "Strict mode",
-                                subtitle = "You cannot end your session early",
+                                title = stringResource(R.string.session_sheet_strict),
+                                subtitle = stringResource(R.string.session_sheet_strict_body),
                                 checked = setupState.isStrictModeEnabled,
+                                enabled = !isSavingProtection,
                                 onCheckedChange = onToggleStrictMode
                             )
 
@@ -1169,8 +1241,9 @@ private fun FocusSetupMainContent(
 
                         // Switch 2: YouTube Study Mode
                         DeepFocusSwitchRow(
-                            title = "YouTube Study Mode",
+                            title = stringResource(R.string.session_sheet_youtube),
                             checked = setupState.isYouTubeStudyModeEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleYouTubeStudyMode
                         )
 
@@ -1180,8 +1253,9 @@ private fun FocusSetupMainContent(
 
                         // Switch 3: Browser Study Mode
                         DeepFocusSwitchRow(
-                            title = "Browser Study Mode",
+                            title = stringResource(R.string.session_sheet_browser),
                             checked = setupState.isBrowserStudyModeEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleBrowserStudyMode
                         )
 
@@ -1191,8 +1265,9 @@ private fun FocusSetupMainContent(
 
                         // Switch 4: Block Phone home screen
                         DeepFocusSwitchRow(
-                            title = "Block Phone home screen",
+                            title = stringResource(R.string.session_sheet_home),
                             checked = setupState.isBlockHomeScreenEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleBlockHomeScreen
                         )
 
@@ -1202,9 +1277,10 @@ private fun FocusSetupMainContent(
 
                         // Switch 5: Block FocusShield app uninstall
                         DeepFocusSwitchRow(
-                            title = "Block FocusShield app uninstall",
-                            subtitle = "Prevents uninstalling or tampering with FocusShield",
+                            title = stringResource(R.string.session_sheet_uninstall),
+                            subtitle = stringResource(R.string.session_sheet_uninstall_body),
                             checked = setupState.isBlockUninstallEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleBlockUninstall
                         )
 
@@ -1214,9 +1290,10 @@ private fun FocusSetupMainContent(
 
                         // Switch 6: Block split screen
                         DeepFocusSwitchRow(
-                            title = "Block split screen",
-                            subtitle = "Cannot use blocked apps in split screen",
+                            title = stringResource(R.string.session_sheet_split),
+                            subtitle = stringResource(R.string.session_sheet_split_body),
                             checked = setupState.isBlockSplitScreenEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleBlockSplitScreen
                         )
 
@@ -1226,9 +1303,10 @@ private fun FocusSetupMainContent(
 
                         // Switch 7: Block floating window
                         DeepFocusSwitchRow(
-                            title = "Block floating window",
-                            subtitle = "Cannot use blocked apps in floating window",
+                            title = stringResource(R.string.session_sheet_floating),
+                            subtitle = stringResource(R.string.session_sheet_floating_body),
                             checked = setupState.isBlockFloatingWindowEnabled,
+                            enabled = !isSavingProtection,
                             onCheckedChange = onToggleBlockFloatingWindow
                         )
                     }
@@ -1239,36 +1317,32 @@ private fun FocusSetupMainContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // BOTTOM ACTION BUTTON: "Start Focus Now"
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(CircleShape)
-                .background(FocusColors.Primary)
-                .clickable { onStartFocusNow() }
-                .padding(vertical = 16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Start Focus Now",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-            )
-        }
+        FocusPrimaryButton(
+            text = stringResource(R.string.session_sheet_start_now),
+            onClick = onStartFocusNow,
+            testTag = "start_focus_now_button"
+        )
     }
 }
 
 @Composable
 private fun DeepFocusSwitchRow(
     title: String,
-    subtitle: String? = null,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+    subtitle: String? = null
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1294,13 +1368,10 @@ private fun DeepFocusSwitchRow(
 
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = FocusColors.ToggleGreen,
-                uncheckedThumbColor = FocusColors.TextMuted,
-                uncheckedTrackColor = FocusColors.SurfaceVariant
-            )
+            onCheckedChange = null,
+            enabled = enabled,
+            colors = FocusColors.SwitchColors,
+            modifier = Modifier.clearAndSetSemantics { }
         )
     }
 }

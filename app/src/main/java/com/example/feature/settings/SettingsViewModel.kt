@@ -4,21 +4,30 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.R
 import com.example.cloud.auth.AuthState
 import com.example.cloud.sync.SyncCycleOutcome
 import com.example.cloud.sync.SyncTracker
 import com.example.core.accessibility.AccessibilityHelper
+import com.example.core.util.ProfilePhotoStorage
 import com.example.data.preferences.FocusPreferences
 import com.example.data.preferences.FocusPreferencesRepository
 import com.example.data.repository.BlockedAppRepository
+import com.example.feature.profile.ProfileEditorSave
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SettingsUiState(
     val preferences: FocusPreferences = FocusPreferences(),
@@ -61,6 +70,52 @@ class SettingsViewModel(
     private val _isBatteryOptimizationIgnored = MutableStateFlow(false)
     private val _isNotificationListenerGranted = MutableStateFlow(false)
     private val _isOverlayPermissionGranted = MutableStateFlow(false)
+    private val _operationError = MutableStateFlow<String?>(null)
+    val operationError: StateFlow<String?> = _operationError.asStateFlow()
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
+    private var pendingWrites = 0
+
+    /** Result of the profile editor's copy → persist → retire transaction. */
+    sealed interface ProfileSaveState {
+        data object Idle : ProfileSaveState
+        data object Saving : ProfileSaveState
+        data class Saved(val queuedForCloud: Boolean, val followUpFailure: Exception? = null) : ProfileSaveState
+        data class Failed(val exception: Exception) : ProfileSaveState
+    }
+
+    private val _profileSaveState = MutableStateFlow<ProfileSaveState>(ProfileSaveState.Idle)
+    val profileSaveState: StateFlow<ProfileSaveState> = _profileSaveState.asStateFlow()
+
+    fun clearProfileSaveState() {
+        if (_profileSaveState.value !is ProfileSaveState.Saving) {
+            _profileSaveState.value = ProfileSaveState.Idle
+        }
+    }
+
+    fun clearOperationError() { _operationError.value = null }
+
+    private suspend fun applySettingChange(block: suspend () -> Unit): Result<Unit> = withContext(Dispatchers.Main.immediate) {
+        pendingWrites++
+        _isSaving.value = true
+        try {
+            block()
+            Result.success(Unit)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (exception: Exception) {
+            android.util.Log.e("SettingsViewModel", "Unable to apply setting", exception)
+            _operationError.value = getApplication<Application>().getString(R.string.settings_save_error)
+            Result.failure(exception)
+        } finally {
+            pendingWrites--
+            _isSaving.value = pendingWrites > 0
+        }
+    }
+
+    // Set busy before returning, so two rapid actions cannot both pass a stale busy check.
+    private fun launchSettingChange(block: suspend () -> Unit): Job =
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { applySettingChange(block) }
 
     private data class InnerSettingsState(
         val prefs: FocusPreferences,
@@ -154,24 +209,32 @@ class SettingsViewModel(
      * the next sign-in to pick a different account.
      */
     fun signOut() {
-        viewModelScope.launch { authRepository.signOut() }
+        if (syncGateway.running.value || _isSaving.value) return
+        launchSettingChange { authRepository.signOut() }
     }
 
     /** Pushes any pending changes to Firestore now, instead of waiting for the next auto-save tick. */
     fun syncNow() {
-        viewModelScope.launch { syncGateway.flushPending() }
+        if (syncGateway.running.value || _isSaving.value) return
+        launchSettingChange {
+            when (syncGateway.runCycle()) {
+                SyncCycleOutcome.Offline -> _operationError.value = getApplication<Application>().getString(R.string.account_sync_offline)
+                is SyncCycleOutcome.Failed, SyncCycleOutcome.NoSession -> _operationError.value = getApplication<Application>().getString(R.string.account_sync_error)
+                else -> Unit
+            }
+        }
     }
 
     fun updateAutoSaveToCloud(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepository.updateAutoSaveToCloudEnabled(enabled) }
+        launchSettingChange { preferencesRepository.updateAutoSaveToCloudEnabled(enabled) }
     }
 
     fun updateAutoSaveIntervalSeconds(seconds: Int) {
-        viewModelScope.launch { preferencesRepository.updateAutoSaveIntervalSeconds(seconds) }
+        launchSettingChange { preferencesRepository.updateAutoSaveIntervalSeconds(seconds) }
     }
 
     fun claimReward(rewardId: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.claimReward(rewardId)
         }
     }
@@ -202,10 +265,10 @@ class SettingsViewModel(
     }
 
     fun updateFloatingTimerOverlay(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Floating timer cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateFloatingTimerOverlayEnabled(enabled)
             val context = getApplication<Application>()
@@ -221,25 +284,25 @@ class SettingsViewModel(
     }
 
     fun updateTimerDefault(minutes: Int) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateTimerDefault(minutes)
         }
     }
 
     fun updatePomodoroDefaults(focus: Int, shortBreak: Int, longBreak: Int, cycles: Int) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updatePomodoroDefaults(focus, shortBreak, longBreak, cycles)
         }
     }
 
     fun updateProtectionDefaults(appBlocking: Boolean, strictMode: Boolean, studyChannels: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateProtectionDefaults(appBlocking, strictMode, studyChannels)
         }
     }
 
     fun updateThemeMode(themeMode: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateThemeMode(themeMode)
         }
     }
@@ -254,6 +317,8 @@ class SettingsViewModel(
     private suspend fun isStrictProtectionLocked(): Boolean {
         return try {
             com.example.feature.applimits.engine.AppLimitStrictModeEngine.instance.isStrictProtectionLocked()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             val active = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value
             active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
@@ -261,50 +326,50 @@ class SettingsViewModel(
     }
 
     fun updateYouTubeShortsBlocking(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: YouTube Shorts blocker cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateYouTubeShortsBlocking(enabled)
         }
     }
 
     fun updateInstagramReelsBlocking(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Instagram Reels blocker cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateInstagramReelsBlocking(enabled)
         }
     }
 
     fun updateFacebookReelsBlocking(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Facebook Reels blocker cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateFacebookReelsBlocking(enabled)
         }
     }
 
     fun updateShortsReelsAlwaysBlocked(alwaysBlocked: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!alwaysBlocked && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Shorts & Reels blocking cannot be weakened while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateShortsReelsAlwaysBlocked(alwaysBlocked)
         }
     }
 
     fun updateAutoAdultWebsiteBlocking(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: 18+ Adult Website Shield cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateAutoAdultWebsiteBlocking(enabled)
         }
@@ -316,10 +381,10 @@ class SettingsViewModel(
     }
 
     fun updateBlockUninstall(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Uninstall protection cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateBlockUninstall(enabled)
             if (enabled) {
@@ -340,7 +405,9 @@ class SettingsViewModel(
                         dpm?.removeActiveAdmin(adminComponent)
                         _isDeviceAdminActive.value = false
                     } catch (e: Exception) {
-                        android.util.Log.e("SettingsViewModel", "Error removing device admin: ${e.message}")
+                        android.util.Log.e("SettingsViewModel", "Error removing device admin", e)
+                        checkDeviceAdminStatus()
+                        _operationError.value = getApplication<Application>().getString(R.string.settings_device_admin_error)
                     }
                 }
             }
@@ -367,53 +434,53 @@ class SettingsViewModel(
     }
 
     fun updateBlockSplitScreen(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Split screen blocking cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateBlockSplitScreen(enabled)
         }
     }
 
     fun updateBlockFloatingWindow(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Floating window blocking cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateBlockFloatingWindow(enabled)
         }
     }
 
     fun updateBlockNotifications(enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!enabled && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Notification blocker cannot be disabled while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.updateBlockNotifications(enabled)
         }
     }
 
     fun updateBlockedNotificationPackages(packages: Set<String>) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateBlockedNotificationPackages(packages)
         }
     }
 
     fun toggleBlockedNotificationPackage(packageName: String, blocked: Boolean) {
-        viewModelScope.launch {
+        launchSettingChange {
             if (!blocked && isStrictProtectionLocked()) {
-                _strictLockMessage.value = "Strict Mode Active: Cannot unblock app notifications while Strict Mode is active."
-                return@launch
+                _strictLockMessage.value = getApplication<Application>().getString(R.string.settings_strict_lock_error)
+                return@launchSettingChange
             }
             preferencesRepository.toggleBlockedNotificationPackage(packageName, blocked)
         }
     }
 
     fun setOnboardingCompleted(completed: Boolean = true) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.setOnboardingCompleted(completed)
         }
     }
@@ -421,18 +488,17 @@ class SettingsViewModel(
     /**
      * Writes the edited profile locally.
      *
-     * Returns the [Job] doing the write so a caller that has follow-up work depending on the new
-     * values — the cloud push in `ProfileScreen`, which would otherwise snapshot and upload the
-     * pre-edit profile — can await it instead of racing it (issue #29).
+     * The explicit result distinguishes a completed write from a failed Job. Follow-up photo
+     * cleanup and cloud work must only run after success.
      */
-    fun updateUserProfile(
+    suspend fun updateUserProfile(
         userName: String,
         photoUri: String?,
         avatarPreset: String,
         motto: String,
         academicGoal: String,
         dailyGoalMinutes: Int
-    ): Job = viewModelScope.launch {
+    ): Result<Unit> = applySettingChange {
         preferencesRepository.updateUserProfile(
             userName = userName,
             photoUri = photoUri,
@@ -443,38 +509,109 @@ class SettingsViewModel(
         )
     }
 
+    /**
+     * Owns the whole profile-photo save in [viewModelScope], not the editor's composition scope.
+     *
+     * A rotation during the save must neither cancel the transaction nor let the recreated editor
+     * submit stale values. The trailing writes stay non-cancellable inside [ProfileEditorSave], and
+     * the completed result is observable by whichever composition is on screen.
+     */
+    fun saveProfileWithPhoto(
+        userName: String,
+        selectedPhoto: String?,
+        avatarPreset: String,
+        motto: String,
+        academicGoal: String,
+        dailyGoalMinutes: Int
+    ) {
+        if (_profileSaveState.value is ProfileSaveState.Saving) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            _profileSaveState.value = ProfileSaveState.Saving
+            val app = getApplication<Application>() as FocusShieldApp
+            try {
+                val uid = (authRepository.authState.value as? AuthState.Authenticated)?.userId
+                val previousPhoto = preferencesRepository.preferencesFlow.first().userPhotoUri
+                var queuedForCloud = false
+                val outcome = ProfileEditorSave.run(
+                    selectedPhoto = selectedPhoto,
+                    preparePhoto = { ProfilePhotoStorage.preparePhoto(app, it) },
+                    persistProfile = { prepared ->
+                        // Direct repository write: the profile state below owns busy/error
+                        // reporting, so this must not also post a generic settings error.
+                        preferencesRepository.updateUserProfile(
+                            userName = userName,
+                            photoUri = prepared,
+                            avatarPreset = avatarPreset,
+                            motto = motto,
+                            academicGoal = academicGoal,
+                            dailyGoalMinutes = dailyGoalMinutes
+                        )
+                    },
+                    discardPreparedPhoto = { ProfilePhotoStorage.discardOwnedPhoto(app, it) },
+                    finishPhoto = { savedPhoto ->
+                        if (uid != null) {
+                            app.cloudInstallState.setPendingProfilePhoto(uid, savedPhoto)
+                            queuedForCloud = true
+                            app.cloudInstallState.setProfileDirty(true)
+                        }
+                        ProfilePhotoStorage.finishPhoto(
+                            app,
+                            previousPhoto,
+                            savedPhoto,
+                            app.cloudInstallState.pendingProfilePhotoUris()
+                        )
+                        // A backup request is follow-up work and must never undo the local save.
+                        if (uid != null && app.authRepository.currentUserId() == uid) {
+                            app.syncGateway.requestSync()
+                        }
+                    }
+                )
+                _profileSaveState.value = when (outcome) {
+                    is ProfileEditorSave.Outcome.Saved ->
+                        ProfileSaveState.Saved(queuedForCloud, outcome.followUpFailure)
+                    is ProfileEditorSave.Outcome.Failed ->
+                        ProfileSaveState.Failed(outcome.exception)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                _profileSaveState.value = ProfileSaveState.Failed(exception)
+            }
+        }
+    }
+
     fun updateUserPhoto(uri: String?) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateUserPhotoUri(uri)
         }
     }
 
     fun updateUserName(name: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateUserName(name)
         }
     }
 
     fun updateUserAvatarPreset(preset: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateUserAvatarPreset(preset)
         }
     }
 
     fun updateUserMotto(motto: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateUserMotto(motto)
         }
     }
 
     fun updateUserAcademicGoal(goal: String) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateUserAcademicGoal(goal)
         }
     }
 
     fun updateDailyGoalMinutes(minutes: Int) {
-        viewModelScope.launch {
+        launchSettingChange {
             preferencesRepository.updateDailyGoalMinutes(minutes)
         }
     }

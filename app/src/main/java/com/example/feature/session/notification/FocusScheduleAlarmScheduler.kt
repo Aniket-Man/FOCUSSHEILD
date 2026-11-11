@@ -37,11 +37,21 @@ object FocusScheduleAlarmScheduler {
 
     private const val TAG = "FocusScheduleScheduler"
 
+    /** What actually happened, so a saved schedule can report an alarm that was not armed. */
+    sealed interface SchedulingResult {
+        data class Armed(val triggerAtMillis: Long, val usedInexactFallback: Boolean) : SchedulingResult
+        data class Skipped(val reason: ScheduleAlarmPlanner.Reason, val detail: String) : SchedulingResult
+        data class Failed(val detail: String) : SchedulingResult
+    }
+
     /** Reschedules alarms for all given schedules (arming the enabled ones, cancelling the rest). */
     fun rescheduleAllSchedules(context: Context, schedules: List<FocusScheduleEntity>) {
         for (schedule in schedules) {
             if (schedule.isEnabled) {
-                scheduleSingleFocusSchedule(context, schedule)
+                val result = scheduleSingleFocusSchedule(context, schedule)
+                if (result is SchedulingResult.Failed) {
+                    Log.e(TAG, "Could not re-arm '${schedule.title}': ${result.detail}")
+                }
             } else {
                 cancelFocusSchedule(context, schedule.id)
             }
@@ -52,48 +62,67 @@ object FocusScheduleAlarmScheduler {
      * Plans and arms the next alarm for [schedule]. Safe to call for a disabled schedule: it cancels
      * instead of arming.
      */
-    fun scheduleSingleFocusSchedule(context: Context, schedule: FocusScheduleEntity) {
+    fun scheduleSingleFocusSchedule(context: Context, schedule: FocusScheduleEntity): SchedulingResult {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-        if (alarmManager == null) {
-            Log.e(TAG, "AlarmManager unavailable; schedule '${schedule.title}' not armed")
-            return
-        }
-
-        // Always drop the previous alarm first: an edit that shortens or invalidates the schedule
-        // must not leave the old trigger behind.
-        cancelFocusSchedule(context, schedule.id)
-
-        when (val plan = ScheduleAlarmPlanner.plan(
-            schedule = schedule,
-            nowMillis = System.currentTimeMillis(),
-            timeZone = TimeZone.getDefault()
-        )) {
-            is ScheduleAlarmPlanner.Plan.Skip -> {
-                // Not an error for a disabled schedule; anything else is a configuration problem the
-                // user needs to be able to see, so it is logged at warning level with the raw value.
-                val level = if (plan.reason == ScheduleAlarmPlanner.Reason.DISABLED) Log.DEBUG else Log.WARN
-                Log.println(level, TAG, "Not scheduling '${schedule.title}' (${schedule.id}): ${plan.detail}")
+            ?: return SchedulingResult.Failed("AlarmManager is unavailable").also {
+                Log.e(TAG, "AlarmManager unavailable; schedule '${schedule.title}' not armed")
             }
 
-            is ScheduleAlarmPlanner.Plan.Arm -> {
-                if (plan.degradedReason != null) {
-                    Log.w(TAG, "Scheduling '${schedule.title}' with a fallback: ${plan.degradedReason}")
+        return try {
+            // Always drop the previous alarm first: an edit that shortens or invalidates the
+            // schedule must not leave the old trigger behind.
+            cancelFocusSchedule(context, schedule.id)
+
+            when (val plan = ScheduleAlarmPlanner.plan(
+                schedule = schedule,
+                nowMillis = System.currentTimeMillis(),
+                timeZone = TimeZone.getDefault()
+            )) {
+                is ScheduleAlarmPlanner.Plan.Skip -> {
+                    // Not an error for a disabled schedule; anything else is a configuration problem
+                    // the user needs to see, so it is logged with the raw value.
+                    val level = if (plan.reason == ScheduleAlarmPlanner.Reason.DISABLED) Log.DEBUG else Log.WARN
+                    Log.println(level, TAG, "Not scheduling '${schedule.title}' (${schedule.id}): ${plan.detail}")
+                    SchedulingResult.Skipped(plan.reason, plan.detail)
                 }
-                val result = arm(
-                    alarmManager = alarmManager,
-                    context = context,
-                    scheduleId = schedule.id,
-                    label = schedule.title,
-                    triggerAtMillis = plan.triggerAtMillis
-                )
-                Log.d(
-                    TAG,
-                    "Schedule '${schedule.title}' (${schedule.id}) -> $result at " +
-                        "${plan.triggerAtMillis} (${ScheduleTime.format(
-                            ScheduleTime.parseToMinutesOrNull(schedule.startTime) ?: 0
-                        )} local)"
-                )
+
+                is ScheduleAlarmPlanner.Plan.Arm -> {
+                    if (plan.degradedReason != null) {
+                        Log.w(TAG, "Scheduling '${schedule.title}' with a fallback: ${plan.degradedReason}")
+                    }
+                    when (val result = arm(
+                        alarmManager = alarmManager,
+                        context = context,
+                        scheduleId = schedule.id,
+                        label = schedule.title,
+                        triggerAtMillis = plan.triggerAtMillis
+                    )) {
+                        is ExactAlarmGate.ArmResult.Failed -> {
+                            Log.e(TAG, "Schedule '${schedule.title}' could not be armed: ${result.reason}")
+                            SchedulingResult.Failed(result.reason)
+                        }
+                        ExactAlarmGate.ArmResult.Exact,
+                        ExactAlarmGate.ArmResult.InexactFallback -> {
+                            Log.d(
+                                TAG,
+                                "Schedule '${schedule.title}' (${schedule.id}) -> $result at " +
+                                    "${plan.triggerAtMillis} (${ScheduleTime.format(
+                                        ScheduleTime.parseToMinutesOrNull(schedule.startTime) ?: 0
+                                    )} local)"
+                            )
+                            SchedulingResult.Armed(
+                                triggerAtMillis = plan.triggerAtMillis,
+                                usedInexactFallback = result == ExactAlarmGate.ArmResult.InexactFallback
+                            )
+                        }
+                    }
+                }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (exception: Exception) {
+            Log.e(TAG, "Unable to arm schedule '${schedule.title}' (${schedule.id})", exception)
+            SchedulingResult.Failed(exception.message ?: exception.javaClass.simpleName)
         }
     }
 

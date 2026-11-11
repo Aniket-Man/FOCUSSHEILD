@@ -28,7 +28,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -165,7 +164,7 @@ fun FloatingOverlayPermissionDialog(
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = FocusColors.Primary,
-                        contentColor = Color.White
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier

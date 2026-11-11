@@ -126,7 +126,8 @@ class SyncGateway(
      * the tick sees an empty outbox, and nothing is ever uploaded.
      */
     private suspend fun hasPendingWork(): Boolean =
-        SyncTracker.pendingCount.value > 0 || installState.profileDirty() || installState.prefsDirty()
+        SyncTracker.pendingCount.value > 0 || installState.profileDirty() || installState.prefsDirty() ||
+            currentAuthenticatedUid()?.let { installState.pendingProfilePhoto(it) != null } == true
 
     /**
      * Force a push of anything currently pending (Settings "Sync now", app-backgrounded, or the

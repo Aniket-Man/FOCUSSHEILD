@@ -7,6 +7,7 @@ import android.database.SQLException
 import android.util.Log
 import com.example.FocusShieldApp
 import com.example.data.local.entity.FocusScheduleEntity
+import com.example.data.repository.ScheduleMutationGate
 import com.example.feature.session.engine.FocusSessionManager
 import com.example.feature.session.service.FocusSessionForegroundService
 import kotlinx.coroutines.CancellationException
@@ -72,7 +73,10 @@ class FocusScheduleReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun handle(app: FocusShieldApp, context: Context, scheduleId: String) {
+    private suspend fun handle(app: FocusShieldApp, context: Context, scheduleId: String) =
+        ScheduleMutationGate.run { handleLocked(app, context, scheduleId) }
+
+    private suspend fun handleLocked(app: FocusShieldApp, context: Context, scheduleId: String) {
         val db = app.database
         val schedule = db.focusScheduleDao().getScheduleById(scheduleId)
 
@@ -171,15 +175,7 @@ class FocusScheduleReceiver : BroadcastReceiver() {
 
                     is ScheduledSessionFactory.Result.Ready -> {
                         val prefs = app.preferencesRepository.snapshot()
-                        val effectiveBlockedPackages = draft.draft.blockedAppPackages.ifEmpty {
-                            setOf(
-                                "com.google.android.youtube",
-                                "com.android.chrome",
-                                "com.opera.browser",
-                                "com.brave.browser",
-                                "com.instagram.android"
-                            )
-                        }
+                        val effectiveBlockedPackages = draft.draft.blockedAppPackages
                         val isStrict = prefs.isStrictModeDefault &&
                             draft.draft.mode != com.example.data.model.SessionMode.STOPWATCH
                         val started = sessionManager.startSession(
@@ -311,18 +307,24 @@ class FocusScheduleReceiver : BroadcastReceiver() {
 
                 val receiver = FocusScheduleReceiver()
                 for (schedule in enabledSchedules) {
+                    val expired = ScheduleMutationGate.run {
+                        val current = app.database.focusScheduleDao().getScheduleById(schedule.id)
+                            ?: return@run true
                     // 2. If a one-time schedule's window has completely passed, disable it cleanly
-                    if (!schedule.repeatEnabled && schedule.scheduledDateMillis > 0L) {
+                    if (!current.repeatEnabled && current.scheduledDateMillis > 0L) {
                         val oneTimeBounds = ScheduleValidation.resolveWindowBoundsForDate(
-                            schedule = schedule,
-                            referenceDateMillis = schedule.scheduledDateMillis
+                            schedule = current,
+                            referenceDateMillis = current.scheduledDateMillis
                         )
                         if (oneTimeBounds != null && nowMillis >= oneTimeBounds.endMillis) {
                             app.database.focusScheduleDao().setScheduleEnabled(schedule.id, false)
                             FocusScheduleAlarmScheduler.cancelFocusSchedule(context, schedule.id)
-                            continue
+                            return@run true
                         }
                     }
+                    false
+                    }
+                    if (expired) continue
 
                     // 3. If current time is inside this schedule's active [startTime, endTime) window,
                     // trigger it immediately (deduplicated per window occurrence).
@@ -330,6 +332,8 @@ class FocusScheduleReceiver : BroadcastReceiver() {
                         receiver.handle(app, context.applicationContext, schedule.id)
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Log.w(TAG, "Error in evaluateDueSchedulesInProcess: ${e.message}")
             }

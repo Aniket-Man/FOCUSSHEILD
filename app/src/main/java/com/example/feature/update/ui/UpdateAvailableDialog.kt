@@ -422,8 +422,8 @@ fun UpdatePushModal(
                         onClick = onInstallAndRestart,
                         shape = FocusShapes.button,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = FocusColors.EmeraldSuccess,
-                            contentColor = FocusColors.TextOnDark
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
                         ),
                         modifier = Modifier.testTag("update_modal_install_restart_button")
                     ) {
@@ -528,7 +528,7 @@ fun WhatsNewDialog(
                                 Text(
                                     text = "•",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.EmeraldSuccess,
+                                        color = FocusColors.EmeraldText,
                                         fontWeight = FontWeight.Bold
                                     )
                                 )

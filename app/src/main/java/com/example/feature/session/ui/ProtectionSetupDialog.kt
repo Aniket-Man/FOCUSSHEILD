@@ -1,10 +1,5 @@
 package com.example.feature.session.ui
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,12 +10,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.Check
@@ -36,28 +29,29 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.R
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
@@ -65,11 +59,8 @@ import com.example.core.permission.FocusPermissionManager
 import com.example.core.permission.ProtectionPermissionStatus
 
 /**
- * Educational setup & permission verification dialog shown before starting a protected session.
- * Clearly guides the student through granting the necessary Android permissions:
- * 1. "Display over other apps" (SYSTEM_ALERT_WINDOW)
- * 2. "Accessibility Service" (FocusAccessibilityService)
- * 3. "Notifications" (POST_NOTIFICATIONS)
+ * Educational setup and permission verification dialog shown before starting a protected session.
+ * It guides the student through the Android permissions protection actually uses.
  */
 @Composable
 fun ProtectionSetupDialog(
@@ -78,7 +69,9 @@ fun ProtectionSetupDialog(
     onConfirmStart: () -> Unit,
     onStartWithoutBlocking: () -> Unit,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    confirmLabel: String? = null,
+    dismissActionLabel: String? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -158,7 +151,7 @@ fun ProtectionSetupDialog(
         },
         title = {
             Text(
-                text = "Focus Shield Setup",
+                text = stringResource(R.string.session_protection_title),
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp
@@ -171,17 +164,16 @@ fun ProtectionSetupDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "To protect your deep focus and filter YouTube distractions during your session, Android requires two quick permissions:",
+                    text = stringResource(R.string.session_protection_body),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = FocusColors.TextSecondary,
                         fontSize = 13.5.sp
                     )
                 )
 
-                // 1. Overlay Permission Card
                 PermissionItemCard(
-                    title = "Display over other apps",
-                    description = "Shows the focus lock screen when a blocked app is opened.",
+                    title = stringResource(R.string.session_protection_overlay),
+                    description = stringResource(R.string.session_protection_overlay_body),
                     icon = Icons.Rounded.Layers,
                     isGranted = permissionStatus.isOverlayGranted,
                     isRequired = true,
@@ -192,12 +184,15 @@ fun ProtectionSetupDialog(
                     testTag = "overlay_permission_item"
                 )
 
-                var showAccessibilityTroubleshooting by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-
-                // 2. Accessibility Service Card
                 PermissionItemCard(
-                    title = "Accessibility Service",
-                    description = if (permissionStatus.isAccessibilityEnabled) "Enables YouTube Study Mode and blocks distracting apps & Shorts." else "Enables YouTube Study Mode & blocks Shorts. Tap to enable in Settings.",
+                    title = stringResource(R.string.session_protection_accessibility),
+                    description = stringResource(
+                        if (permissionStatus.isAccessibilityEnabled) {
+                            R.string.session_protection_accessibility_on
+                        } else {
+                            R.string.session_protection_accessibility_off
+                        }
+                    ),
                     icon = Icons.Rounded.Shield,
                     isGranted = permissionStatus.isAccessibilityEnabled,
                     isRequired = true,
@@ -208,19 +203,9 @@ fun ProtectionSetupDialog(
                     testTag = "accessibility_permission_item"
                 )
 
-                if (showAccessibilityTroubleshooting) {
-                    com.example.core.accessibility.AccessibilityTroubleshootingDialog(
-                        onDismissRequest = {
-                            showAccessibilityTroubleshooting = false
-                            onRefreshPermissions()
-                        }
-                    )
-                }
-
-                // 3. Background Persistence Card
                 PermissionItemCard(
-                    title = "Background Protection",
-                    description = "Keeps timers & blockers running if FocusShield is swiped from Recent Apps.",
+                    title = stringResource(R.string.session_protection_background),
+                    description = stringResource(R.string.session_protection_background_body),
                     icon = Icons.Rounded.Security,
                     isGranted = permissionStatus.isBatteryOptimizationIgnored,
                     isRequired = false,
@@ -231,15 +216,15 @@ fun ProtectionSetupDialog(
                     testTag = "battery_optimization_permission_item"
                 )
 
-                // 4. Exact alarms (optional, but the difference between "starts at 09:00" and
-                // "starts some time after 09:00" for automated schedules).
                 PermissionItemCard(
-                    title = "Exact alarms",
-                    description = if (permissionStatus.isExactAlarmGranted) {
-                        "Scheduled sessions start at their configured time."
-                    } else {
-                        "Android may delay automated schedules. Tap to allow \"Alarms & reminders\"."
-                    },
+                    title = stringResource(R.string.session_protection_exact_alarms),
+                    description = stringResource(
+                        if (permissionStatus.isExactAlarmGranted) {
+                            R.string.session_protection_exact_on
+                        } else {
+                            R.string.session_protection_exact_off
+                        }
+                    ),
                     icon = Icons.Rounded.Alarm,
                     isGranted = permissionStatus.isExactAlarmGranted,
                     isRequired = false,
@@ -253,10 +238,9 @@ fun ProtectionSetupDialog(
                     testTag = "exact_alarm_permission_item"
                 )
 
-                // 5. Notification Permission Card (Optional / Recommended)
                 PermissionItemCard(
-                    title = "Notifications",
-                    description = "Sends cycle timers and session complete alerts.",
+                    title = stringResource(R.string.session_protection_notifications),
+                    description = stringResource(R.string.session_protection_notifications_body),
                     icon = Icons.Rounded.Notifications,
                     isGranted = permissionStatus.isNotificationGranted,
                     isRequired = false,
@@ -280,13 +264,17 @@ fun ProtectionSetupDialog(
                 enabled = allMandatoryGranted,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = FocusColors.Primary,
-                    contentColor = Color.White
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 shape = FocusShapes.medium,
                 modifier = Modifier.testTag("confirm_start_protected_session_button")
             ) {
                 Text(
-                    text = if (allMandatoryGranted) "Start Protected Session" else "Enable Required Above",
+                    text = when {
+                        !allMandatoryGranted -> stringResource(R.string.session_protection_enable_required)
+                        confirmLabel != null -> confirmLabel
+                        else -> stringResource(R.string.session_protection_start)
+                    },
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -301,7 +289,8 @@ fun ProtectionSetupDialog(
                     modifier = Modifier.testTag("start_without_blocking_button")
                 ) {
                     Text(
-                        text = "Timer Only",
+                        text = dismissActionLabel
+                            ?: stringResource(R.string.session_protection_without_blockers),
                         color = FocusColors.TextSecondary,
                         fontSize = 12.sp
                     )
@@ -311,7 +300,10 @@ fun ProtectionSetupDialog(
                     onClick = onDismiss,
                     modifier = Modifier.testTag("cancel_setup_dialog_button")
                 ) {
-                    Text("Cancel", color = FocusColors.TextSecondary)
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = FocusColors.TextSecondary
+                    )
                 }
             }
         }
@@ -333,15 +325,27 @@ private fun PermissionItemCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(FocusShapes.medium)
-            .clickable(onClick = onClick)
+            .clickable(
+                enabled = !isGranted,
+                role = Role.Button,
+                onClick = onClick
+            )
             .testTag(testTag),
         shape = FocusShapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = if (isGranted) FocusColors.EmeraldSuccess.copy(alpha = 0.08f) else FocusColors.SurfaceVariant.copy(alpha = 0.5f)
+            containerColor = if (isGranted) {
+                FocusColors.EmeraldSuccess.copy(alpha = 0.08f)
+            } else {
+                FocusColors.SurfaceVariant.copy(alpha = 0.5f)
+            }
         ),
         border = BorderStroke(
             1.dp,
-            if (isGranted) FocusColors.EmeraldSuccess.copy(alpha = 0.3f) else FocusColors.CardBorderSubtle
+            if (isGranted) {
+                FocusColors.EmeraldSuccess.copy(alpha = 0.3f)
+            } else {
+                FocusColors.CardBorderSubtle
+            }
         )
     ) {
         Row(
@@ -360,7 +364,13 @@ private fun PermissionItemCard(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(CircleShape)
-                        .background(if (isGranted) FocusColors.EmeraldSuccess.copy(alpha = 0.15f) else FocusColors.Primary.copy(alpha = 0.12f)),
+                        .background(
+                            if (isGranted) {
+                                FocusColors.EmeraldSuccess.copy(alpha = 0.15f)
+                            } else {
+                                FocusColors.Primary.copy(alpha = 0.12f)
+                            }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -384,9 +394,9 @@ private fun PermissionItemCard(
                         if (isRequired && !isGranted) {
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "• Required",
+                                text = stringResource(R.string.session_protection_required),
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusColors.CoralWarning,
+                                    color = FocusColors.CoralText,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 )
@@ -419,14 +429,14 @@ private fun PermissionItemCard(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Check,
-                            contentDescription = "Granted",
+                            contentDescription = null,
                             tint = FocusColors.EmeraldSuccess,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = "Granted",
+                            text = stringResource(R.string.session_permission_granted),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.EmeraldSuccess,
+                                color = FocusColors.EmeraldText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -434,23 +444,20 @@ private fun PermissionItemCard(
                     }
                 }
             } else {
-                OutlinedButton(
-                    onClick = onClick,
-                    shape = FocusShapes.pill,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = FocusColors.Primary
-                    ),
-                    border = BorderStroke(1.dp, FocusColors.Primary.copy(alpha = 0.5f)),
-                    modifier = Modifier.height(32.dp)
+                Box(
+                    modifier = Modifier
+                        .clip(FocusShapes.pill)
+                        .border(1.dp, FocusColors.Primary.copy(alpha = 0.5f), FocusShapes.pill)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "Enable",
+                            text = stringResource(R.string.session_permission_enable),
                             style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusColors.Primary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.5.sp
                             )
@@ -458,6 +465,7 @@ private fun PermissionItemCard(
                         Icon(
                             imageVector = Icons.Rounded.OpenInNew,
                             contentDescription = null,
+                            tint = FocusColors.Primary,
                             modifier = Modifier.size(12.dp)
                         )
                     }

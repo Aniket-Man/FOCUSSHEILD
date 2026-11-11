@@ -60,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -82,9 +83,7 @@ import com.example.core.ui.FocusBottomNavigation
 import com.example.core.ui.FocusHeader
 import com.example.core.ui.FocusLottieAnimation
 import com.example.core.ui.FocusSessionCard
-import com.example.core.ui.ProgressCard
 import com.example.core.ui.QuickActionCard
-import com.example.core.ui.StatisticsOverview
 import com.example.core.ui.StudyAndUsageStatsRow
 import com.example.core.ui.StudyPlanRow
 import com.example.core.ui.TodayPlanSummaryCard
@@ -347,6 +346,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    val dockState = com.example.core.design.rememberFocusDockState()
     var showAddEditDialog by remember { mutableStateOf(false) }
     var editingPlan by remember { mutableStateOf<StudyPlanItem?>(null) }
     var planToDelete by remember { mutableStateOf<StudyPlanItem?>(null) }
@@ -376,7 +376,7 @@ fun HomeScreen(
                     .statusBarsPadding(),
                 // The floating bottom dock is drawn as an overlay, so content extends behind it,
                 // while the clearance padding ensures the final items rest above the dock.
-                contentPadding = PaddingValues(bottom = FocusCardStyle.BottomNavClearance + 20.dp + 48.dp),
+                contentPadding = PaddingValues(bottom = dockState.contentPadding),
                 // 10dp between items; the four sections above Today's Plan add another 10dp so their
                 // original 20dp rhythm is unchanged, while plan rows keep the tighter 10dp spacing.
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -631,7 +631,7 @@ fun HomeScreen(
                                 Text(
                                     text = "Time Overlap Detected: Some scheduled study blocks overlap in time.",
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = FocusColors.CoralWarning,
+                                        color = FocusColors.CoralText,
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 12.sp
                                     )
@@ -693,7 +693,9 @@ fun HomeScreen(
                     BottomTab.BLOCKS -> onNavigateToBlocksTab()
                 }
             },
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged(dockState::onSizeChanged)
         )
     }
 
@@ -765,7 +767,7 @@ fun HomeScreen(
                         planToDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = FocusColors.CoralWarning
+                        containerColor = FocusColors.CoralText
                     )
                 ) {
                     Text("Delete")
@@ -1055,7 +1057,7 @@ fun StudyPlanDialog(
                         Text(
                             text = "⚠️ Overlaps existing",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.CoralWarning,
+                                color = FocusColors.CoralText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -1067,7 +1069,7 @@ fun StudyPlanDialog(
                     Text(
                         text = timesError,
                         style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.CoralWarning,
+                            color = FocusColors.CoralText,
                             fontWeight = FontWeight.Medium,
                             fontSize = 11.sp
                         ),
@@ -1177,7 +1179,7 @@ fun TodayPhoneUsageVsFocusCard(
                         Text(
                             text = "$completedTimerSessions Sessions Online",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.EmeraldSuccess,
+                                color = FocusColors.EmeraldText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
                             )

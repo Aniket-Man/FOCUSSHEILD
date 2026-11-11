@@ -8,6 +8,9 @@ import com.example.data.local.entity.AppLimitSessionEntity
 import com.example.data.local.entity.DailyAppUsageEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -20,6 +23,18 @@ class AppLimitRepository(
     private val appLimitSessionDao: AppLimitSessionDao
 ) {
     private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    private val mutationMutex = Mutex()
+
+    private suspend fun mutate(block: suspend () -> AppLimitWriteResult): AppLimitWriteResult =
+        mutationMutex.withLock {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                AppLimitWriteResult.Failed(exception)
+            }
+        }
 
     // --- App-limit data is device-local in its entirety — the limit configuration, the daily usage
     // counters and the temporary usage sessions are all about what *this phone* should enforce, so
@@ -51,12 +66,16 @@ class AppLimitRepository(
         isEnabled: Boolean = true,
         isStrictOverride: Boolean = false,
         showRemindersBeforeLimit: Boolean = true,
-        emergencyUsesAllowed: Int = 1
-    ) {
+        emergencyUsesAllowed: Int = 1,
+        requireExisting: Boolean = false
+    ): AppLimitWriteResult = mutate {
+        if (packageName.isBlank() || appName.isBlank() || dailyLimitMinutes !in 1..1440 || emergencyUsesAllowed !in 0..10) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.INVALID)
+        }
         val existing = appLimitDao.getLimitByPackage(packageName)
+        if (requireExisting && existing == null) return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
         if (existing?.isStrictOverride == true) {
-            // Strict Mode is locked for this app: do not allow overwriting, disabling, or weakening the limit.
-            return
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
         val entity = AppLimitEntity(
             packageName = packageName,
@@ -68,14 +87,14 @@ class AppLimitRepository(
             emergencyUsesAllowed = emergencyUsesAllowed,
             streakDays = existing?.streakDays ?: 0,
             lastStreakDate = existing?.lastStreakDate ?: "",
+            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis()
         )
-        appLimitDao.insertOrUpdate(entity)
-        // Reset bypass status so re-adding/re-enabling works immediately
-        setBypassedForToday(packageName, bypassed = false)
-        try {
-            com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(entity)
-        } catch (_: Exception) {}
+        AppLimitWriteCompletion.run(
+            persist = { appLimitDao.insertOrUpdate(entity) },
+            { writeBypass(packageName, getTodayDateString(), false) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(entity) }
+        )
     }
 
     /**
@@ -88,67 +107,72 @@ class AppLimitRepository(
      *
      * In Strict Mode (`isStrictOverride == true`), deletion is strictly forbidden from any entry point.
      */
-    suspend fun deleteLimit(packageName: String): Boolean {
+    suspend fun deleteLimitResult(packageName: String): AppLimitWriteResult = mutate {
         val existing = appLimitDao.getLimitByPackage(packageName)
-        if (existing?.isStrictOverride == true) {
-            return false
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        if (existing.isStrictOverride) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
-        appLimitDao.deleteByPackage(packageName)
-        try {
-            com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName)
-        } catch (_: Exception) {}
-        return true
+        AppLimitWriteCompletion.run(
+            { appLimitDao.deleteByPackage(packageName) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDeleted(packageName) }
+        )
     }
 
-    suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean): Boolean {
+    suspend fun deleteLimit(packageName: String): Boolean = deleteLimitResult(packageName) is AppLimitWriteResult.Applied
+
+    suspend fun setLimitEnabledResult(packageName: String, isEnabled: Boolean): AppLimitWriteResult = mutate {
         val existing = appLimitDao.getLimitByPackage(packageName)
-        if (!isEnabled && existing?.isStrictOverride == true) {
-            return false
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        if (!isEnabled && existing.isStrictOverride) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
-        appLimitDao.setEnabled(packageName, isEnabled)
-
-        if (isEnabled) {
-            // Reset bypass status so re-enabling works immediately
-            setBypassedForToday(packageName, bypassed = false)
-        }
-
-        try {
+        val updated = existing.copy(isEnabled = isEnabled, updatedAt = System.currentTimeMillis())
+        AppLimitWriteCompletion.run({ appLimitDao.update(updated) }, {
+            if (isEnabled) writeBypass(packageName, getTodayDateString(), false)
+        }, {
             if (isEnabled) {
-                appLimitDao.getLimitByPackage(packageName)?.let {
-                    com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(it)
-                }
+                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(updated)
             } else {
                 // Disabling is not a delete: keep the configuration and its usage history, but
                 // retire the live session/timer/overlay state that belonged to the disabled limit.
                 com.example.feature.applimits.engine.AppLimitManager.instance.onLimitDisabled(packageName)
             }
-        } catch (_: Exception) {}
-        return true
+        })
     }
 
-    suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int) {
+    suspend fun setLimitEnabled(packageName: String, isEnabled: Boolean): Boolean =
+        setLimitEnabledResult(packageName, isEnabled) is AppLimitWriteResult.Applied
+
+    suspend fun updateDailyLimitMinutes(packageName: String, minutes: Int): AppLimitWriteResult = mutate {
+        if (minutes !in 1..1440) return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.INVALID)
         val existing = appLimitDao.getLimitByPackage(packageName)
-        if (existing?.isStrictOverride == true) {
-            return
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        if (existing.isStrictOverride) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
-        appLimitDao.updateDailyLimitMinutes(packageName, minutes)
-        try {
-            appLimitDao.getLimitByPackage(packageName)?.let {
-                com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(it)
-            }
-        } catch (_: Exception) {}
+        val updated = existing.copy(dailyLimitMinutes = minutes, updatedAt = System.currentTimeMillis())
+        AppLimitWriteCompletion.run({ appLimitDao.update(updated) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(updated) })
     }
 
-    suspend fun updateStrictMode(packageName: String, isStrict: Boolean) {
+    suspend fun updateStrictMode(packageName: String, isStrict: Boolean): AppLimitWriteResult = mutate {
         val existing = appLimitDao.getLimitByPackage(packageName)
-        if (existing?.isStrictOverride == true && !isStrict) {
-            return
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        if (existing.isStrictOverride && !isStrict) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
-        appLimitDao.updateStrictMode(packageName, isStrict)
+        val updated = existing.copy(isStrictOverride = isStrict, updatedAt = System.currentTimeMillis())
+        AppLimitWriteCompletion.run({ appLimitDao.update(updated) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(updated) })
     }
 
-    suspend fun updateRemindersSetting(packageName: String, showReminders: Boolean) {
-        appLimitDao.updateRemindersSetting(packageName, showReminders)
+    suspend fun updateRemindersSetting(packageName: String, showReminders: Boolean): AppLimitWriteResult = mutate {
+        val existing = appLimitDao.getLimitByPackage(packageName)
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        val updated = existing.copy(showRemindersBeforeLimit = showReminders, updatedAt = System.currentTimeMillis())
+        AppLimitWriteCompletion.run({ appLimitDao.update(updated) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onLimitSaved(updated) })
     }
 
     suspend fun recordDisciplineStreak(packageName: String) {
@@ -184,24 +208,23 @@ class AppLimitRepository(
     /**
      * Resets usedMillis to 0 for a specific app and date. Used by the "Reset Today's Usage" button.
      */
-    suspend fun resetUsage(packageName: String, dateString: String = getTodayDateString()) {
+    suspend fun resetUsage(packageName: String, dateString: String = getTodayDateString()): AppLimitWriteResult = mutate {
         val limit = appLimitDao.getLimitByPackage(packageName)
         if (limit?.isStrictOverride == true) {
-            return
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
         }
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
-        if (existing != null) {
-            val updated = existing.copy(
+        AppLimitWriteCompletion.run({
+            if (existing != null) dailyAppUsageDao.insertOrUpdate(existing.copy(
                 usedMillis = 0L,
                 emergencyUsedMillis = 0L,
                 emergencyUsesCount = 0,
+                isBypassedForToday = false,
                 lastActiveTimestamp = System.currentTimeMillis()
-            )
-            dailyAppUsageDao.insertOrUpdate(updated)
-        }
-        try {
+            ))
+        }, {
             com.example.feature.applimits.engine.AppLimitManager.instance.onUsageReset(packageName)
-        } catch (_: Exception) {}
+        })
     }
 
     /**
@@ -265,11 +288,41 @@ class AppLimitRepository(
         }
     }
 
-    suspend fun setBypassedForToday(packageName: String, dateString: String = getTodayDateString(), bypassed: Boolean) {
+    suspend fun bypassLimitForToday(packageName: String): AppLimitWriteResult = mutate {
         val limit = appLimitDao.getLimitByPackage(packageName)
-        if (bypassed && limit?.isStrictOverride == true) {
-            return
+            ?: return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
+        if (limit.isStrictOverride) return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
+        AppLimitWriteCompletion.run({ writeBypass(packageName, getTodayDateString(), true) },
+            { com.example.feature.applimits.engine.AppLimitManager.instance.onUsageReset(packageName) })
+    }
+
+    /**
+     * Writes (or clears) today's bypass. The result is reported instead of a bare Boolean so a
+     * strict lock, a removed limit and a failed write cannot be mistaken for "allowed".
+     */
+    suspend fun setBypassForTodayResult(
+        packageName: String,
+        dateString: String = getTodayDateString(),
+        bypassed: Boolean
+    ): AppLimitWriteResult = mutate {
+        val limit = appLimitDao.getLimitByPackage(packageName)
+        if (bypassed && limit == null) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.MISSING)
         }
+        if (bypassed && limit?.isStrictOverride == true) {
+            return@mutate AppLimitWriteResult.Rejected(AppLimitWriteResult.Reason.STRICT_LOCKED)
+        }
+        AppLimitWriteCompletion.run({ writeBypass(packageName, dateString, bypassed) })
+    }
+
+    suspend fun setBypassedForToday(
+        packageName: String,
+        dateString: String = getTodayDateString(),
+        bypassed: Boolean
+    ): Boolean = setBypassForTodayResult(packageName, dateString, bypassed) is AppLimitWriteResult.Applied
+
+    private suspend fun writeBypass(packageName: String, dateString: String, bypassed: Boolean) {
+        val limit = appLimitDao.getLimitByPackage(packageName)
         val existing = dailyAppUsageDao.getUsage(packageName, dateString)
         if (existing == null) {
             val newRecord = DailyAppUsageEntity(

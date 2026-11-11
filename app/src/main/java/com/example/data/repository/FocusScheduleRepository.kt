@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import android.util.Log
+import com.example.R
 import com.example.cloud.sync.CloudJson
 import com.example.cloud.sync.SyncTables
 import com.example.cloud.sync.SyncTracker
@@ -37,7 +38,11 @@ class FocusScheduleRepository(
     /** Outcome of a write attempt. */
     sealed interface SaveResult {
         /** Stored (possibly normalised). [schedule] reflects exactly what was persisted. */
-        data class Saved(val schedule: FocusScheduleEntity) : SaveResult
+        data class Saved(
+            val schedule: FocusScheduleEntity,
+            val defaultsFailure: Exception? = null,
+            val followUpFailure: Exception? = null
+        ) : SaveResult
 
         /** Not stored; [reason] is user-presentable ("End time must be after the start time"). */
         data class Rejected(val reason: String) : SaveResult
@@ -67,72 +72,83 @@ class FocusScheduleRepository(
         clearPreloadedDefaultSchedules()
     }
 
-    suspend fun addSchedule(schedule: FocusScheduleEntity): SaveResult {
-        val normalized = validateAndNormalize(schedule)
-            ?: return reject("addSchedule", schedule)
+    suspend fun addSchedule(schedule: FocusScheduleEntity, saveDefaults: suspend () -> Unit = {}): SaveResult =
+        save(schedule, updating = false, saveDefaults = saveDefaults)
 
-        rejectOverlap("addSchedule", normalized)?.let { return it }
+    suspend fun updateSchedule(schedule: FocusScheduleEntity, saveDefaults: suspend () -> Unit = {}): SaveResult =
+        save(schedule, updating = true, saveDefaults = saveDefaults)
 
-        dao.insertSchedule(normalized)
-        SyncTracker.enqueueUpsert(
-            SyncTables.FOCUS_SCHEDULES,
-            normalized.id,
-            CloudJson.focusScheduleToJson(normalized).toString()
-        )
-        // Invalid schedules scheduled nothing (and cancelled anything previously armed for this id),
-        // so the alarm state always matches the stored row.
-        context?.let { ctx ->
-            if (normalized.isEnabled) {
-                com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, normalized.id)
-                FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, normalized)
-                (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
-                    com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
-                }
-            } else {
-                FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, normalized.id)
+    private suspend fun save(schedule: FocusScheduleEntity, updating: Boolean, saveDefaults: suspend () -> Unit): SaveResult {
+        val result = ScheduleMutationGate.run {
+            val operation = if (updating) "updateSchedule" else "addSchedule"
+            val existing = dao.getScheduleById(schedule.id)
+            if (updating && existing == null) {
+                return@run SaveResult.Rejected(context?.getString(R.string.planner_missing_schedule_error)
+                    ?: "This schedule was removed. Close this editor and add a new schedule.")
             }
+            if (existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
+                val reason = context?.getString(R.string.planner_active_edit_error, existing.title)
+                    ?: "\"${existing.title}\" is running. Wait until its focus window ends, then edit it."
+                Log.w(TAG, "$operation rejected '${existing.title}': window is currently active")
+                return@run SaveResult.Rejected(reason)
+            }
+            // A restored new-editor ID updates its one saved row; never silently ignore new input.
+            val normalized = validateAndNormalize(schedule)?.let { value ->
+                if (existing != null) value.copy(createdAt = existing.createdAt) else value
+            } ?: return@run reject(operation, schedule)
+            rejectOverlap(operation, normalized)?.let { return@run it }
+            val completion = ScheduleWriteCompletion.run(
+                persistSchedule = { if (updating || existing != null) dao.updateSchedule(normalized) else dao.insertSchedule(normalized) },
+                saveDefaults = saveDefaults,
+                armSchedule = {
+                    context?.let { ctx ->
+                        if (normalized.isEnabled) {
+                            com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, normalized.id)
+                            when (val scheduled = FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, normalized)) {
+                                is FocusScheduleAlarmScheduler.SchedulingResult.Failed ->
+                                    throw IllegalStateException("Alarm could not be armed: ${scheduled.detail}")
+                                is FocusScheduleAlarmScheduler.SchedulingResult.Skipped ->
+                                    if (scheduled.reason != com.example.feature.session.notification.ScheduleAlarmPlanner.Reason.DISABLED) {
+                                        throw IllegalStateException("Alarm could not be armed: ${scheduled.detail}")
+                                    }
+                                is FocusScheduleAlarmScheduler.SchedulingResult.Armed -> Unit
+                            }
+                        } else FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, normalized.id)
+                    }
+                },
+                trackChange = { SyncTracker.enqueueUpsert(SyncTables.FOCUS_SCHEDULES, normalized.id,
+                    CloudJson.focusScheduleToJson(normalized).toString()) }
+            )
+            completion.defaultsFailure?.let { Log.e(TAG, "Schedule saved but protection defaults failed", it) }
+            completion.activationFailure?.let { Log.e(TAG, "Schedule saved but alarm setup failed", it) }
+            completion.trackingFailure?.let { Log.e(TAG, "Schedule saved but backup tracking failed", it) }
+            SaveResult.Saved(normalized, completion.defaultsFailure, completion.activationFailure ?: completion.trackingFailure)
         }
-        return SaveResult.Saved(normalized)
+        // Never evaluate while holding the gate: the receiver re-enters it and re-reads the row.
+        if (result !is SaveResult.Saved) return result
+        // The row has already committed. A watchdog failure is partial success, not a failed save.
+        return try {
+            evaluateDueSchedules()
+            result
+        } catch (exception: Exception) {
+            Log.e(TAG, "Schedule saved but immediate evaluation failed", exception)
+            result.copy(followUpFailure = result.followUpFailure ?: exception)
+        }
     }
 
-    suspend fun updateSchedule(schedule: FocusScheduleEntity): SaveResult {
-        val existing = dao.getScheduleById(schedule.id)
-        if (existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
-            val reason = "Active Schedule Locked: Cannot edit \"${existing.title}\" while its scheduled focus window is running."
-            Log.w(TAG, "updateSchedule rejected '${existing.title}' (${existing.id}): window is currently active")
-            return SaveResult.Rejected(reason)
-        }
-
-        val normalized = validateAndNormalize(schedule)
-            ?: return reject("updateSchedule", schedule)
-
-        rejectOverlap("updateSchedule", normalized)?.let { return it }
-
-        dao.updateSchedule(normalized)
-        SyncTracker.enqueueUpsert(
-            SyncTables.FOCUS_SCHEDULES,
-            normalized.id,
-            CloudJson.focusScheduleToJson(normalized).toString()
-        )
-        context?.let { ctx ->
-            if (normalized.isEnabled) {
-                com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, normalized.id)
-                FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, normalized)
-                (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
-                    com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
-                }
-            } else {
-                FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, normalized.id)
-            }
-        }
-        return SaveResult.Saved(normalized)
+    private suspend fun evaluateDueSchedules() {
+        context?.let { ctx -> (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
+            com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
+        } }
     }
 
     suspend fun toggleScheduleEnabled(id: String, isEnabled: Boolean): Boolean {
+        val applied = ScheduleMutationGate.run {
         val existing = dao.getScheduleById(id)
+        if (existing == null) return@run false
         if (!isEnabled && existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
             Log.w(TAG, "Refused to disable schedule '${existing.title}' ($id): window is currently active")
-            return false
+            return@run false
         }
         dao.setScheduleEnabled(id, isEnabled)
         val updated = dao.getScheduleById(id)
@@ -150,29 +166,37 @@ class FocusScheduleRepository(
                     // cancels and logs instead of arming a guessed time.
                     com.example.feature.session.notification.FocusScheduleReceiver.clearFiredSlot(ctx, updated.id)
                     FocusScheduleAlarmScheduler.scheduleSingleFocusSchedule(ctx, updated)
-                    (ctx.applicationContext as? com.example.FocusShieldApp)?.let { app ->
-                        com.example.feature.session.notification.FocusScheduleReceiver.evaluateDueSchedulesInProcess(app, ctx)
-                    }
                 } else {
                     FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, id)
                 }
             }
         }
-        return true
+        true
+        }
+        if (applied && isEnabled) {
+            try {
+                evaluateDueSchedules()
+            } catch (exception: Exception) {
+                // The enable flag and its alarm are already committed. A watchdog failure must not
+                // turn that successful write into a misleading "could not change schedule" error.
+                Log.e(TAG, "Schedule enabled but immediate evaluation failed", exception)
+            }
+        }
+        return applied
     }
 
-    suspend fun deleteSchedule(id: String): Boolean {
+    suspend fun deleteSchedule(id: String): Boolean = ScheduleMutationGate.run {
         val existing = dao.getScheduleById(id)
         if (existing != null && ScheduleValidation.isCurrentlyActiveWindow(existing)) {
             Log.w(TAG, "Refused to delete schedule '${existing.title}' ($id): window is currently active")
-            return false
+            return@run false
         }
         dao.deleteScheduleById(id)
         SyncTracker.enqueueDelete(SyncTables.FOCUS_SCHEDULES, id)
         context?.let { ctx ->
             FocusScheduleAlarmScheduler.cancelFocusSchedule(ctx, id)
         }
-        return true
+        true
     }
 
     /**
@@ -218,8 +242,8 @@ class FocusScheduleRepository(
         if (!normalized.isEnabled) return null
         val clash = ScheduleValidation.findOverlap(normalized, dao.getEnabledSchedules())
             ?: return null
-        val reason = "This overlaps \"${clash.title}\" " +
-            "(${clash.startTime}–${clash.endTime}). Adjust one of the two windows."
+        val reason = context?.getString(R.string.planner_overlap_error, clash.title, clash.startTime, clash.endTime)
+            ?: "This overlaps \"${clash.title}\" (${clash.startTime}–${clash.endTime}). Adjust one of the two windows."
         Log.w(
             TAG,
             "$operation rejected schedule '${normalized.title}' (${normalized.id}): " +

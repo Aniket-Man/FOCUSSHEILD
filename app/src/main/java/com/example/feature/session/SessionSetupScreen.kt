@@ -2,7 +2,6 @@ package com.example.feature.session
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,35 +12,33 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.OndemandVideo
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,26 +49,37 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
+import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
-import com.example.core.ui.FocusPrimaryButton
-import androidx.compose.ui.platform.LocalContext
 import com.example.core.permission.FocusPermissionManager
-import com.example.core.permission.ProtectionPermissionStatus
-import com.example.feature.session.ui.ProtectionSetupDialog
+import com.example.core.ui.FocusPrimaryButton
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.sessionModeSubtitle
+import com.example.core.ui.sessionModeTitle
 import com.example.data.model.SessionMode
+import com.example.feature.session.ui.ProtectionSetupDialog
 
 /**
  * Screen 4: Session Setup Screen.
- * Configures Focus settings (Duration, Subject, Topic, Goal, Pomodoro cycle options) and Protection shields.
+ * Configures focus duration, subject, topic, goal and protection shields.
  */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SessionSetupScreen(
     viewModel: SessionViewModel,
@@ -81,27 +89,32 @@ fun SessionSetupScreen(
 ) {
     val uiState by viewModel.setupState.collectAsStateWithLifecycle()
     val customSubjects by viewModel.customSubjects.collectAsStateWithLifecycle()
+    val isSavingProtection by viewModel.isSavingProtection.collectAsStateWithLifecycle()
+    val protectionError by viewModel.protectionError.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var showProtectionSetupDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    var permissionStatus by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(FocusPermissionManager.getPermissionStatus(context))
+    var showProtectionSetupDialog by remember { mutableStateOf(false) }
+    var permissionStatus by remember {
+        mutableStateOf(FocusPermissionManager.getPermissionStatus(context))
     }
 
     val refreshPermissions = {
-        permissionStatus = FocusPermissionManager.getPermissionStatus(context, requiresBlocking = uiState.isAppBlockingEnabled || uiState.isStudyChannelsEnabled)
+        permissionStatus = FocusPermissionManager.getPermissionStatus(
+            context,
+            requiresBlocking = uiState.isAppBlockingEnabled || uiState.isStudyChannelsEnabled
+        )
     }
 
-    val isAccessibilityActive by com.example.core.accessibility.AccessibilityHelper.isServiceEnabledFlow.collectAsStateWithLifecycle()
-    androidx.compose.runtime.LaunchedEffect(isAccessibilityActive) {
+    val isAccessibilityActive by AccessibilityHelper.isServiceEnabledFlow.collectAsStateWithLifecycle()
+    LaunchedEffect(isAccessibilityActive) {
         refreshPermissions()
     }
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                com.example.core.accessibility.AccessibilityHelper.updateState(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                AccessibilityHelper.updateState(context)
                 refreshPermissions()
             }
         }
@@ -138,50 +151,34 @@ fun SessionSetupScreen(
     val durationOptions = listOf(25, 45, 60, 90, 120)
     val pomodoroFocusOptions = listOf(20, 25, 30, 45, 50)
     val pomodoroBreakOptions = listOf(3, 5, 10)
-    val pomodoroLongBreakOptions = listOf(15, 20, 30)
     val cycleOptions = listOf(2, 3, 4, 6)
 
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.sm, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(FocusSpacing.xs))
-                Text(
-                    text = "Session Setup",
-                    style = androidx.compose.material3.MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary
-                    )
-                )
-            }
+            FocusScreenHeader(
+                title = stringResource(R.string.session_setup_title),
+                onBack = onNavigateBack,
+                modifier = Modifier.statusBarsPadding(),
+                backButtonModifier = Modifier.testTag("back_button")
+            )
         },
         bottomBar = {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(FocusColors.Surface)
+                    .navigationBarsPadding()
                     .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.base)
             ) {
                 FocusPrimaryButton(
-                    text = "START FOCUS SESSION",
+                    text = stringResource(R.string.session_setup_start),
                     onClick = {
-                        val requiresProtection = uiState.isAppBlockingEnabled || uiState.isStudyChannelsEnabled
-                        val hasMandatory = FocusPermissionManager.areMandatoryPermissionsGranted(context, requiresBlocking = requiresProtection)
+                        val requiresProtection =
+                            uiState.isAppBlockingEnabled || uiState.isStudyChannelsEnabled
+                        val hasMandatory = FocusPermissionManager.areMandatoryPermissionsGranted(
+                            context,
+                            requiresBlocking = requiresProtection
+                        )
 
                         if (requiresProtection && !hasMandatory) {
                             refreshPermissions()
@@ -198,7 +195,7 @@ fun SessionSetupScreen(
             }
         },
         containerColor = FocusColors.Background,
-        modifier = modifier.navigationBarsPadding().testTag("session_setup_screen")
+        modifier = modifier.testTag("session_setup_screen")
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -208,7 +205,7 @@ fun SessionSetupScreen(
                 .padding(horizontal = FocusSpacing.screenHorizontal),
             verticalArrangement = Arrangement.spacedBy(FocusSpacing.xl)
         ) {
-            // Selected Mode indicator banner
+            // Selected mode indicator
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -216,9 +213,7 @@ fun SessionSetupScreen(
                     .background(FocusColors.PrimaryContainer)
                     .padding(horizontal = FocusSpacing.base, vertical = 12.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = uiState.selectedMode.icon,
                         contentDescription = null,
@@ -227,8 +222,12 @@ fun SessionSetupScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Mode: ${uiState.selectedMode.title} (${uiState.selectedMode.subtitle})",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                        text = stringResource(
+                            R.string.session_setup_mode,
+                            sessionModeTitle(uiState.selectedMode),
+                            sessionModeSubtitle(uiState.selectedMode)
+                        ),
+                        style = MaterialTheme.typography.labelMedium.copy(
                             color = FocusColors.OnPrimaryContainer,
                             fontWeight = FontWeight.Bold
                         )
@@ -236,7 +235,12 @@ fun SessionSetupScreen(
                 }
             }
 
-            // Inline Validation Error Warning if any
+            FocusStatusMessage(
+                message = protectionError,
+                isError = true,
+                onDismiss = { viewModel.clearProtectionError() }
+            )
+
             if (uiState.validationError != null) {
                 Box(
                     modifier = Modifier
@@ -252,14 +256,14 @@ fun SessionSetupScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Warning,
-                            contentDescription = "Warning",
+                            contentDescription = null,
                             tint = FocusColors.CoralWarning,
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = uiState.validationError ?: "",
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
-                                color = FocusColors.CoralWarning,
+                            text = uiState.validationError.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = FocusColors.CoralText,
                                 fontWeight = FontWeight.SemiBold
                             )
                         )
@@ -270,21 +274,20 @@ fun SessionSetupScreen(
             // GROUP 1: FOCUS CONFIGURATION
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = "FOCUS CONFIGURATION",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                    text = stringResource(R.string.session_setup_focus_configuration),
+                    style = MaterialTheme.typography.labelMedium.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
                 )
 
-                // 1. Mode Specific Duration Controls
                 when (uiState.selectedMode) {
                     SessionMode.TIMER -> {
                         Column {
                             Text(
-                                text = "Target Duration",
-                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                text = stringResource(R.string.session_setup_target_duration),
+                                style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     color = FocusColors.TextPrimary
                                 )
@@ -299,7 +302,14 @@ fun SessionSetupScreen(
                                     FilterChip(
                                         selected = isSelected,
                                         onClick = { viewModel.setDuration(minutes) },
-                                        label = { Text("${minutes}m") },
+                                        label = {
+                                            Text(
+                                                stringResource(
+                                                    R.string.session_setup_minutes_short,
+                                                    minutes
+                                                )
+                                            )
+                                        },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = FocusColors.Primary,
                                             selectedLabelColor = Color.White,
@@ -339,8 +349,8 @@ fun SessionSetupScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = "Stopwatch mode tracks open-ended study time. Record laps as you solve problems and stop whenever you are done.",
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                                    text = stringResource(R.string.session_setup_stopwatch_body),
+                                    style = MaterialTheme.typography.bodySmall.copy(
                                         color = FocusColors.TextSecondary,
                                         lineHeight = 16.sp
                                     )
@@ -351,11 +361,10 @@ fun SessionSetupScreen(
 
                     SessionMode.POMODORO -> {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // Focus Interval
                             Column {
                                 Text(
-                                    text = "Focus Interval",
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                    text = stringResource(R.string.session_setup_focus_interval),
+                                    style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = FocusColors.TextPrimary
                                     )
@@ -377,7 +386,14 @@ fun SessionSetupScreen(
                                                     cycles = uiState.pomodoroCycles
                                                 )
                                             },
-                                            label = { Text("${minutes}m Focus") },
+                                            label = {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.session_setup_focus_minutes,
+                                                        minutes
+                                                    )
+                                                )
+                                            },
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = FocusColors.Primary,
                                                 selectedLabelColor = Color.White,
@@ -396,11 +412,10 @@ fun SessionSetupScreen(
                                 }
                             }
 
-                            // Short Break Interval
                             Column {
                                 Text(
-                                    text = "Short Break Interval",
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                    text = stringResource(R.string.session_setup_short_break_interval),
+                                    style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = FocusColors.TextPrimary
                                     )
@@ -422,7 +437,14 @@ fun SessionSetupScreen(
                                                     cycles = uiState.pomodoroCycles
                                                 )
                                             },
-                                            label = { Text("${minutes}m Rest") },
+                                            label = {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.session_setup_break_minutes,
+                                                        minutes
+                                                    )
+                                                )
+                                            },
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = FocusColors.EmeraldSuccess,
                                                 selectedLabelColor = Color.White,
@@ -441,11 +463,10 @@ fun SessionSetupScreen(
                                 }
                             }
 
-                            // Total Cycles
                             Column {
                                 Text(
-                                    text = "Total Pomodoro Cycles",
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                                    text = stringResource(R.string.session_setup_total_cycles),
+                                    style = MaterialTheme.typography.titleSmall.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = FocusColors.TextPrimary
                                     )
@@ -467,7 +488,14 @@ fun SessionSetupScreen(
                                                     cycles = count
                                                 )
                                             },
-                                            label = { Text("$count Cycles") },
+                                            label = {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.session_setup_cycles,
+                                                        count
+                                                    )
+                                                )
+                                            },
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = FocusColors.AmberOrange,
                                                 selectedLabelColor = Color.White,
@@ -489,12 +517,11 @@ fun SessionSetupScreen(
                     }
                 }
 
-                // 2. Subject Selection
                 if (customSubjects.isNotEmpty()) {
                     Column {
                         Text(
-                            text = "Subject Tag (Optional)",
-                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                            text = stringResource(R.string.session_setup_subject_optional),
+                            style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 color = FocusColors.TextPrimary
                             )
@@ -505,7 +532,10 @@ fun SessionSetupScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             customSubjects.forEach { subjectEntity ->
-                                val isSelected = uiState.selectedSubject.equals(subjectEntity.name, ignoreCase = true)
+                                val isSelected = uiState.selectedSubject.equals(
+                                    subjectEntity.name,
+                                    ignoreCase = true
+                                )
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { viewModel.toggleSubjectTag(subjectEntity.name) },
@@ -529,11 +559,10 @@ fun SessionSetupScreen(
                     }
                 }
 
-                // 3. Topic Selection / Input
                 Column {
                     Text(
-                        text = "Topic (Optional)",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                        text = stringResource(R.string.session_setup_topic_optional),
+                        style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = FocusColors.TextPrimary
                         )
@@ -542,7 +571,7 @@ fun SessionSetupScreen(
                     OutlinedTextField(
                         value = uiState.selectedTopic,
                         onValueChange = { viewModel.setTopic(it) },
-                        placeholder = { Text("Enter topic...") },
+                        placeholder = { Text(stringResource(R.string.session_setup_topic_example)) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -557,11 +586,10 @@ fun SessionSetupScreen(
                     )
                 }
 
-                // 4. Session Goal
                 Column {
                     Text(
-                        text = "Session Goal",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                        text = stringResource(R.string.session_setup_session_goal),
+                        style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = FocusColors.TextPrimary
                         )
@@ -570,7 +598,7 @@ fun SessionSetupScreen(
                     OutlinedTextField(
                         value = uiState.sessionGoal,
                         onValueChange = { viewModel.setSessionGoal(it) },
-                        placeholder = { Text("e.g. Solve 20 JEE Advanced questions") },
+                        placeholder = { Text(stringResource(R.string.session_setup_goal_example)) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -589,46 +617,49 @@ fun SessionSetupScreen(
             // GROUP 2: PROTECTION
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = "FOCUS PROTECTION",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelMedium.copy(
+                    text = stringResource(R.string.session_setup_focus_protection),
+                    style = MaterialTheme.typography.labelMedium.copy(
                         color = FocusColors.TextSecondary,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
                 )
 
-                // 1. Blocked Apps Switch
                 ProtectionRow(
-                    title = "Blocked Apps",
-                    subtitle = "24 distracting apps shielded automatically",
+                    title = stringResource(R.string.session_setup_blocked_apps),
+                    subtitle = stringResource(R.string.session_setup_blocked_apps_body),
                     icon = Icons.Rounded.Block,
                     iconColor = FocusColors.BlockedRed,
                     iconBackground = Color(0xFFFEECEB),
                     isChecked = uiState.isAppBlockingEnabled,
+                    enabled = !isSavingProtection,
                     onCheckedChange = { viewModel.toggleAppBlocking(it) },
                     testTag = "blocked_apps_switch"
                 )
 
-                // 2. Strict Mode Switch
-                ProtectionRow(
-                    title = "Strict Mode",
-                    subtitle = "Lockdown mode: no exit until session ends",
-                    icon = Icons.Rounded.Lock,
-                    iconColor = FocusColors.AmberOrange,
-                    iconBackground = Color(0xFFFEF5E7),
-                    isChecked = uiState.isStrictModeEnabled,
-                    onCheckedChange = { viewModel.toggleStrictMode(it) },
-                    testTag = "strict_mode_switch"
-                )
+                // Strict Mode is not available for open-ended Stopwatch sessions.
+                if (uiState.selectedMode != SessionMode.STOPWATCH) {
+                    ProtectionRow(
+                        title = stringResource(R.string.session_setup_strict_mode),
+                        subtitle = stringResource(R.string.session_setup_strict_body),
+                        icon = Icons.Rounded.Lock,
+                        iconColor = FocusColors.AmberOrange,
+                        iconBackground = Color(0xFFFEF5E7),
+                        isChecked = uiState.isStrictModeEnabled,
+                        enabled = !isSavingProtection,
+                        onCheckedChange = { viewModel.toggleStrictMode(it) },
+                        testTag = "strict_mode_switch"
+                    )
+                }
 
-                // 3. Study Channels Switch
                 ProtectionRow(
-                    title = "Approved Study Channels",
-                    subtitle = "Allow educational YouTube channels only",
+                    title = stringResource(R.string.session_setup_approved_channels),
+                    subtitle = stringResource(R.string.session_setup_approved_channels_body),
                     icon = Icons.Rounded.OndemandVideo,
                     iconColor = FocusColors.EmeraldSuccess,
                     iconBackground = Color(0xFFE8FAF3),
                     isChecked = uiState.isStudyChannelsEnabled,
+                    enabled = !isSavingProtection,
                     onCheckedChange = { viewModel.toggleStudyChannels(it) },
                     testTag = "study_channels_switch"
                 )
@@ -647,6 +678,7 @@ private fun ProtectionRow(
     iconColor: Color,
     iconBackground: Color,
     isChecked: Boolean,
+    enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     testTag: String
 ) {
@@ -662,10 +694,18 @@ private fun ProtectionRow(
             .clip(FocusShapes.medium)
             .background(FocusColors.Surface)
             .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.medium)
-            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = isChecked,
+                    enabled = enabled,
+                    role = Role.Switch,
+                    onValueChange = onCheckedChange
+                )
+                .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
+                .testTag(testTag),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -682,7 +722,7 @@ private fun ProtectionRow(
                 ) {
                     Icon(
                         imageVector = icon,
-                        contentDescription = title,
+                        contentDescription = null,
                         tint = iconColor,
                         modifier = Modifier.size(22.dp)
                     )
@@ -693,7 +733,7 @@ private fun ProtectionRow(
                 Column {
                     Text(
                         text = title,
-                        style = androidx.compose.material3.MaterialTheme.typography.titleSmall.copy(
+                        style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = FocusColors.TextPrimary,
                             fontSize = 14.sp
@@ -701,7 +741,7 @@ private fun ProtectionRow(
                     )
                     Text(
                         text = subtitle,
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                        style = MaterialTheme.typography.bodySmall.copy(
                             color = FocusColors.TextSecondary,
                             fontSize = 11.5.sp
                         )
@@ -711,14 +751,10 @@ private fun ProtectionRow(
 
             Switch(
                 checked = isChecked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = FocusColors.ToggleGreen,
-                    uncheckedThumbColor = Color.White,
-                    uncheckedTrackColor = FocusColors.CardBorder
-                ),
-                modifier = Modifier.testTag(testTag)
+                onCheckedChange = null,
+                enabled = enabled,
+                colors = FocusColors.SwitchColors,
+                modifier = Modifier.clearAndSetSemantics { }
             )
         }
     }

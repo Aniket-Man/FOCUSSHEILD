@@ -1,63 +1,40 @@
 package com.example.feature.profile
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.EmojiEvents
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.HourglassBottom
-import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.SystemUpdate
-import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,44 +42,48 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
+import com.example.R
+import com.example.cloud.auth.AuthState
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
 import com.example.core.accessibility.AccessibilityPermissionRequiredDialog
 import com.example.core.design.FocusColors
 import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
-import com.example.feature.settings.SettingsViewModel
-import com.example.feature.rewards.domain.RewardBadge
-import com.example.feature.rewards.ui.ProfileRewardsSection
-import com.example.feature.rewards.ui.ProfileRewardsSummarySection
-import com.example.feature.profile.ui.UserProfileAvatar
-import com.example.feature.profile.ui.EditProfileBottomSheet
-import com.example.FocusShieldApp
-import com.example.cloud.auth.AuthState
-import com.example.cloud.storage.ProfileImageUploader
+import com.example.core.ui.FocusActionRow
+import com.example.core.ui.FocusScreenHeader
+import com.example.core.ui.FocusStatusMessage
+import com.example.core.ui.FocusSwitchRow
+import com.example.core.util.ProfilePhotoStorage
+import com.example.core.util.TimeFormatter
 import com.example.feature.account.AccountViewModel
+import com.example.feature.profile.ui.EditProfileBottomSheet
+import com.example.feature.profile.ui.UserProfileAvatar
+import com.example.feature.rewards.domain.RewardBadge
+import com.example.feature.rewards.ui.ProfileRewardsSummarySection
+import com.example.feature.settings.SettingsViewModel
+import com.example.feature.update.domain.UpdateState
 import com.example.feature.update.ui.UpdateViewModel
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     settingsViewModel: SettingsViewModel,
@@ -119,734 +100,243 @@ fun ProfileScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val uiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var showEditProfileSheet by remember { mutableStateOf(false) }
-    var pendingAccessibilityPrompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
-
-    // Small red dot on "New Updates". It stays lit after "Later" and only clears on a successful
-    // install or an explicit mark-as-read (prompt.txt §7/§18).
-    val showUpdateDot by updateViewModel.showDot.collectAsStateWithLifecycle()
-
+    val state by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val saving by settingsViewModel.isSaving.collectAsStateWithLifecycle()
+    val profileSaveState by settingsViewModel.profileSaveState.collectAsStateWithLifecycle()
+    val operationError by settingsViewModel.operationError.collectAsStateWithLifecycle()
+    val strictError by settingsViewModel.strictLockMessage.collectAsStateWithLifecycle()
+    val adminActive by settingsViewModel.isDeviceAdminActive.collectAsStateWithLifecycle()
+    val pendingAdmin by settingsViewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
     val accountState by accountViewModel.uiState.collectAsStateWithLifecycle()
-    val cloudScope = rememberCoroutineScope()
-    val cloudUploader = remember(context) {
-        ProfileImageUploader(context, FocusShieldApp.instance.authRepository)
+    val showUpdateDot by updateViewModel.showDot.collectAsStateWithLifecycle()
+    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    var showEditor by rememberSaveable { mutableStateOf(false) }
+    var feedback by rememberSaveable { mutableStateOf<String?>(null) }
+    var feedbackIsError by rememberSaveable { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf<AccessibilityFeaturePromptInfo?>(null) }
+    val prefs = state.preferences
+    val adminLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        settingsViewModel.onDeviceAdminRequestResult()
     }
-    var cloudAvatarFileUri by remember { mutableStateOf<String?>(null) }
-
-    // On a restored device (authenticated, no local photo, but the account owns one) fetch the avatar
-    // into a private cache file so the hero renders the cloud image. Silent no-op in every other case.
-    val authUserId = (accountState.auth as? AuthState.Authenticated)?.userId
-    LaunchedEffect(authUserId, uiState.preferences.userPhotoUri) {
-        cloudAvatarFileUri = null
-        if (authUserId == null || uiState.preferences.userPhotoUri != null) return@LaunchedEffect
-        cloudAvatarFileUri = try {
-            cloudUploader.downloadOwnAvatarToCache(authUserId)?.let { "file://$it" }
-        } catch (_: Throwable) {
-            null
+    fun activateAdmin() {
+        try { adminLauncher.launch(settingsViewModel.getDeviceAdminIntent()) }
+        catch (exception: Exception) {
+            Log.w("Profile", "Unable to open device-admin settings", exception)
+            feedback = context.getString(R.string.profile_admin_error)
+            feedbackIsError = true
         }
     }
-
-    // After an authenticated profile save: wait for the local write, upload a new image (or delete a
-    // cleared one), and only then mark the profiles row dirty + request a sync.
-    val pushEditedProfileToCloud: (Job, String?, String?) -> Unit = { localWrite, photoBefore, photoAfter ->
-        val uid = (accountState.auth as? AuthState.Authenticated)?.userId
-        if (uid != null) {
-            cloudScope.launch {
-                localWrite.join()
-
-                val avatarConsistent: Boolean = when {
-                    photoAfter != null -> cloudUploader.uploadOwnImage(photoAfter)
-                    photoBefore != null -> cloudUploader.deleteOwnImage()
-                    else -> true
+    LaunchedEffect(pendingAdmin) {
+        if (pendingAdmin) {
+            settingsViewModel.onDeviceAdminRequestLaunched()
+            activateAdmin()
+        }
+    }
+    // The save runs in SettingsViewModel, so this effect also closes the recreated editor after a
+    // rotation instead of leaving it to submit stale values a second time.
+    LaunchedEffect(profileSaveState) {
+        when (val result = profileSaveState) {
+            is SettingsViewModel.ProfileSaveState.Saved -> {
+                showEditor = false
+                scope.launch { ProfilePhotoStorage.discardStagedCrop(context) }
+                feedbackIsError = result.followUpFailure != null
+                feedback = context.getString(when {
+                    result.followUpFailure != null -> R.string.profile_cloud_queue_error
+                    result.queuedForCloud -> R.string.profile_cloud_queued
+                    else -> R.string.profile_saved
+                })
+                result.followUpFailure?.let {
+                    Log.w("Profile", "Local profile saved but follow-up work failed", it)
                 }
-
-                if (!avatarConsistent) {
-                    // (1) Do NOT push a partial edit. Silence here is what lost people's photos.
-                    android.util.Log.w(
-                        "ProfileScreen",
-                        "Avatar step failed; profile edit kept local instead of syncing partially"
-                    )
-                    android.widget.Toast.makeText(
-                        context,
-                        "Your photo could not be uploaded, so this edit was saved on this device " +
-                            "only. Check your connection and save again to sync it.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    return@launch
-                }
-
-                runCatching { FocusShieldApp.instance.cloudInstallState.setProfileDirty(true) }
-                FocusShieldApp.instance.syncGateway.requestSync()
+                settingsViewModel.clearProfileSaveState()
             }
+            is SettingsViewModel.ProfileSaveState.Failed -> {
+                Log.e("Profile", "Profile save failed; previous profile retained", result.exception)
+                // Keep the editor open so the user can retry, and clear the state once the editor
+                // has consumed it as a dismissible message.
+            }
+            else -> Unit
         }
     }
-
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 settingsViewModel.checkAccessibilityStatus()
+                settingsViewModel.checkDeviceAdminStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
-        topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.testTag("profile_back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = FocusColors.TextPrimary
-                    )
+        topBar = { FocusScreenHeader(stringResource(R.string.profile_title), onNavigateBack,
+            Modifier.statusBarsPadding(), backButtonModifier = Modifier.testTag("profile_back_button")) },
+        containerColor = FocusColors.Background,
+        modifier = modifier.navigationBarsPadding().testTag("profile_screen")
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = FocusSpacing.screenHorizontal, vertical = FocusSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(FocusSpacing.xl)) {
+            item {
+                FocusStatusMessage(strictError ?: operationError, isError = true,
+                    onDismiss = { settingsViewModel.clearStrictLockMessage(); settingsViewModel.clearOperationError() })
+                FocusStatusMessage(feedback, isError = feedbackIsError, onDismiss = { feedback = null })
+            }
+            item {
+                ProfileCard {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                        // The edit button carries the action; the adjacent photo is decorative.
+                        UserProfileAvatar(prefs.userPhotoUri, prefs.userAvatarPreset, size = 64.dp)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                            Text(prefs.userName.ifBlank { stringResource(R.string.profile_default_name) },
+                                color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleLarge)
+                            Text(prefs.userMotto.ifBlank { stringResource(R.string.profile_default_motto) },
+                                color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                            if (prefs.userAcademicGoal.isNotBlank()) Text(stringResource(R.string.profile_academic_goal, prefs.userAcademicGoal),
+                                color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        IconButton({ showEditor = true }, enabled = !saving, modifier = Modifier.testTag("profile_edit_icon_button")) {
+                            Icon(Icons.Rounded.Edit, stringResource(R.string.profile_edit), tint = FocusColors.Primary)
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
+                        ProfileMetric(stringResource(R.string.profile_daily_goal), stringResource(R.string.profile_goal_duration,
+                            prefs.dailyGoalMinutes / 60, prefs.dailyGoalMinutes % 60))
+                        ProfileMetric(stringResource(R.string.profile_lifetime_focus), TimeFormatter.formatElapsedCompact(state.allTimeStudyTimeMillis))
+                        ProfileMetric(stringResource(R.string.profile_badges), stringResource(R.string.profile_badge_count,
+                            state.badgeUnlockTimes.size, RewardBadge.ALL_BADGES.size))
+                    }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Scholar Profile",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 20.sp
-                    )
-                )
+            }
+            item {
+                ProfileNavigationRow(stringResource(R.string.profile_account),
+                    stringResource(if (accountState.auth is AuthState.Authenticated) R.string.profile_account_signed_in else R.string.profile_account_local),
+                    Icons.Rounded.CloudDone, onNavigateToAccount, "profile_account_nav_row")
+            }
+            item {
+                ProfileRewardsSummarySection(totalLifetimeStudyMillis = state.allTimeStudyTimeMillis,
+                    allTimeStudyTimeFormatted = state.formattedAllTimeStudyTime, claimedRewardIds = prefs.claimedRewardIds,
+                    badgeUnlockTimes = state.badgeUnlockTimes, onNavigateToAllRewards = onNavigateToRewards,
+                    onClaimReward = { if (!saving) settingsViewModel.claimReward(it) })
+            }
+            item {
+                ProfileSectionTitle(stringResource(R.string.profile_theme_section))
+                ThemeShifterCard(prefs.themeMode, settingsViewModel::updateThemeMode, enabled = !saving)
+            }
+            item {
+                ProfileSectionTitle(stringResource(R.string.profile_history_section))
+                ProfileNavigationRow(stringResource(R.string.profile_history), stringResource(R.string.profile_history_body),
+                    Icons.Rounded.History, onNavigateToHistory, "profile_session_history_row")
+            }
+            item {
+                ProfileSectionTitle(stringResource(R.string.profile_protection_section))
+                Surface(color = FocusColors.Surface, shape = FocusShapes.card) {
+                    Column {
+                        FocusSwitchRow(stringResource(R.string.profile_uninstall), prefs.isBlockUninstallEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                    prompt = AccessibilityFeaturePromptInfo(context.getString(R.string.profile_uninstall),
+                                        context.getString(R.string.profile_uninstall_permission), onGranted = { settingsViewModel.updateBlockUninstall(true) })
+                                } else settingsViewModel.updateBlockUninstall(enabled)
+                            }, enabled = !saving, modifier = Modifier.testTag("profile_prevent_uninstall_switch"),
+                            description = stringResource(when {
+                                prefs.isBlockUninstallEnabled && adminActive -> R.string.profile_uninstall_active
+                                prefs.isBlockUninstallEnabled -> R.string.profile_uninstall_pending
+                                else -> R.string.profile_uninstall_off
+                            }))
+                        if (prefs.isBlockUninstallEnabled && !adminActive) FocusActionRow(stringResource(R.string.profile_activate_admin), ::activateAdmin)
+                    }
+                }
+                ProfileNavigationRow(stringResource(R.string.profile_channels), stringResource(R.string.profile_channels_body),
+                    Icons.Rounded.SmartDisplay, onNavigateToStudyChannels, "profile_study_channels_row")
+                ProfileNavigationRow(stringResource(R.string.profile_strict), stringResource(R.string.profile_strict_body),
+                    Icons.Rounded.Security, onNavigateToStrictMode, "profile_strict_mode_row")
+                Surface(color = FocusColors.Surface, shape = FocusShapes.card) {
+                    FocusActionRow(stringResource(R.string.settings_accessibility), { AccessibilityHelper.openAccessibilitySettings(context) },
+                        value = stringResource(if (state.isAccessibilityEnabled) R.string.settings_service_enabled else R.string.settings_service_disabled),
+                        description = stringResource(R.string.settings_accessibility_body), modifier = Modifier.testTag("profile_accessibility_row"))
+                }
+            }
+            item {
+                ProfileSectionTitle(stringResource(R.string.settings_about_section))
+                val updateDescription = when (val update = updateState) {
+                    is UpdateState.Downloaded -> stringResource(R.string.profile_update_downloaded, update.info.versionName)
+                    is UpdateState.Downloading -> stringResource(R.string.profile_update_downloading)
+                    is UpdateState.UpdateAvailable -> stringResource(R.string.profile_update_available, update.info.versionName)
+                    else -> stringResource(R.string.profile_update_check)
+                }
+                ProfileNavigationRow(stringResource(R.string.profile_updates), updateDescription, Icons.Rounded.SystemUpdate,
+                    onNavigateToUpdates, "profile_updates_row", showBadge = showUpdateDot)
+                ProfileCard {
+                    Text(stringResource(R.string.settings_app_version, BuildConfig.VERSION_NAME), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.settings_about_body), color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+    if (showEditor) EditProfileBottomSheet(
+        currentName = prefs.userName, currentPhotoUri = prefs.userPhotoUri, currentAvatarPreset = prefs.userAvatarPreset,
+        currentMotto = prefs.userMotto, currentAcademicGoal = prefs.userAcademicGoal, currentDailyGoalMinutes = prefs.dailyGoalMinutes,
+        saving = profileSaveState is SettingsViewModel.ProfileSaveState.Saving,
+        saveError = (profileSaveState as? SettingsViewModel.ProfileSaveState.Failed)
+            ?.let { context.getString(R.string.profile_save_error) },
+        onDismissSaveError = settingsViewModel::clearProfileSaveState,
+        onDismiss = {
+            if (profileSaveState !is SettingsViewModel.ProfileSaveState.Saving) {
+                showEditor = false
+                scope.launch { ProfilePhotoStorage.discardStagedCrop(context) }
             }
         },
-        containerColor = FocusColors.Background,
-        modifier = modifier.testTag("profile_screen")
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 600.dp),
-                contentPadding = PaddingValues(bottom = FocusSpacing.xxl),
-                verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)
-            ) {
-                // Profile Card Hero
-                item {
-                    val prefs = uiState.preferences
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                            .clip(FocusShapes.card)
-                            .background(FocusColors.Surface)
-                            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                            .padding(18.dp)
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Avatar with upload badge
-                                UserProfileAvatar(
-                                    photoUri = prefs.userPhotoUri ?: cloudAvatarFileUri,
-                                    avatarPresetId = prefs.userAvatarPreset,
-                                    size = 64.dp,
-                                    showEditBadge = true,
-                                    onEditClick = { showEditProfileSheet = true }
-                                )
-
-                                Spacer(modifier = Modifier.width(16.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = prefs.userName.ifBlank { "Focus Scholar" },
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = FocusColors.TextPrimary,
-                                            fontSize = 18.sp
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = prefs.userMotto.ifBlank { "Deep Work & Daily Mastery" },
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = FocusColors.TextSecondary,
-                                            fontSize = 12.sp
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (prefs.userAcademicGoal.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "🎯 ${prefs.userAcademicGoal}",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.Primary,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 11.sp
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    onClick = { showEditProfileSheet = true },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(FocusColors.SurfaceVariant)
-                                        .testTag("profile_edit_icon_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Edit,
-                                        contentDescription = "Edit Profile",
-                                        tint = FocusColors.Primary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Quick Stats Pill Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = FocusColors.SurfaceSubtle,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text(
-                                            text = "${prefs.dailyGoalMinutes / 60}h Target",
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = FocusColors.TextPrimary,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "Daily Goal",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.TextMuted,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = FocusColors.SurfaceSubtle,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text(
-                                            text = uiState.formattedAllTimeStudyTime,
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = FocusColors.AmberOrange,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "Lifetime Focus",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.TextMuted,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = FocusColors.SurfaceSubtle,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text(
-                                            text = "${uiState.badgeUnlockTimes.size} / ${RewardBadge.ALL_BADGES.size}",
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = FocusColors.EmeraldSuccess,
-                                                fontSize = 12.sp
-                                            )
-                                        )
-                                        Text(
-                                            text = "Badges Won",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = FocusColors.TextMuted,
-                                                fontSize = 10.sp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Account & Cloud Backup (optional; local-first until the user signs in)
-                item {
-                    val authenticated = accountState.auth is AuthState.Authenticated
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                    ) {
-                        ProfileNavigationRow(
-                            title = "Account & Cloud Backup",
-                            subtitle = if (authenticated) {
-                                "Cloud backup on • Manage your account, sync, or sign out"
-                            } else {
-                                "Optional — everything stays on this device until you sign in"
-                            },
-                            icon = if (authenticated) Icons.Rounded.CloudDone else Icons.Rounded.Shield,
-                            iconTint = if (authenticated) FocusColors.EmeraldSuccess else FocusColors.Primary,
-                            onClick = onNavigateToAccount,
-                            testTag = "profile_account_nav_row"
-                        )
-                    }
-                }
-
-                // Rewards & Milestones Summary (Current Achieved & Upcoming Badges only)
-                item {
-                    ProfileRewardsSummarySection(
-                        totalLifetimeStudyMillis = uiState.allTimeStudyTimeMillis,
-                        allTimeStudyTimeFormatted = uiState.formattedAllTimeStudyTime,
-                        claimedRewardIds = uiState.preferences.claimedRewardIds,
-                        badgeUnlockTimes = uiState.badgeUnlockTimes,
-                        onNavigateToAllRewards = onNavigateToRewards,
-                        onClaimReward = { rewardId -> settingsViewModel.claimReward(rewardId) }
-                    )
-                }
-
-                // Theme Switcher Section (Dark / Light / System)
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                    ) {
-                        Text(
-                            text = "APP THEME & APPEARANCE",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        ThemeShifterCard(
-                            currentThemeMode = uiState.preferences.themeMode,
-                            onThemeSelected = { mode ->
-                                settingsViewModel.updateThemeMode(mode)
-                            }
-                        )
-                    }
-                }
-
-                // Session History Section
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                    ) {
-                        Text(
-                            text = "STUDY LOGS & SESSIONS",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        ProfileNavigationRow(
-                            title = "Session History",
-                            subtitle = "View detailed logs, subject distribution, and duration records",
-                            icon = Icons.Rounded.History,
-                            iconTint = FocusColors.Primary,
-                            onClick = onNavigateToHistory,
-                            testTag = "profile_session_history_row"
-                        )
-                    }
-                }
-
-                // Shield Protections & Controls
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal)
-                    ) {
-                        Text(
-                            text = "SHIELD & CONTROLS",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        val isDeviceAdminActive by settingsViewModel.isDeviceAdminActive.collectAsStateWithLifecycle()
-                        val pendingDeviceAdminRequest by settingsViewModel.pendingDeviceAdminRequest.collectAsStateWithLifecycle()
-                        val deviceAdminLauncher = rememberLauncherForActivityResult(
-                            contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-                        ) {
-                            settingsViewModel.onDeviceAdminRequestResult()
-                        }
-
-                        LaunchedEffect(pendingDeviceAdminRequest) {
-                            if (pendingDeviceAdminRequest) {
-                                // Consume before launching, so a rotation cannot relaunch the
-                                // device-admin screen (issue #28).
-                                settingsViewModel.onDeviceAdminRequestLaunched()
-                                deviceAdminLauncher.launch(settingsViewModel.getDeviceAdminIntent())
-                            }
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            // Prevent Uninstall Protection Switch — activates Device Admin
-                            ProfileSwitchRow(
-                                title = "Prevent App Uninstall",
-                                subtitle = when {
-                                    uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive ->
-                                        "Active — Device Admin enabled, uninstallation blocked"
-                                    uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive ->
-                                        "Pending — Tap to activate Device Admin protection"
-                                    else ->
-                                        "Disabled — Prevents deleting FocusShield during study"
-                                },
-                                icon = Icons.Rounded.Shield,
-                                iconTint = when {
-                                    uiState.preferences.isBlockUninstallEnabled && isDeviceAdminActive -> FocusColors.EmeraldSuccess
-                                    uiState.preferences.isBlockUninstallEnabled && !isDeviceAdminActive -> FocusColors.AmberOrange
-                                    else -> FocusColors.Primary
-                                },
-                                checked = uiState.preferences.isBlockUninstallEnabled,
-                                onCheckedChange = { checked ->
-                                    if (checked && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                        pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                            title = "App Uninstall Protection",
-                                            description = "system settings to prevent FocusShield from being uninstalled",
-                                            onGranted = { settingsViewModel.updateBlockUninstall(true) }
-                                        )
-                                    } else {
-                                        settingsViewModel.updateBlockUninstall(checked)
-                                    }
-                                },
-                                testTag = "profile_prevent_uninstall_switch"
-                            )
-
-                            ProfileNavigationRow(
-                                title = "Approved Study Channels",
-                                subtitle = "YouTube Study Mode allowlist & Shorts blocker",
-                                icon = Icons.Rounded.SmartDisplay,
-                                iconTint = Color(0xFFEF4444),
-                                onClick = onNavigateToStudyChannels,
-                                testTag = "profile_study_channels_row"
-                            )
-
-                            ProfileNavigationRow(
-                                title = "Strict Mode Rules & Anti-Cheating",
-                                subtitle = "Configure emergency pauses, break rules, and PIN protection",
-                                icon = Icons.Rounded.Security,
-                                iconTint = FocusColors.Primary,
-                                onClick = onNavigateToStrictMode,
-                                testTag = "profile_strict_mode_row"
-                            )
-
-                            ProfileNavigationRow(
-                                title = "Accessibility Blocker Service",
-                                subtitle = if (uiState.isAccessibilityEnabled) "Service active and ready" else "Permission required — Tap to enable",
-                                icon = if (uiState.isAccessibilityEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
-                                iconTint = if (uiState.isAccessibilityEnabled) FocusColors.EmeraldSuccess else FocusColors.CoralWarning,
-                                onClick = { AccessibilityHelper.openAccessibilitySettings(context) },
-                                testTag = "profile_accessibility_row"
-                            )
-
-                        }
-                    }
-                }
-
-                // About FocusShield
-                item {
-                    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
-                    val updateSubtitle = when (val s = updateState) {
-                        is com.example.feature.update.domain.UpdateState.Downloaded ->
-                            "Update v${s.info.versionName} downloaded — Tap to install & restart"
-                        is com.example.feature.update.domain.UpdateState.Downloading ->
-                            "Downloading update…"
-                        is com.example.feature.update.domain.UpdateState.UpdateAvailable ->
-                            "New release v${s.info.versionName} available on GitHub"
-                        else ->
-                            "Check GitHub Releases for new FocusShield versions"
-                    }
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = FocusSpacing.screenHorizontal),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "ABOUT FOCUSSHIELD",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = FocusColors.TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                letterSpacing = 0.5.sp
-                            )
-                        )
-                        ProfileNavigationRow(
-                            title = "New Updates",
-                            subtitle = updateSubtitle,
-                            icon = Icons.Rounded.SystemUpdate,
-                            iconTint = if (showUpdateDot) FocusColors.EmeraldSuccess else FocusColors.Primary,
-                            onClick = onNavigateToUpdates,
-                            testTag = "profile_updates_row",
-                            showBadge = showUpdateDot
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(FocusShapes.card)
-                                .background(FocusColors.Surface)
-                                .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-                                .padding(FocusSpacing.lg)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    androidx.compose.foundation.Image(
-                                        painter = androidx.compose.ui.res.painterResource(com.example.R.drawable.ic_focus_shield_app_icon),
-                                        contentDescription = "FocusShield Logo",
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "FocusShield v1.3",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = FocusColors.TextPrimary
-                                        )
-                                    )
-                                    Text(
-                                        text = "Secure Study & Anti-Distraction Engine",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = FocusColors.TextSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(FocusSpacing.xl))
-                }
-            }
-        }
-
-        // Edit Profile Sheet
-        if (showEditProfileSheet) {
-            val prefs = uiState.preferences
-            EditProfileBottomSheet(
-                currentName = prefs.userName,
-                currentPhotoUri = prefs.userPhotoUri,
-                currentAvatarPreset = prefs.userAvatarPreset,
-                currentMotto = prefs.userMotto,
-                currentAcademicGoal = prefs.userAcademicGoal,
-                currentDailyGoalMinutes = prefs.dailyGoalMinutes,
-                onDismiss = { showEditProfileSheet = false },
-                onSaveProfile = { name, photo, preset, motto, goal, minutes ->
-                    // The returned Job is the local DataStore write; the cloud push awaits it so it
-                    // can never snapshot pre-edit values (issue #29).
-                    val localWrite = settingsViewModel.updateUserProfile(
-                        userName = name,
-                        photoUri = photo,
-                        avatarPreset = preset,
-                        motto = motto,
-                        academicGoal = goal,
-                        dailyGoalMinutes = minutes
-                    )
-                    pushEditedProfileToCloud(localWrite, prefs.userPhotoUri, photo)
-                }
+        onSaveProfile = { name, photo, preset, motto, goal, minutes ->
+            settingsViewModel.saveProfileWithPhoto(
+                userName = name,
+                selectedPhoto = photo,
+                avatarPreset = preset,
+                motto = motto,
+                academicGoal = goal,
+                dailyGoalMinutes = minutes
             )
         }
-
-        // Dynamic Accessibility Permission Prompt Dialog
-        pendingAccessibilityPrompt?.let { promptInfo ->
-            AccessibilityPermissionRequiredDialog(
-                featureTitle = promptInfo.title,
-                featureDescription = promptInfo.description,
-                onDismissRequest = { pendingAccessibilityPrompt = null },
-                onPermissionGranted = {
-                    promptInfo.onGranted()
-                    pendingAccessibilityPrompt = null
-                }
-            )
-        }
-    }
-}
-
-/**
- * 3-way Theme Shifter Card (Light / Dark / System Default) with smooth selection transitions
- */
-@Composable
-fun ThemeShifterCard(
-    currentThemeMode: String,
-    onThemeSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val modes = listOf(
-        Triple("LIGHT", "Light", Icons.Rounded.LightMode),
-        Triple("DARK", "Dark", Icons.Rounded.DarkMode),
-        Triple("SYSTEM", "System", Icons.Rounded.BrightnessAuto)
     )
+    prompt?.let { info -> AccessibilityPermissionRequiredDialog(info.title, info.description,
+        featureKey = info.featureKey, onDismissRequest = { prompt = null }, onPermissionGranted = { info.onGranted(); prompt = null }) }
+}
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .padding(14.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Palette,
-                    contentDescription = null,
-                    tint = FocusColors.Primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Theme Mode",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 14.sp
-                    )
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = when (currentThemeMode) {
-                        "LIGHT" -> "Light"
-                        "DARK" -> "Dark"
-                        else -> "System Default"
-                    },
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.Primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                )
-            }
+@Composable
+private fun ProfileSectionTitle(title: String) {
+    Text(title, color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(bottom = FocusSpacing.sm).semantics { heading() })
+}
 
-            // 3 Segmented Pill Buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(FocusColors.SurfaceSubtle)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                modes.forEach { (modeKey, title, icon) ->
-                    val isSelected = currentThemeMode.equals(modeKey, ignoreCase = true)
+@Composable
+private fun ProfileCard(content: @Composable () -> Unit) {
+    Surface(color = FocusColors.Surface, shape = FocusShapes.card, border = BorderStroke(1.dp, FocusColors.CardBorderSubtle)) {
+        Column(Modifier.fillMaxWidth().padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.lg)) { content() }
+    }
+}
 
-                    val containerColor by animateColorAsState(
-                        targetValue = if (isSelected) FocusColors.Primary else Color.Transparent,
-                        animationSpec = tween(durationMillis = 200),
-                        label = "theme_btn_container_$modeKey"
-                    )
+@Composable
+private fun ProfileMetric(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+        Text(label, color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
+        Text(value, color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"))
+    }
+}
 
-                    val contentColor by animateColorAsState(
-                        targetValue = if (isSelected) FocusColors.TextOnDark else FocusColors.TextSecondary,
-                        animationSpec = tween(durationMillis = 200),
-                        label = "theme_btn_content_$modeKey"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(containerColor)
-                            .clickable { onThemeSelected(modeKey) }
-                            .testTag("theme_shifter_${modeKey.lowercase()}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = title,
-                                tint = contentColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = contentColor,
-                                    fontSize = 13.sp
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ThemeShifterCard(currentThemeMode: String, onThemeSelected: (String) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Surface(color = FocusColors.Surface, shape = FocusShapes.card, modifier = modifier) {
+        Column(Modifier.fillMaxWidth().padding(FocusSpacing.base), verticalArrangement = Arrangement.spacedBy(FocusSpacing.sm)) {
+            Text(stringResource(R.string.profile_theme_mode), color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+            FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.sm),
+                verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                listOf("LIGHT" to R.string.profile_theme_light, "DARK" to R.string.profile_theme_dark, "SYSTEM" to R.string.profile_theme_system).forEach { (key, label) ->
+                    FilterChip(selected = currentThemeMode.equals(key, ignoreCase = true), onClick = { onThemeSelected(key) }, enabled = enabled,
+                        label = { Text(stringResource(label)) }, modifier = Modifier.testTag("theme_shifter_${key.lowercase(java.util.Locale.ROOT)}"))
                 }
             }
         }
@@ -854,165 +344,16 @@ fun ThemeShifterCard(
 }
 
 @Composable
-private fun ProfileSwitchRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    testTag: String = ""
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
-            .testTag(testTag)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(iconTint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
-                )
+private fun ProfileNavigationRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, testTag: String, showBadge: Boolean = false) {
+    Surface(onClick = onClick, color = FocusColors.Surface, shape = FocusShapes.card, modifier = Modifier.fillMaxWidth().testTag(testTag)) {
+        Row(Modifier.padding(FocusSpacing.base), horizontalArrangement = Arrangement.spacedBy(FocusSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = FocusColors.Primary, modifier = Modifier.size(24.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FocusSpacing.xs)) {
+                Text(title, color = FocusColors.TextPrimary, style = MaterialTheme.typography.titleSmall)
+                Text(subtitle, color = FocusColors.TextSecondary, style = MaterialTheme.typography.bodyMedium)
+                if (showBadge) Text(stringResource(R.string.update_available_status), color = FocusColors.EmeraldText, style = MaterialTheme.typography.labelMedium)
             }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 15.sp
-                    )
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 12.sp
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = FocusColors.TextOnDark,
-                    checkedTrackColor = FocusColors.ToggleGreen,
-                    uncheckedThumbColor = FocusColors.TextMuted,
-                    uncheckedTrackColor = FocusColors.SurfaceSubtle
-                ),
-                modifier = Modifier.testTag("${testTag}_switch")
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProfileNavigationRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    onClick: () -> Unit,
-    testTag: String = "",
-    /**
-     * Small red notification dot beside the title — used by "New Updates" to signal a downloaded
-     * release the user has not installed or dismissed yet. It is deliberately tinted on the icon tile
-     * rather than replacing it, so the row stays readable at a glance.
-     */
-    showBadge: Boolean = false
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(FocusShapes.card)
-            .background(FocusColors.Surface)
-            .border(1.dp, FocusColors.CardBorderSubtle, FocusShapes.card)
-            .clickable(onClick = onClick)
-            .padding(horizontal = FocusSpacing.base, vertical = 14.dp)
-            .testTag(testTag)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier.size(38.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(iconTint.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = iconTint,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                if (showBadge) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(FocusColors.BlockedRed)
-                            .border(1.5.dp, FocusColors.Surface, CircleShape)
-                            .testTag("${testTag}_badge")
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = FocusColors.TextPrimary,
-                        fontSize = 15.sp
-                    )
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 12.sp
-                    )
-                )
-            }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                contentDescription = null,
-                tint = FocusColors.TextMuted,
-                modifier = Modifier.size(20.dp)
-            )
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = FocusColors.TextSecondary, modifier = Modifier.size(24.dp))
         }
     }
 }

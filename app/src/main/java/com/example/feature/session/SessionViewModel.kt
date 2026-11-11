@@ -3,6 +3,8 @@ package com.example.feature.session
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.FocusShieldApp
+import com.example.R
+import com.example.data.preferences.FocusPreferences
 import com.example.core.util.TimeFormatter
 import com.example.data.local.entity.SubjectEntity
 import com.example.data.model.SessionMode
@@ -26,6 +28,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.util.Collections
 
 enum class SpecialAppOption {
@@ -42,7 +48,7 @@ data class SessionSetupState(
     val youtubeOption: SpecialAppOption = SpecialAppOption.BLOCK_COMPLETELY,
     val browserOption: SpecialAppOption = SpecialAppOption.BLOCK_COMPLETELY,
     val isDistractingMasterEnabled: Boolean = true,
-    val blockedAppPackages: Set<String> = setOf("com.google.android.youtube", "com.android.chrome", "com.opera.browser", "com.brave.browser", "com.instagram.android"),
+    val blockedAppPackages: Set<String> = emptySet(),
     val isYouTubeStudyModeEnabled: Boolean = false,
     val isBrowserStudyModeEnabled: Boolean = false,
     val isBlockHomeScreenEnabled: Boolean = false,
@@ -68,7 +74,8 @@ data class SessionSetupState(
     val pomodoroLongBreakMinutes: Int = 15,
     val pomodoroCycles: Int = 4,
     // Validation message
-    val validationError: String? = null
+    val validationError: String? = null,
+    val isLoadingPreferences: Boolean = true
 )
 
 data class ActiveSessionUiState(
@@ -110,6 +117,47 @@ class SessionViewModel(
 
     private val _setupState = MutableStateFlow(SessionSetupState())
     val setupState: StateFlow<SessionSetupState> = _setupState
+    private val _isSavingProtection = MutableStateFlow(false)
+    val isSavingProtection = _isSavingProtection.asStateFlow()
+    private val _protectionError = MutableStateFlow<String?>(null)
+    val protectionError = _protectionError.asStateFlow()
+
+    fun clearProtectionError() { _protectionError.value = null }
+
+    private fun applyProtectionPreferences(prefs: FocusPreferences) {
+        _setupState.update { state -> state.copy(
+            isAppBlockingEnabled = if (state.planId == null) prefs.isAppBlockingDefault else state.isAppBlockingEnabled,
+            isStrictModeEnabled = prefs.isStrictModeDefault,
+            strictModeConfig = state.strictModeConfig.copy(enabled = prefs.isStrictModeDefault),
+            isStudyChannelsEnabled = prefs.isStudyChannelsDefault,
+            isBlockUninstallEnabled = prefs.isBlockUninstallEnabled,
+            isBlockSplitScreenEnabled = prefs.isBlockSplitScreenEnabled,
+            isBlockFloatingWindowEnabled = prefs.isBlockFloatingWindowEnabled,
+            isLoadingPreferences = false
+        ) }
+    }
+
+    private fun changeProtection(weakening: Boolean = false, block: suspend () -> Unit) {
+        if (_isSavingProtection.value || _setupState.value.isLoadingPreferences) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            _isSavingProtection.value = true
+            try {
+                val active = sessionManager.activeSession.value
+                val strictSession = active != null && (active.isRunning || active.isPaused) && active.isStrictModeEnabled
+                if (weakening && strictSession) {
+                    _protectionError.value = FocusShieldApp.instance.getString(R.string.protection_locked_error)
+                } else withContext(NonCancellable) {
+                    block()
+                    // Publish the committed values, not an optimistic switch position.
+                    applyProtectionPreferences(FocusShieldApp.instance.preferencesRepository.preferencesFlow.first())
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (exception: Exception) {
+                android.util.Log.e("SessionViewModel", "Unable to save protection settings", exception)
+                _protectionError.value = FocusShieldApp.instance.getString(R.string.protection_save_error)
+            } finally { _isSavingProtection.value = false }
+        }
+    }
 
     private val _pendingSessionSummary = MutableStateFlow<SessionSummaryData?>(null)
     /**
@@ -117,6 +165,13 @@ class SessionViewModel(
      * Contains all metrics taken during the session, allowing the user to Save or Discard.
      */
     val pendingSessionSummary: StateFlow<SessionSummaryData?> = _pendingSessionSummary.asStateFlow()
+
+    private val _isSavingSession = MutableStateFlow(false)
+    val isSavingSession = _isSavingSession.asStateFlow()
+    private val _sessionSaveError = MutableStateFlow<String?>(null)
+    val sessionSaveError = _sessionSaveError.asStateFlow()
+
+    fun clearSessionSaveError() { _sessionSaveError.value = null }
 
     private val _customSubjects = MutableStateFlow<List<SubjectEntity>>(emptyList())
     val customSubjects: StateFlow<List<SubjectEntity>> = _customSubjects.asStateFlow()
@@ -140,24 +195,21 @@ class SessionViewModel(
         viewModelScope.launch {
             try {
                 FocusShieldApp.instance.preferencesRepository.preferencesFlow.collectLatest { prefs ->
-                    _setupState.update {
-                        it.copy(
-                            isBlockUninstallEnabled = prefs.isBlockUninstallEnabled,
-                            isBlockSplitScreenEnabled = prefs.isBlockSplitScreenEnabled,
-                            isBlockFloatingWindowEnabled = prefs.isBlockFloatingWindowEnabled
-                        )
-                    }
+                    applyProtectionPreferences(prefs)
                 }
-            } catch (e: Exception) { }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (exception: Exception) {
+                _setupState.update { it.copy(isLoadingPreferences = false) }
+                android.util.Log.e("SessionViewModel", "Protection preferences are unavailable", exception)
+            }
         }
 
-        // Observe active app limits from AppLimitRepository and merge into setupState.blockedAppPackages
+        // Session blocks and daily app limits are independent. Never add app-limit packages here.
         viewModelScope.launch {
             try {
-                FocusShieldApp.instance.appLimitRepository.getActiveLimitsFlow().collectLatest { limits ->
-                    val limitPkgs = limits.filter { it.isEnabled }.map { it.packageName }.toSet()
-                    if (limitPkgs.isNotEmpty()) {
-                        _setupState.update { it.copy(blockedAppPackages = it.blockedAppPackages + limitPkgs) }
+                FocusShieldApp.instance.blockedAppRepository.enabledBlockedApps.collectLatest { apps ->
+                    _setupState.update { state ->
+                        if (state.planId == null) state.copy(blockedAppPackages = apps.map { it.packageName }.toSet()) else state
                     }
                 }
             } catch (e: Exception) {
@@ -328,7 +380,7 @@ class SessionViewModel(
         blockNotifications: Boolean = false
     ) {
         _setupState.update {
-            val effectiveBlocked = if (blockedAppPackages.isNotEmpty()) blockedAppPackages else it.blockedAppPackages
+            val effectiveBlocked = blockedAppPackages
             it.copy(
                 selectedMode = SessionMode.TIMER,
                 selectedSubject = subjectName,
@@ -339,7 +391,7 @@ class SessionViewModel(
                 blockedAppPackages = effectiveBlocked,
                 isAppBlockingEnabled = effectiveBlocked.isNotEmpty(),
                 blockNotifications = blockNotifications,
-                sessionGoal = if (notes.isNotBlank()) notes else if (startTime.isNotBlank() && endTime.isNotBlank()) "Scheduled Focus Window ($startTime - $endTime)" else "Focus on $subjectName ($topicName)",
+                sessionGoal = notes,
                 planId = planId,
                 startTime = startTime,
                 endTime = endTime,
@@ -368,49 +420,77 @@ class SessionViewModel(
         }
     }
 
+    fun clearSetupError() {
+        _setupState.update { it.copy(validationError = null) }
+    }
+
+    private fun showSetupError(messageRes: Int) {
+        _setupState.update {
+            it.copy(validationError = FocusShieldApp.instance.getString(messageRes))
+        }
+    }
+
     fun addCustomSubjectTag(name: String) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) return
-        _setupState.update { it.copy(selectedSubject = trimmed) }
+        // The subject is free text for this session, so keep the selection even if saving the
+        // reusable tag fails; tell the user that only the saved library entry is missing.
+        _setupState.update { it.copy(selectedSubject = trimmed, validationError = null) }
+        val existing = _customSubjects.value.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
+        if (existing != null) return
         viewModelScope.launch {
             try {
-                val existing = _customSubjects.value.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
-                if (existing == null) {
-                    FocusShieldApp.instance.subjectRepository.addSubject(trimmed)
-                }
-            } catch (e: Exception) { }
+                FocusShieldApp.instance.subjectRepository.addSubject(trimmed)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("SessionViewModel", "Unable to add subject tag", exception)
+                showSetupError(R.string.session_subject_add_error)
+            }
         }
     }
 
     fun renameCustomSubjectTag(subject: SubjectEntity, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isBlank()) return
-        _setupState.update {
-            if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
-                it.copy(selectedSubject = trimmed)
-            } else {
-                it
-            }
-        }
+        // Rename first and only then move the selection. If the write fails the old tag (and the
+        // user's selected subject) stay exactly as they were.
         viewModelScope.launch {
             try {
                 FocusShieldApp.instance.subjectRepository.renameSubject(subject, trimmed)
-            } catch (e: Exception) { }
+                _setupState.update {
+                    if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
+                        it.copy(selectedSubject = trimmed)
+                    } else {
+                        it
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("SessionViewModel", "Unable to rename subject tag", exception)
+                showSetupError(R.string.session_subject_rename_error)
+            }
         }
     }
 
     fun deleteCustomSubjectTag(subject: SubjectEntity) {
-        _setupState.update {
-            if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
-                it.copy(selectedSubject = "")
-            } else {
-                it
-            }
-        }
         viewModelScope.launch {
             try {
                 FocusShieldApp.instance.subjectRepository.deleteSubject(subject.id)
-            } catch (e: Exception) { }
+                _setupState.update {
+                    if (it.selectedSubject.equals(subject.name, ignoreCase = true)) {
+                        it.copy(selectedSubject = "")
+                    } else {
+                        it
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("SessionViewModel", "Unable to delete subject tag", exception)
+                showSetupError(R.string.session_subject_delete_error)
+            }
         }
     }
 
@@ -440,84 +520,20 @@ class SessionViewModel(
     }
 
     fun toggleAppBlocking(enabled: Boolean) {
-        _setupState.update { it.copy(isAppBlockingEnabled = enabled) }
+        changeProtection(weakening = !enabled) { FocusShieldApp.instance.preferencesRepository.updateAppBlockingDefault(enabled) }
     }
 
     fun toggleStrictMode(enabled: Boolean) {
-        _setupState.update {
-            val newConfig = it.strictModeConfig.copy(enabled = enabled)
-            it.copy(
-                isStrictModeEnabled = enabled,
-                strictModeConfig = newConfig,
-                isBlockUninstallEnabled = if (enabled) true else it.isBlockUninstallEnabled
-            )
-        }
-        viewModelScope.launch {
-            try {
-                val prefs = FocusShieldApp.instance.preferencesRepository
-                prefs.updateProtectionDefaults(
-                    appBlocking = _setupState.value.isAppBlockingEnabled,
-                    strictMode = enabled,
-                    studyChannels = _setupState.value.isStudyChannelsEnabled
-                )
-                if (enabled) {
-                    prefs.updateBlockUninstall(true)
-                    if (_setupState.value.strictModeConfig.lockAppLimits) {
-                        val appLimitRepo = FocusShieldApp.instance.appLimitRepository
-                        appLimitRepo.getAllLimits().forEach { limit ->
-                            if (!limit.isStrictOverride) {
-                                appLimitRepo.updateStrictMode(limit.packageName, true)
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) { }
-        }
+        changeProtection(weakening = !enabled) { FocusShieldApp.instance.preferencesRepository.updateStrictModeDefault(enabled) }
     }
 
     fun updateStrictModeConfig(config: StrictModeConfig) {
-        _setupState.update {
-            it.copy(
-                isStrictModeEnabled = config.enabled,
-                strictModeConfig = config,
-                isBlockUninstallEnabled = if (config.enabled && config.blockUninstallTamper) true else it.isBlockUninstallEnabled,
-                isBlockSplitScreenEnabled = if (config.enabled && config.blockSplitScreen) true else it.isBlockSplitScreenEnabled,
-                isBlockFloatingWindowEnabled = if (config.enabled && config.blockFloatingWindow) true else it.isBlockFloatingWindowEnabled
-            )
-        }
-        viewModelScope.launch {
-            try {
-                val prefs = FocusShieldApp.instance.preferencesRepository
-                prefs.updateProtectionDefaults(
-                    appBlocking = _setupState.value.isAppBlockingEnabled,
-                    strictMode = config.enabled,
-                    studyChannels = _setupState.value.isStudyChannelsEnabled
-                )
-                if (config.enabled) {
-                    if (config.blockUninstallTamper) prefs.updateBlockUninstall(true)
-                    if (config.blockSplitScreen) prefs.updateBlockSplitScreen(true)
-                    if (config.blockFloatingWindow) prefs.updateBlockFloatingWindow(true)
-                    if (config.blockAdultAndDistractingWebsites) prefs.updateAutoAdultWebsiteBlocking(true)
-                    if (config.blockShortsAndReels) {
-                        prefs.updateYouTubeShortsBlocking(true)
-                        prefs.updateInstagramReelsBlocking(true)
-                        prefs.updateFacebookReelsBlocking(true)
-                    }
-                    if (config.lockAppLimits) {
-                        val appLimitRepo = FocusShieldApp.instance.appLimitRepository
-                        appLimitRepo.getAllLimits().forEach { limit ->
-                            if (!limit.isStrictOverride) {
-                                appLimitRepo.updateStrictMode(limit.packageName, true)
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) { }
-        }
+        // Legacy flags are retained in saved session snapshots, not offered as unenforced controls.
+        toggleStrictMode(config.enabled)
     }
 
     fun toggleStudyChannels(enabled: Boolean) {
-        _setupState.update { it.copy(isStudyChannelsEnabled = enabled) }
+        changeProtection(weakening = !enabled) { FocusShieldApp.instance.preferencesRepository.updateStudyChannelsDefault(enabled) }
     }
 
     fun setNumberOfBreaks(count: Int) {
@@ -540,20 +556,53 @@ class SessionViewModel(
     }
 
     fun setBrowserOption(option: SpecialAppOption) {
+        val previous = _setupState.value
         val isStudyMode = (option == SpecialAppOption.STUDY_MODE)
         _setupState.update {
             it.copy(
                 browserOption = option,
-                isBrowserStudyModeEnabled = isStudyMode
+                isBrowserStudyModeEnabled = isStudyMode,
+                validationError = null
             )
         }
         if (isStudyMode) {
-            viewModelScope.launch {
-                try {
-                    val prefs = FocusShieldApp.instance.preferencesRepository
-                    prefs.updateAutoAdultWebsiteBlocking(true)
-                    prefs.updateManualWebsiteBlocking(true)
-                } catch (e: Exception) { }
+            persistBrowserStudyProtection(
+                attemptedOption = option,
+                previousOption = previous.browserOption,
+                previousEnabled = previous.isBrowserStudyModeEnabled
+            )
+        }
+    }
+
+    private fun persistBrowserStudyProtection(
+        attemptedOption: SpecialAppOption,
+        previousOption: SpecialAppOption,
+        previousEnabled: Boolean
+    ) {
+        viewModelScope.launch {
+            try {
+                FocusShieldApp.instance.preferencesRepository
+                    .updateWebsiteBlockingDefaults(autoAdult = true, manual = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                android.util.Log.e("SessionViewModel", "Unable to enable browser study protection", exception)
+                _setupState.update { state ->
+                    // Only undo the state this write belongs to; a newer toggle must win.
+                    if (state.browserOption == attemptedOption && state.isBrowserStudyModeEnabled) {
+                        state.copy(
+                            browserOption = previousOption,
+                            isBrowserStudyModeEnabled = previousEnabled,
+                            validationError = FocusShieldApp.instance
+                                .getString(R.string.session_browser_study_error)
+                        )
+                    } else {
+                        state.copy(
+                            validationError = FocusShieldApp.instance
+                                .getString(R.string.session_browser_study_error)
+                        )
+                    }
+                }
             }
         }
     }
@@ -592,18 +641,21 @@ class SessionViewModel(
     }
 
     fun toggleBrowserStudyMode(enabled: Boolean) {
+        val previous = _setupState.value
+        val newOpt = if (enabled) SpecialAppOption.STUDY_MODE else SpecialAppOption.BLOCK_COMPLETELY
         _setupState.update {
-            val newOpt = if (enabled) SpecialAppOption.STUDY_MODE else SpecialAppOption.BLOCK_COMPLETELY
-            it.copy(isBrowserStudyModeEnabled = enabled, browserOption = newOpt)
+            it.copy(
+                isBrowserStudyModeEnabled = enabled,
+                browserOption = newOpt,
+                validationError = null
+            )
         }
         if (enabled) {
-            viewModelScope.launch {
-                try {
-                    val prefs = FocusShieldApp.instance.preferencesRepository
-                    prefs.updateAutoAdultWebsiteBlocking(true)
-                    prefs.updateManualWebsiteBlocking(true)
-                } catch (e: Exception) { }
-            }
+            persistBrowserStudyProtection(
+                attemptedOption = newOpt,
+                previousOption = previous.browserOption,
+                previousEnabled = previous.isBrowserStudyModeEnabled
+            )
         }
     }
 
@@ -612,9 +664,7 @@ class SessionViewModel(
     }
 
     fun toggleBlockUninstall(enabled: Boolean) {
-        _setupState.update { it.copy(isBlockUninstallEnabled = enabled) }
-        viewModelScope.launch {
-            try {
+        changeProtection(weakening = !enabled) {
                 FocusShieldApp.instance.preferencesRepository.updateBlockUninstall(enabled)
                 if (enabled) {
                     val engine = com.example.core.engine.AntiUninstallEngine.getInstance(
@@ -624,7 +674,6 @@ class SessionViewModel(
                         _pendingDeviceAdminRequest.value = true
                     }
                 }
-            } catch (e: Exception) { }
         }
     }
 
@@ -655,20 +704,14 @@ class SessionViewModel(
     }
 
     fun toggleBlockSplitScreen(enabled: Boolean) {
-        _setupState.update { it.copy(isBlockSplitScreenEnabled = enabled) }
-        viewModelScope.launch {
-            try {
+        changeProtection(weakening = !enabled) {
                 FocusShieldApp.instance.preferencesRepository.updateBlockSplitScreen(enabled)
-            } catch (e: Exception) { }
         }
     }
 
     fun toggleBlockFloatingWindow(enabled: Boolean) {
-        _setupState.update { it.copy(isBlockFloatingWindowEnabled = enabled) }
-        viewModelScope.launch {
-            try {
+        changeProtection(weakening = !enabled) {
                 FocusShieldApp.instance.preferencesRepository.updateBlockFloatingWindow(enabled)
-            } catch (e: Exception) { }
         }
     }
 
@@ -682,6 +725,10 @@ class SessionViewModel(
      */
     fun startSession(): Boolean {
         val state = _setupState.value
+        if (state.isLoadingPreferences || _isSavingProtection.value) {
+            _setupState.update { it.copy(validationError = FocusShieldApp.instance.getString(R.string.protection_wait_error)) }
+            return false
+        }
 
         val pomodoroConfig = PomodoroConfig.fromMinutes(
             focusMinutes = state.pomodoroFocusMinutes,
@@ -966,17 +1013,31 @@ class SessionViewModel(
     fun savePendingSession(onComplete: () -> Unit = {}) {
         val summary = _pendingSessionSummary.value
         val session = summary?.rawSession ?: sessionManager.activeSession.value
-        viewModelScope.launch {
-            if (session != null) {
-                persistSessionRecordSync(
-                    session = session,
-                    isCompleted = summary?.isCompleted ?: true,
-                    isCancelled = summary?.isCancelled ?: false,
-                    forcedActualDuration = summary?.pureStudyDurationMillis,
-                    // A restored summary can be saved hours after the session actually ended;
-                    // keep the history row on the time the user saw, not the save tap.
-                    forcedEndTime = summary?.endedAt?.takeIf { it > 0L }
-                )
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (_isSavingSession.value) return@launch
+            _isSavingSession.value = true
+            _sessionSaveError.value = null
+            val saved = if (session != null) {
+                withContext(NonCancellable) {
+                    persistSessionRecordSync(
+                        session = session,
+                        isCompleted = summary?.isCompleted ?: true,
+                        isCancelled = summary?.isCancelled ?: false,
+                        forcedActualDuration = summary?.pureStudyDurationMillis,
+                        // A restored summary can be saved hours after the session actually ended;
+                        // keep the history row on the time the user saw, not the save tap.
+                        forcedEndTime = summary?.endedAt?.takeIf { it > 0L }
+                    )
+                }
+            } else {
+                true
+            }
+            _isSavingSession.value = false
+            if (!saved) {
+                // Keep the summary (and its Save button) on screen so the user can retry instead
+                // of silently discarding a session that was never recorded.
+                _sessionSaveError.value = FocusShieldApp.instance.getString(R.string.session_save_error)
+                return@launch
             }
             resetToIdle(force = true)
             onComplete()
@@ -1015,15 +1076,19 @@ class SessionViewModel(
         } catch (e: Exception) { }
     }
 
+    /**
+     * Returns true when the session is safely recorded (or was already recorded). A failed write
+     * returns false and leaves the summary available for a retry.
+     */
     private suspend fun persistSessionRecordSync(
         session: FocusSession,
         isCompleted: Boolean,
         isCancelled: Boolean,
         forcedActualDuration: Long? = null,
         forcedEndTime: Long? = null
-    ) {
+    ): Boolean {
         // Atomic check-and-add: add() returns false if already present, preventing duplicate persists.
-        if (!persistedSessionIds.add(session.id)) return
+        if (!persistedSessionIds.add(session.id)) return true
 
         val calculatedStudyTime = com.example.feature.analytics.domain.ActualStudyTimeCalculator.calculatePureStudyDuration(
             session = session,
@@ -1047,8 +1112,14 @@ class SessionViewModel(
                 isCancelled = isCancelled,
                 endTime = forcedEndTime ?: System.currentTimeMillis()
             )
-        } catch (e: Exception) {
-            // Room persistence logged safely
+        } catch (cancelled: CancellationException) {
+            persistedSessionIds.remove(session.id)
+            throw cancelled
+        } catch (exception: Exception) {
+            // Let a retry try again instead of remembering a write that never landed.
+            persistedSessionIds.remove(session.id)
+            android.util.Log.e("SessionViewModel", "Unable to record completed session", exception)
+            return false
         }
 
         // Offer a scratch card reward for eligible completed sessions
@@ -1071,6 +1142,7 @@ class SessionViewModel(
                 // Scratch card is a bonus feature; never let it break session persistence
             }
         }
+        return true
     }
 
     // ---------------------------------------------------------------------

@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.example.R
+import com.example.data.repository.AppLimitWriteResult
 import com.example.feature.applimits.engine.AppLimitDurationOptions
 import com.example.feature.applimits.engine.AppLimitManager
 import com.example.feature.applimits.engine.AppLimitOverlayMode
@@ -623,7 +624,7 @@ object AppLimitFloatingOverlayManager {
         fun dp(value: Int): Int = (value * density).toInt()
 
         val title = TextView(context).apply {
-            text = "Enable Strict Mode for $appName"
+            text = context.getString(R.string.limits_lock_confirm_title, appName)
             textSize = 20f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -633,7 +634,7 @@ object AppLimitFloatingOverlayManager {
         contentWrapper.addView(title)
 
         val message = TextView(context).apply {
-            text = "• The 'Turn off' and 'Delete' options will be completely disabled.\n• Once the daily limit is exhausted, the app is strictly locked until tomorrow.\n• No emergency extensions are permitted."
+            text = context.getString(R.string.limits_lock_confirm_body)
             textSize = 14f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.START
@@ -642,7 +643,7 @@ object AppLimitFloatingOverlayManager {
         contentWrapper.addView(message)
 
         val enableBtn = TextView(context).apply {
-            text = "Turn On Strict Mode"
+            text = context.getString(R.string.limits_lock_action)
             textSize = 15f
             setTextColor(Color.BLACK)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -657,26 +658,20 @@ object AppLimitFloatingOverlayManager {
             ).apply { bottomMargin = dp(12) }
             setOnClickListener {
                 overlayScope.launch {
-                    val success = try {
-                        com.example.FocusShieldApp.instance.appLimitRepository.updateStrictMode(packageName, true)
-                        true
+                    val result = try {
+                        com.example.FocusShieldApp.instance.appLimitRepository
+                            .updateStrictMode(packageName, true)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to enable strict mode for $packageName", e)
-                        false
+                        Log.e(TAG, "Failed to lock app limit for $packageName", e)
+                        AppLimitWriteResult.Failed(e)
                     }
-                    if (success) {
-                        Toast.makeText(
-                            context,
-                            "Strict Mode enabled for $appName",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                    if (result is AppLimitWriteResult.Applied) {
+                        val message = if (result.followUpFailure != null)
+                            R.string.limits_lock_follow_up else R.string.limits_lock_saved
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                         onConfirmed()
                     } else {
-                        Toast.makeText(
-                            context,
-                            "Couldn't enable Strict Mode for $appName. Please try again.",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(context, R.string.limits_lock_error, Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -709,7 +704,7 @@ object AppLimitFloatingOverlayManager {
 
         // 1. Title & Message
         val title = TextView(context).apply {
-            text = "Turn off $appName limit?"
+            text = context.getString(R.string.limits_turn_off_today_title, appName)
             textSize = 20f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -719,7 +714,9 @@ object AppLimitFloatingOverlayManager {
         contentWrapper.addView(title)
 
         val message = TextView(context).apply {
-            text = "Turning off resets your $streakDays-day discipline streak for this app. Are you sure?"
+            text = context.resources.getQuantityString(
+                R.plurals.limits_turn_off_today_body, streakDays, appName, streakDays
+            )
             textSize = 15f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.CENTER
@@ -729,7 +726,7 @@ object AppLimitFloatingOverlayManager {
 
         // 2. Buttons: "For today" (disable), "Completely" (remove), "Cancel"
         val optionForToday = TextView(context).apply {
-            text = "Turn off for the rest of today"
+            text = context.getString(R.string.limits_turn_off_today_action)
             textSize = 15f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -751,20 +748,18 @@ object AppLimitFloatingOverlayManager {
                         true
                     }
                     if (!allowed) {
-                        Toast.makeText(
-                            context,
-                            "Strict Mode Active: $appName limit cannot be turned off.",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(context, R.string.limits_strict_locked, Toast.LENGTH_LONG).show()
                         onCancel()
                         return@launch
                     }
                     val success = AppLimitManager.instance.leaveBlockForToday(packageName, alsoDisableLimit = true)
                     if (success) {
+                        // Match the full-screen blocker: quitting a limit ends the current streak.
+                        AppLimitStrictModeEngine.instance.onUserQuitLimit(packageName)
                         hideOverlay()
                         Log.i(TAG, "Limit for $appName turned off for today (disabled)")
                     } else {
-                        Toast.makeText(context, "Strict Mode Active: Couldn't turn off limit", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, R.string.limits_turn_off_error, Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -772,7 +767,7 @@ object AppLimitFloatingOverlayManager {
         contentWrapper.addView(optionForToday)
 
         val optionCompletely = TextView(context).apply {
-            text = "Turn off completely"
+            text = context.getString(R.string.limits_turn_off_completely_action)
             textSize = 15f
             setTextColor(Color.parseColor("#F87171")) // soft red
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -794,17 +789,22 @@ object AppLimitFloatingOverlayManager {
                         true
                     }
                     if (!allowed) {
-                        Toast.makeText(
-                            context,
-                            "Strict Mode Active: You cannot delete $appName app limit while Strict Mode is active.",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(context, R.string.limits_strict_locked, Toast.LENGTH_LONG).show()
                         onCancel()
                         return@launch
                     }
-                    AppLimitManager.instance.removeLimitPermanently(packageName)
-                    hideOverlay()
-                    Log.i(TAG, "Limit for $appName removed permanently")
+                    val removed = AppLimitManager.instance.removeLimitPermanently(packageName)
+                    if (removed) {
+                        hideOverlay()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.limits_deleted_message, appName),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        Log.i(TAG, "Limit for $appName removed permanently")
+                    } else {
+                        Toast.makeText(context, R.string.limits_delete_complete_error, Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
@@ -834,16 +834,13 @@ object AppLimitFloatingOverlayManager {
             }
             isClickable = true
             isFocusable = true
+            contentDescription = context.getString(R.string.limits_lock_badge)
             setOnClickListener {
-                Toast.makeText(
-                    context,
-                    "Strict Mode Active: $appName limit is locked and cannot be turned off or deleted.",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(context, R.string.limits_strict_locked, Toast.LENGTH_LONG).show()
             }
         }
         pill.addView(TextView(context).apply {
-            text = "🔒 Strict Locked"
+            text = "🔒 ${context.getString(R.string.limits_lock_badge)}"
             textSize = 12f
             setTextColor(Color.parseColor("#F87171"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -937,6 +934,7 @@ object AppLimitFloatingOverlayManager {
             ).apply { topMargin = dp(context, 4) }
             isClickable = true
             isFocusable = true
+            contentDescription = context.getString(R.string.limits_lock_promo_title)
             setOnClickListener { onClick() }
         }
         banner.addView(TextView(context).apply {
@@ -944,7 +942,7 @@ object AppLimitFloatingOverlayManager {
             textSize = 14f
         })
         banner.addView(TextView(context).apply {
-            text = "Introducing Strict Mode"
+            text = context.getString(R.string.limits_lock_promo_title)
             textSize = 13f
             setTextColor(Color.parseColor("#FBBF24"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -958,7 +956,7 @@ object AppLimitFloatingOverlayManager {
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         )
         banner.addView(TextView(context).apply {
-            text = "Try now ›"
+            text = "${context.getString(R.string.limits_lock_promo_action)} ›"
             textSize = 13f
             setTextColor(Color.parseColor("#FBBF24"))
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)

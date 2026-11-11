@@ -16,6 +16,7 @@ import com.google.firebase.firestore.SetOptions
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
@@ -39,39 +40,45 @@ class ProfileImageUploader(
      * Uploads the picked image as the signed-in user's profile avatar to Firestore.
      * The image is safely scaled to 256x256 and base64 encoded.
      */
-    suspend fun uploadOwnImage(localPhotoUri: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun uploadOwnImage(localPhotoUri: String, expectedUserId: String? = null): Boolean = withContext(Dispatchers.IO) {
         val uid = authRepository.currentUserId() ?: return@withContext false
+        if (expectedUserId != null && expectedUserId != uid) return@withContext false
         val bytes = encodeAsJpeg(context.contentResolver, Uri.parse(localPhotoUri))
             ?: return@withContext false
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
 
-        val docRef = db.collection("users").document(uid)
         try {
+            val docRef = db.collection("users").document(uid)
             val payload = hashMapOf<String, Any>(
                 "userId" to uid,
-                "displayName" to (authRepository.currentDisplayName().takeUnless { it.isNullOrBlank() } ?: "User"),
-                "email" to (authRepository.currentUserEmail() ?: ""),
                 "photoBase64" to base64,
                 "updatedAt" to FieldValue.serverTimestamp()
             )
             docRef.set(payload, SetOptions.merge()).await()
 
             // Save locally to cache file
-            val cacheFile = avatarCacheFile(uid)
-            cacheFile.parentFile?.mkdirs()
-            cacheFile.writeBytes(bytes)
+            try {
+                val cacheFile = avatarCacheFile(uid)
+                cacheFile.parentFile?.mkdirs()
+                cacheFile.writeBytes(bytes)
+            } catch (exception: Exception) {
+                android.util.Log.w("ProfileImageUploader", "Avatar uploaded but cache write failed", exception)
+            }
             true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            handleFirestoreError(e, OperationType.UPDATE, "users/$uid")
             false
         }
     }
 
     /** Deletes the signed-in user's cloud avatar. */
-    suspend fun deleteOwnImage(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun deleteOwnImage(expectedUserId: String? = null): Boolean = withContext(Dispatchers.IO) {
         val uid = authRepository.currentUserId() ?: return@withContext false
-        val docRef = db.collection("users").document(uid)
+        if (expectedUserId != null && expectedUserId != uid) return@withContext false
         try {
+            val docRef = db.collection("users").document(uid)
             val payload = hashMapOf<String, Any?>(
                 "photoBase64" to null,
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -79,8 +86,10 @@ class ProfileImageUploader(
             docRef.set(payload, SetOptions.merge()).await()
             runCatching { avatarCacheFile(uid).delete() }
             true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            handleFirestoreError(e, OperationType.UPDATE, "users/$uid")
             false
         }
     }
@@ -90,8 +99,8 @@ class ProfileImageUploader(
      * Returns the file path or null if none is saved.
      */
     suspend fun downloadOwnAvatarToCache(userId: String): String? = withContext(Dispatchers.IO) {
-        val docRef = db.collection("users").document(userId)
         try {
+            val docRef = db.collection("users").document(userId)
             val snapshot = docRef.get().await()
             val base64 = snapshot.getString("photoBase64")
             if (base64.isNullOrBlank()) return@withContext null
@@ -101,16 +110,19 @@ class ProfileImageUploader(
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
             file.absolutePath
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.GET, docRef.path)
+            handleFirestoreError(e, OperationType.GET, "users/$userId")
             null
         }
     }
 
     private fun encodeAsJpeg(resolver: ContentResolver, uri: Uri): ByteArray? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: return null
+        val boundsStream = resolver.openInputStream(uri) ?: return null
+        // inJustDecodeBounds intentionally returns no bitmap; dimensions live in Options.
+        boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         var sample = 1
