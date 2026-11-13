@@ -207,7 +207,7 @@ fun YouTubeStudyChannelContent(
 
     val repo = try { FocusShieldApp.instance.studyChannelRepository } catch (e: Exception) { null }
     val approvedChannelsState = repo?.allChannels?.collectAsState(initial = emptyList())
-    val existingChannels = approvedChannelsState?.value ?: emptyList()
+    val existingChannels = (approvedChannelsState?.value ?: emptyList()).filter { it.isApproved }
 
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<YouTubeChannelSearchResult>>(emptyList()) }
@@ -591,7 +591,7 @@ fun YouTubeStudyChannelContent(
                         coroutineScope.launch {
                             try {
                                 val channelRepo = repo ?: error("Study channel repository unavailable")
-                                channelRepo.clearAllChannels()
+                                existingChannels.forEach { channelRepo.removeChannel(it.id) }
                                 report(context.getString(R.string.channel_cleared_message))
                             } catch (cancelled: CancellationException) {
                                 throw cancelled

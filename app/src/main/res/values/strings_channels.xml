@@ -1,5 +1,5 @@
 <resources>
-    <string name="channel_sheet_title">Add channels you study from and block the rest</string>
+    <string name="channel_sheet_title">Add study channels manually or from packs</string>
     <string name="channel_search_label">Search study channels</string>
     <string name="channel_search_example" translatable="false">Khan Academy or @PhysicsWallah</string>
     <string name="channel_list_title">Study channels</string>

@@ -29,8 +29,8 @@
     <string name="profile_activate_admin">Activate uninstall protection</string>
     <string name="profile_admin_error">Unable to open Android device-admin settings. Open Android settings and review FocusShield device-admin access.</string>
     <string name="profile_uninstall_permission">Android settings used to protect FocusShield against uninstall</string>
-    <string name="profile_channels">Approved study channels</string>
-    <string name="profile_channels_body">Manage the YouTube study-mode allowlist.</string>
+    <string name="profile_channels">YouTube Study Guard</string>
+    <string name="profile_channels_body">Review AI-learned and manual YouTube channels.</string>
     <string name="profile_strict">Strict-mode rules</string>
     <string name="profile_strict_body">Review protected sessions, break rules and anti-tampering settings.</string>
     <string name="profile_updates">App updates</string>

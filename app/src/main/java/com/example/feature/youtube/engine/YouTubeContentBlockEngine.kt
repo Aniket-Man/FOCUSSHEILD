@@ -93,9 +93,9 @@ object YouTubeContentBlockEngine {
         }
 
         val (clickedChannel, clickedTitle) = YouTubeNodeExtractor.extractClickedVideoCardIdentity(event)
-        if (!clickedChannel.isNullOrBlank()) {
-            pendingClickedChannel = clickedChannel
-            pendingClickedTitle = clickedTitle
+        if (!clickedChannel.isNullOrBlank() || !clickedTitle.isNullOrBlank()) {
+            if (!clickedChannel.isNullOrBlank()) pendingClickedChannel = clickedChannel
+            if (!clickedTitle.isNullOrBlank()) pendingClickedTitle = clickedTitle
             pendingClickedAt = currentTime
         }
 
@@ -130,18 +130,18 @@ object YouTubeContentBlockEngine {
      * or if autoplay transitions to a new video, the sandbox exits immediately whenever:
      *  - Shorts opens,
      *  - The watch page is exited,
-     *  - The strict watch-header video title changes to a different video, or
-     *  - An unapproved channel appears in the active portrait watch header.
-     *
-     * In Full-Screen mode (or when scrolling down the recommendation feed), the portrait watch header
-     * is hidden, so the sandbox remains active as long as the video title has not changed.
+     *  - The watch-header video title changes to a different video, or
+     *  - A blocked channel override appears in the active portrait watch header.
      */
     fun checkSandboxStillValid(
         rootNode: AccessibilityNodeInfo?,
         event: AccessibilityEvent?,
         approvedChannelIds: Set<String>,
         approvedChannelNames: Set<String>,
-        currentTime: Long = System.currentTimeMillis()
+        blockedChannelIds: Set<String> = emptySet(),
+        blockedChannelNames: Set<String> = emptySet(),
+        currentTime: Long = System.currentTimeMillis(),
+        enableAiClassification: Boolean = true
     ): Boolean {
         if (rootNode == null) return true
 
@@ -158,6 +158,7 @@ object YouTubeContentBlockEngine {
         }
 
         val strictHeaderTitle = YouTubeNodeExtractor.extractWatchHeaderTitle(rootNode)
+            ?: YouTubeNodeExtractor.extractVideoTitle(rootNode)
         val sandboxedTitle = com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedVideoTitle
         if (!strictHeaderTitle.isNullOrBlank() &&
             !sandboxedTitle.isNullOrBlank() &&
@@ -180,15 +181,42 @@ object YouTubeContentBlockEngine {
 
         val identity = YouTubeNodeExtractor.extractChannelIdentity(rootNode)
         if (identity.isIdentifiable) {
-            val isApproved = isChannelIdentityApproved(identity, approvedChannelIds, approvedChannelNames)
-            if (!isApproved) {
-                // Positively identified an unapproved channel in the portrait watch header!
+            val temporarilyAllowed = com.example.feature.youtube.ai.YouTubeAiStudyClassifier.isChannelTemporarilyAllowed(
+                identity.channelHandle,
+                identity.channelName
+            )
+            if (!temporarilyAllowed && isChannelIdentityApproved(identity, blockedChannelIds, blockedChannelNames)) {
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
                 lastApprovedVideoKey = null
                 lastApprovedChannel = null
                 lastApprovedHandle = null
                 currentVideoFirstSeenAt = currentTime
                 return false
+            }
+
+            if (!temporarilyAllowed && isChannelIdentityApproved(identity, approvedChannelIds, approvedChannelNames)) {
+                val distractionSignal = com.example.feature.youtube.ai.YouTubeAiStudyClassifier
+                    .checkObviousDistractionSafety(strictHeaderTitle, identity.preferredDisplay)
+                if (distractionSignal != null) {
+                    com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+                    lastApprovedVideoKey = null
+                    lastApprovedChannel = null
+                    lastApprovedHandle = null
+                    currentVideoFirstSeenAt = currentTime
+                    return false
+                }
+            }
+
+            if (!enableAiClassification) {
+                val isApproved = isChannelIdentityApproved(identity, approvedChannelIds, approvedChannelNames)
+                if (!isApproved) {
+                    com.example.feature.youtube.detector.YouTubePlaybackSandbox.onVideoNavigationOccurred(currentTime)
+                    lastApprovedVideoKey = null
+                    lastApprovedChannel = null
+                    lastApprovedHandle = null
+                    currentVideoFirstSeenAt = currentTime
+                    return false
+                }
             }
         }
 
@@ -197,7 +225,9 @@ object YouTubeContentBlockEngine {
 
     /**
      * Evaluates the current YouTube screen and returns the block decision.
-     * Fully synchronous and in-memory so it completes within milliseconds.
+     * Combines 0ms Trusted/Blocked channel overrides, 0ms L1/L2 AI verdict cache,
+     * 0ms high-confidence heuristics, speculative search pre-warming, and
+     * non-blocking `gemini-3.5-flash-lite` classification.
      */
     fun evaluate(
         rootNode: AccessibilityNodeInfo?,
@@ -205,13 +235,18 @@ object YouTubeContentBlockEngine {
         approvedChannelIds: Set<String>,
         approvedChannelNames: Set<String>,
         blockUnknownContent: Boolean = true,
-        currentTime: Long = System.currentTimeMillis()
+        currentTime: Long = System.currentTimeMillis(),
+        activeSubject: String = "",
+        activeTopic: String = "",
+        blockedChannelIds: Set<String> = emptySet(),
+        blockedChannelNames: Set<String> = emptySet(),
+        enableAiClassification: Boolean = true
     ): YouTubeBlockDecision {
         if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val (clickedChan, clickedTitle) = YouTubeNodeExtractor.extractClickedVideoCardIdentity(event)
-            if (!clickedChan.isNullOrBlank()) {
-                pendingClickedChannel = clickedChan
-                pendingClickedTitle = clickedTitle
+            if (!clickedChan.isNullOrBlank() || !clickedTitle.isNullOrBlank()) {
+                if (!clickedChan.isNullOrBlank()) pendingClickedChannel = clickedChan
+                if (!clickedTitle.isNullOrBlank()) pendingClickedTitle = clickedTitle
                 pendingClickedAt = currentTime
             }
         }
@@ -232,6 +267,19 @@ object YouTubeContentBlockEngine {
             return if (YouTubeNodeExtractor.isHomeFeed(rootNode)) {
                 YouTubeBlockDecision.HOME_FEED
             } else {
+                // Speculative Pre-Warming (Layer 3): while user browses Search Results or Channel Pages,
+                // pre-classify visible video cards in the background so tapping any result resolves in 0ms!
+                if (enableAiClassification) {
+                    val candidates = YouTubeNodeExtractor.extractVisibleSearchCandidateTitles(rootNode)
+                    if (candidates.isNotEmpty()) {
+                        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.prewarmSearchCandidates(
+                            candidates = candidates,
+                            activeSubject = activeSubject,
+                            activeTopic = activeTopic,
+                            currentTime = currentTime
+                        )
+                    }
+                }
                 YouTubeBlockDecision.ALLOW_NAVIGATION
             }
         }
@@ -253,8 +301,10 @@ object YouTubeContentBlockEngine {
             playbackStartedAt = currentTime
         }
 
-        // 3. DUAL CHANNEL IDENTITY EXTRACTION (@handle under title + Channel Name from Subscribe/Avatar/Owner)
-        val title = YouTubeNodeExtractor.extractVideoTitle(rootNode)
+        // 3. DUAL CHANNEL IDENTITY & VIDEO TITLE EXTRACTION
+        val extractedTitle = YouTubeNodeExtractor.extractVideoTitle(rootNode)
+        val recentClickedTitle = pendingClickedTitle?.takeIf { (currentTime - pendingClickedAt) in 0L..8000L }
+        val title = extractedTitle ?: recentClickedTitle
         val identity = if (isFullScreen) {
             // In full-screen mode, only accept strict portrait header signals if explicitly present
             YouTubeNodeExtractor.WatchChannelIdentity(
@@ -274,8 +324,40 @@ object YouTubeContentBlockEngine {
         val isStillShowingOldVideoImmediatelyAfterClick =
             (currentTime - lastClickOrNavigationAt) < 600L &&
             !prevTitleBeforeClick.isNullOrBlank() &&
-            !title.isNullOrBlank() &&
-            title.equals(prevTitleBeforeClick, ignoreCase = true)
+            !extractedTitle.isNullOrBlank() &&
+            extractedTitle.equals(prevTitleBeforeClick, ignoreCase = true)
+
+        // 3.0 Check Session-Scoped "Allow Anyway" Bypass first (0ms)
+        val isTemporarilyAllowed = com.example.feature.youtube.ai.YouTubeAiStudyClassifier.isChannelTemporarilyAllowed(
+            channelId = identity.channelHandle,
+            channelName = identity.channelName ?: fallbackChannel ?: pendingClickedChannel
+        )
+
+        // Check Blocked Channel Override (0ms) unless temporarily allowed for this session
+        val isHandleBlockedOverride = !isTemporarilyAllowed && !identity.channelHandle.isNullOrBlank() &&
+                isChannelApproved(identity.channelHandle, blockedChannelIds, blockedChannelNames)
+        val isNameBlockedOverride = !isTemporarilyAllowed && !identity.channelName.isNullOrBlank() &&
+                isChannelApproved(identity.channelName, blockedChannelIds, blockedChannelNames)
+        val isFallbackBlockedOverride = !isTemporarilyAllowed && !fallbackChannel.isNullOrBlank() &&
+                isChannelApproved(fallbackChannel, blockedChannelIds, blockedChannelNames)
+        if (isHandleBlockedOverride || isNameBlockedOverride || isFallbackBlockedOverride) {
+            val blockedChan = identity.preferredDisplay ?: fallbackChannel ?: "Blocked Channel"
+            com.example.feature.youtube.ai.YouTubeAiStudyClassifier.recordLocalChannelHit(
+                channelName = blockedChan,
+                videoTitle = title,
+                isAllowed = false,
+                currentTime = currentTime
+            )
+            com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+            isCurrentlyOnApprovedWatchPage = false
+            return YouTubeBlockDecision.blockedByAi(
+                channel = blockedChan,
+                title = title,
+                reason = "Entertainment channel '$blockedChan' is blocked",
+                category = "CHANNEL_BLOCKED",
+                latencyMs = 0L
+            )
+        }
 
         val isHandleApproved = !identity.channelHandle.isNullOrBlank() &&
                 isChannelApproved(identity.channelHandle, approvedChannelIds, approvedChannelNames)
@@ -284,27 +366,135 @@ object YouTubeContentBlockEngine {
         val isFallbackApproved = !fallbackChannel.isNullOrBlank() &&
                 isChannelApproved(fallbackChannel, approvedChannelIds, approvedChannelNames)
 
-        var hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank()
-        var isPositivelyApproved = isHandleApproved || isNameApproved || isFallbackApproved
+        // Mixed-content safety check: if channel is approved (and not bypassed via "Allow Anyway"),
+        // block obvious gaming/prank/vlog/music uploads on the spot in 0ms without changing channel approval.
+        val anyChannelApproved = isHandleApproved || isNameApproved || isFallbackApproved
+        if (!isTemporarilyAllowed && anyChannelApproved && !title.isNullOrBlank()) {
+            val matchedDistraction = com.example.feature.youtube.ai.YouTubeAiStudyClassifier
+                .checkObviousDistractionSafety(title, identity.preferredDisplay ?: fallbackChannel)
+            if (matchedDistraction != null) {
+                val chanLabel = identity.preferredDisplay ?: fallbackChannel ?: "Approved Channel"
+                com.example.feature.youtube.ai.YouTubeAiStudyClassifier.recordLocalChannelHit(
+                    channelName = chanLabel,
+                    videoTitle = title,
+                    isAllowed = false,
+                    currentTime = currentTime
+                )
+                com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                isCurrentlyOnApprovedWatchPage = false
+                return YouTubeBlockDecision.blockedByAi(
+                    channel = chanLabel,
+                    title = title,
+                    reason = "Distraction upload ('$matchedDistraction') blocked on $chanLabel",
+                    category = "DISTRACTION_SAFETY",
+                    latencyMs = 0L
+                )
+            }
+        }
+
+        var hasPositiveChannelIdentification = identity.isIdentifiable || !fallbackChannel.isNullOrBlank() || isTemporarilyAllowed
+        var isPositivelyApproved = isTemporarilyAllowed || anyChannelApproved
         var approvedChannelFromCardClick: String? = null
 
-        // If the user just clicked a video card whose channel was extracted from the click event:
-        //  - If the clicked card is from an UNAPPROVED channel, block it once the transition begins (>= 150ms)
-        //    even if the watch header is still rendering or briefly holding the old video's header.
-        //  - If the clicked card is from an APPROVED channel and we are in full screen (where the portrait
-        //    header will not render), approve the new video directly from the verified card click.
         val clickedChan = pendingClickedChannel
         val clickedTitle = pendingClickedTitle
         val clickedAge = currentTime - pendingClickedAt
-        if (!clickedChan.isNullOrBlank() && clickedAge in 0L..6000L) {
-            val isClickedChanApproved = isChannelApproved(clickedChan, approvedChannelIds, approvedChannelNames)
-            if (!isClickedChanApproved && clickedAge >= 150L && (isStillShowingOldVideoImmediatelyAfterClick || !hasPositiveChannelIdentification)) {
+        if ((!clickedChan.isNullOrBlank() || !clickedTitle.isNullOrBlank()) && clickedAge in 0L..6000L) {
+            val isClickedTemporarilyAllowed = com.example.feature.youtube.ai.YouTubeAiStudyClassifier
+                .isChannelTemporarilyAllowed(null, clickedChan)
+            val isClickedChanBlocked = !isClickedTemporarilyAllowed && !clickedChan.isNullOrBlank() &&
+                    isChannelApproved(clickedChan, blockedChannelIds, blockedChannelNames)
+            val isClickedChanApproved = isClickedTemporarilyAllowed || (!isClickedChanBlocked && !clickedChan.isNullOrBlank() &&
+                    isChannelApproved(clickedChan, approvedChannelIds, approvedChannelNames))
+            if (isClickedChanBlocked && clickedAge >= 150L) {
                 pendingClickedChannel = null
                 pendingClickedTitle = null
+                com.example.feature.youtube.ai.YouTubeAiStudyClassifier.recordLocalChannelHit(
+                    channelName = clickedChan,
+                    videoTitle = clickedTitle ?: title,
+                    isAllowed = false,
+                    currentTime = currentTime
+                )
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
                 isCurrentlyOnApprovedWatchPage = false
-                return YouTubeBlockDecision.blockedChannel(clickedChan)
+                return YouTubeBlockDecision.blockedByAi(
+                    channel = clickedChan ?: "Blocked Channel",
+                    title = clickedTitle ?: title,
+                    reason = "Entertainment channel '$clickedChan' is blocked",
+                    category = "CHANNEL_BLOCKED",
+                    latencyMs = 0L
+                )
+            } else if (!isClickedChanApproved && clickedAge >= 150L && (isStillShowingOldVideoImmediatelyAfterClick || !hasPositiveChannelIdentification)) {
+                val candidateTitle = clickedTitle ?: title
+                if (enableAiClassification) {
+                    if (!candidateTitle.isNullOrBlank()) {
+                        val aiOutcome = com.example.feature.youtube.ai.YouTubeAiStudyClassifier.evaluateWatchVideo(
+                            videoTitle = candidateTitle,
+                            channelName = clickedChan,
+                            channelHandle = identity.channelHandle,
+                            activeSubject = activeSubject,
+                            activeTopic = activeTopic,
+                            approvedChannelIds = approvedChannelIds,
+                            approvedChannelNames = approvedChannelNames,
+                            blockedChannelIds = blockedChannelIds,
+                            blockedChannelNames = blockedChannelNames,
+                            currentTime = currentTime
+                        )
+                        when (aiOutcome) {
+                            is com.example.feature.youtube.ai.YouTubeAiEvaluationOutcome.Decided -> {
+                                pendingClickedChannel = null
+                                pendingClickedTitle = null
+                                if (aiOutcome.verdict.isAllowed) {
+                                    hasPositiveChannelIdentification = true
+                                    isPositivelyApproved = true
+                                    approvedChannelFromCardClick = clickedChan ?: aiOutcome.verdict.channelName
+                                } else {
+                                    com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                                    isCurrentlyOnApprovedWatchPage = false
+                                    return YouTubeBlockDecision.blockedByAi(
+                                        channel = clickedChan ?: aiOutcome.verdict.channelName,
+                                        title = candidateTitle,
+                                        reason = aiOutcome.verdict.reason,
+                                        category = aiOutcome.verdict.category,
+                                        latencyMs = aiOutcome.verdict.latencyMs
+                                    )
+                                }
+                            }
+                            is com.example.feature.youtube.ai.YouTubeAiEvaluationOutcome.VerifyingAsync -> {
+                                return YouTubeBlockDecision(
+                                    verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+                                    reason = "AI verifying channel...",
+                                    detectedTitle = candidateTitle,
+                                    detectedChannel = clickedChan
+                                )
+                            }
+                        }
+                    }
+                } else if (!clickedChan.isNullOrBlank()) {
+                    pendingClickedChannel = null
+                    pendingClickedTitle = null
+                    com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                    isCurrentlyOnApprovedWatchPage = false
+                    return YouTubeBlockDecision.blockedChannel(clickedChan)
+                }
             } else if (isClickedChanApproved && !hasPositiveChannelIdentification) {
+                val matchedClickedDistraction = if (!isClickedTemporarilyAllowed) {
+                    com.example.feature.youtube.ai.YouTubeAiStudyClassifier
+                        .checkObviousDistractionSafety(clickedTitle ?: title, clickedChan)
+                } else null
+                if (matchedClickedDistraction != null) {
+                    pendingClickedChannel = null
+                    pendingClickedTitle = null
+                    com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                    isCurrentlyOnApprovedWatchPage = false
+                    return YouTubeBlockDecision.blockedByAi(
+                        channel = clickedChan ?: "Approved Channel",
+                        title = clickedTitle ?: title,
+                        reason = "Distraction upload ('$matchedClickedDistraction') blocked",
+                        category = "DISTRACTION_SAFETY",
+                        latencyMs = 0L
+                    )
+                }
                 val titleMatchesClicked = clickedTitle.isNullOrBlank() ||
                         title.isNullOrBlank() ||
                         title.equals(clickedTitle, ignoreCase = true) ||
@@ -314,14 +504,14 @@ object YouTubeContentBlockEngine {
                     hasPositiveChannelIdentification = true
                     isPositivelyApproved = true
                     approvedChannelFromCardClick = clickedChan
-                    if (!title.isNullOrBlank() && !isStillShowingOldVideoImmediatelyAfterClick) {
+                    if (!extractedTitle.isNullOrBlank() && !isStillShowingOldVideoImmediatelyAfterClick) {
                         pendingClickedChannel = null
                         pendingClickedTitle = null
                     }
                 }
             }
         }
-        if (hasPositiveChannelIdentification && !isStillShowingOldVideoImmediatelyAfterClick && approvedChannelFromCardClick == null) {
+        if (hasPositiveChannelIdentification && !extractedTitle.isNullOrBlank() && !isStillShowingOldVideoImmediatelyAfterClick && approvedChannelFromCardClick == null) {
             pendingClickedChannel = null
             pendingClickedTitle = null
         }
@@ -335,11 +525,18 @@ object YouTubeContentBlockEngine {
                 lastApprovedVideoKey == null ||
                 currentVideoKey.equals(lastApprovedVideoKey, ignoreCase = true)
 
-        val isLatchedApproved = !hasPositiveChannelIdentification && (
+        val isAiLatchedForCurrentVideo = !lastApprovedVideoKey.isNullOrBlank() &&
+                (title.isNullOrBlank() || title.equals(lastApprovedVideoKey, ignoreCase = true)) &&
+                !lastApprovedChannel.isNullOrBlank() &&
+                (!hasPositiveChannelIdentification ||
+                        identity.channelName.equals(lastApprovedChannel, ignoreCase = true) ||
+                        identity.preferredDisplay.equals(lastApprovedChannel, ignoreCase = true))
+
+        val isLatchedApproved = isAiLatchedForCurrentVideo || (!hasPositiveChannelIdentification && (
             (!isInPostClickCooldown && lastApprovedChannel != null && isSameOrHiddenTitle) ||
             (isFullScreen && lastApprovedChannel != null && isSameOrHiddenTitle) ||
             isSandboxActiveForPlayback
-        )
+        ))
 
         val approved = isPositivelyApproved || isLatchedApproved
         val displayChannel = when {
@@ -351,6 +548,7 @@ object YouTubeContentBlockEngine {
             isLatchedApproved -> lastApprovedChannel
                 ?: com.example.feature.youtube.detector.YouTubePlaybackSandbox.sandboxedChannel?.channelName
                 ?: lastSeenChannelName
+            !clickedChan.isNullOrBlank() && clickedAge in 0L..8000L -> clickedChan
             else -> null
         }
         if (displayChannel != null && !isStillShowingOldVideoImmediatelyAfterClick) {
@@ -373,17 +571,13 @@ object YouTubeContentBlockEngine {
                     title = title ?: lastSeenVideoTitle,
                     isAdPlaying = true
                 )
-            } else if (hasPositiveChannelIdentification && !isPositivelyApproved) {
-                // Ad is playing on a positively identified UNAPPROVED channel -> stop ad & step back immediately!
-                isCurrentlyOnApprovedWatchPage = false
-                return YouTubeBlockDecision.blockedChannel(displayChannel ?: "Unapproved Channel")
             } else {
-                // Pre-roll ad is hiding the channel header before the video starts -> allow ad while waiting for channel
+                // Pre-roll ad is playing; allow ad while waiting for main video or evaluate via AI if title known
                 val withinAdWait = (currentTime - currentVideoFirstSeenAt) < AD_MAX_WAIT_FOR_CHANNEL_MILLIS
                 if (withinAdWait) {
                     return YouTubeBlockDecision(
                         verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                        reason = "Pre-roll ad playing; waiting for channel identification",
+                        reason = "Pre-roll ad playing; waiting for video verification",
                         detectedTitle = title,
                         isAdPlaying = true
                     )
@@ -409,8 +603,17 @@ object YouTubeContentBlockEngine {
                 isCurrentlyOnApprovedWatchPage = true
             }
 
-            val canEnterSandboxNow = (isPositivelyApproved || (isFullScreen && isLatchedApproved)) &&
+            val canEnterSandboxNow = (isPositivelyApproved || isLatchedApproved) &&
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.canEnterSandbox(title, currentTime)
+
+            if (isPositivelyApproved && !isStillShowingOldVideoImmediatelyAfterClick && !isTemporarilyAllowed) {
+                com.example.feature.youtube.ai.YouTubeAiStudyClassifier.recordLocalChannelHit(
+                    channelName = displayChannel ?: lastApprovedChannel,
+                    videoTitle = title ?: lastApprovedVideoKey ?: lastSeenVideoTitle,
+                    isAllowed = true,
+                    currentTime = currentTime
+                )
+            }
 
             if (canEnterSandboxNow) {
                 com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
@@ -426,8 +629,90 @@ object YouTubeContentBlockEngine {
                 title = title ?: lastApprovedVideoKey ?: lastSeenVideoTitle,
                 isAdPlaying = false
             )
+        }
+
+        val elapsedForCurrentVideo = currentTime - currentVideoFirstSeenAt
+
+        // 3.3B CONTEXT-AWARE AI STUDY MODE CLASSIFICATION:
+        // When Context-Aware AI Study Mode is enabled, AI is the authority for whether a video is study content.
+        // We NEVER block simply because a channel is not on a manual approved list!
+        if (enableAiClassification) {
+            val effectiveTitleForAi = title
+                ?: lastSeenVideoTitle?.takeIf { elapsedForCurrentVideo < 3000L }
+                ?: if (elapsedForCurrentVideo >= 1800L) displayChannel else null
+
+            val alreadyAutoExitedForFullScreen = isFullScreen &&
+                (currentVideoKey ?: "__unverified_fullscreen__") == lastFullScreenVerifyExitKey &&
+                (currentTime - lastFullScreenVerifyExitAt) <= 6000L
+            if (!effectiveTitleForAi.isNullOrBlank() &&
+                (!isFullScreen || hasPositiveChannelIdentification || alreadyAutoExitedForFullScreen)
+            ) {
+                val aiOutcome = com.example.feature.youtube.ai.YouTubeAiStudyClassifier.evaluateWatchVideo(
+                    videoTitle = effectiveTitleForAi,
+                    channelName = displayChannel,
+                    channelHandle = identity.channelHandle,
+                    activeSubject = activeSubject,
+                    activeTopic = activeTopic,
+                    approvedChannelIds = approvedChannelIds,
+                    approvedChannelNames = approvedChannelNames,
+                    blockedChannelIds = blockedChannelIds,
+                    blockedChannelNames = blockedChannelNames,
+                    currentTime = currentTime
+                )
+                when (aiOutcome) {
+                    is com.example.feature.youtube.ai.YouTubeAiEvaluationOutcome.Decided -> {
+                        val verdict = aiOutcome.verdict
+                        if (verdict.isAllowed) {
+                            val effectiveChannel = displayChannel ?: verdict.channelName.ifBlank { "AI Verified Study" }
+                            if (!isStillShowingOldVideoImmediatelyAfterClick) {
+                                currentVideoKey = effectiveTitleForAi
+                                lastApprovedVideoKey = effectiveTitleForAi
+                                lastApprovedChannel = effectiveChannel
+                                if (!identity.channelHandle.isNullOrBlank()) {
+                                    lastApprovedHandle = identity.channelHandle
+                                }
+                                isCurrentlyOnApprovedWatchPage = true
+                            }
+                            if (com.example.feature.youtube.detector.YouTubePlaybackSandbox.canEnterSandbox(effectiveTitleForAi, currentTime)) {
+                                com.example.feature.youtube.detector.YouTubePlaybackSandbox.enterSandbox(
+                                    channel = com.example.feature.youtube.detector.ChannelIdentityInfo(
+                                        channelName = effectiveChannel,
+                                        channelHandle = identity.channelHandle ?: lastApprovedHandle
+                                    ),
+                                    title = effectiveTitleForAi
+                                )
+                            }
+                            return YouTubeBlockDecision.approvedByAi(
+                                channel = effectiveChannel,
+                                title = effectiveTitleForAi,
+                                reason = verdict.reason,
+                                category = verdict.category,
+                                latencyMs = verdict.latencyMs
+                            )
+                        } else {
+                            com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
+                            isCurrentlyOnApprovedWatchPage = false
+                            return YouTubeBlockDecision.blockedByAi(
+                                channel = displayChannel ?: verdict.channelName,
+                                title = effectiveTitleForAi,
+                                reason = verdict.reason,
+                                category = verdict.category,
+                                latencyMs = verdict.latencyMs
+                            )
+                        }
+                    }
+                    is com.example.feature.youtube.ai.YouTubeAiEvaluationOutcome.VerifyingAsync -> {
+                        return YouTubeBlockDecision(
+                            verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
+                            reason = "AI verifying study content...",
+                            detectedTitle = effectiveTitleForAi,
+                            detectedChannel = displayChannel
+                        )
+                    }
+                }
+            }
         } else if (hasPositiveChannelIdentification) {
-            // Unapproved channel positively identified -> exit sandbox and block
+            // Legacy channel-only mode (when enableAiClassification == false)
             com.example.feature.youtube.detector.YouTubePlaybackSandbox.exitSandbox()
             isCurrentlyOnApprovedWatchPage = false
             return YouTubeBlockDecision.blockedChannel(displayChannel)
@@ -437,7 +722,6 @@ object YouTubeContentBlockEngine {
         // If a brand-new or unverified video is playing in full-screen mode and its channel metadata
         // is hidden because full-screen mode hides the portrait watch header, auto-exit full screen once
         // so FocusShield can read the portrait channel header and verify instead of falsely blocking.
-        val elapsedForCurrentVideo = currentTime - currentVideoFirstSeenAt
         if (isFullScreen && elapsedForCurrentVideo >= 900L) {
             val fsKey = currentVideoKey ?: "__unverified_fullscreen__"
             val canAutoExitFs = fsKey != lastFullScreenVerifyExitKey ||
@@ -450,12 +734,12 @@ object YouTubeContentBlockEngine {
             }
         }
 
-        // 4. Channel metadata not rendered yet: wait briefly, then treat as unknown.
+        // 4. Video title/channel metadata not rendered yet: wait briefly, then treat as unknown.
         val withinGrace = elapsedForCurrentVideo < CHANNEL_METADATA_GRACE_MILLIS
         if (withinGrace) {
             return YouTubeBlockDecision(
                 verdict = YouTubeBlockVerdict.ALLOW_NAVIGATION,
-                reason = "Waiting for channel handle metadata"
+                reason = "Waiting for video metadata for AI check"
             )
         }
 
@@ -542,6 +826,9 @@ object YouTubeContentBlockEngine {
             if (currentVideoKey == null) {
                 // First time seeing the title for the current video (e.g. title node rendered slightly after channel header)
                 currentVideoKey = videoKey
+                if (currentVideoFirstSeenAt == 0L) {
+                    currentVideoFirstSeenAt = currentTime
+                }
                 if (lastApprovedChannel != null && lastApprovedVideoKey == null) {
                     lastApprovedVideoKey = videoKey
                 }

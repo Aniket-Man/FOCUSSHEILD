@@ -67,7 +67,7 @@ import com.example.data.local.entity.TopicEntity
         ScratchCardEntity::class,
         SyncOutboxEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -442,6 +442,19 @@ abstract class FocusShieldDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v13 -> v14: additive columns on `study_channels` so AI-learned channels remember
+         * whether they were verified automatically by AI, their study/entertainment category,
+         * and a concise explanation for the Student-First UI.
+         */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `study_channels` ADD COLUMN `verifiedByAi` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `study_channels` ADD COLUMN `category` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `study_channels` ADD COLUMN `aiReason` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getInstance(context: Context): FocusShieldDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -449,7 +462,7 @@ abstract class FocusShieldDatabase : RoomDatabase() {
                     FocusShieldDatabase::class.java,
                     "focus_shield_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     // No destructive fallbacks: a missing migration or an app downgrade must fail
                     // loudly with an explicit error. `fallbackToDestructiveMigration()` used to
                     // silently wipe every session, limit and blocked list on any schema drift.

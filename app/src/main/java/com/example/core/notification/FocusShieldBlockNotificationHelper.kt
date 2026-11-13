@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.core.sound.FocusAlertSoundManager
+import com.example.feature.youtube.receiver.YouTubeAllowAnywayReceiver
 
 /**
  * Manages rich Android system notifications posted when real-time protection features trigger:
@@ -123,23 +124,79 @@ object FocusShieldBlockNotificationHelper {
         )
     }
 
+    fun cancelAiBlockedNotification(context: Context) {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIF_ID_CHANNEL)
+        } catch (_: Exception) {}
+    }
+
     /**
-     * System notification for unapproved YouTube channel.
+     * System notification for AI Study Guard blocked YouTube video.
      */
-    fun notifyChannelBlocked(context: Context, channelName: String) {
+    fun notifyAiVideoBlocked(
+        context: Context,
+        channelName: String,
+        videoTitle: String? = null,
+        reason: String? = null,
+        channelId: String? = null,
+        sessionId: String? = null
+    ) {
         initialize(context)
         FocusAlertSoundManager.playWarningBuzzer(context)
         if (!hasNotificationPermission(context)) return
 
-        val cleanName = if (channelName.isNotBlank()) channelName else "This channel"
-        val title = "🎯 Channel Not in Study List"
-        val message = "'$cleanName' is not in your allowed YouTube study channels. Returned to Home to keep your streak!"
+        val title = "🤖 AI Study Guard Blocked Video"
+        val cleanReason = reason?.takeIf { it.isNotBlank() } ?: "Blocked as entertainment during your focus session"
+        val targetLabel = videoTitle?.takeIf { it.isNotBlank() } ?: channelName.ifBlank { "This video" }
+        val message = "\"$targetLabel\" was blocked ($cleanReason). Returned to YouTube to keep your focus streak!"
+
+        val actions = if (channelName.isNotBlank() || !channelId.isNullOrBlank()) {
+            val allowIntent = Intent(context, YouTubeAllowAnywayReceiver::class.java).apply {
+                action = YouTubeAllowAnywayReceiver.ACTION_ALLOW_ANYWAY
+                putExtra(YouTubeAllowAnywayReceiver.EXTRA_CHANNEL_NAME, channelName)
+                putExtra(YouTubeAllowAnywayReceiver.EXTRA_CHANNEL_ID, channelId)
+                putExtra(YouTubeAllowAnywayReceiver.EXTRA_SESSION_ID, sessionId)
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val allowPendingIntent = PendingIntent.getBroadcast(
+                context,
+                NOTIF_ID_CHANNEL,
+                allowIntent,
+                flags
+            )
+            listOf(
+                NotificationCompat.Action.Builder(
+                    0,
+                    "Allow Anyway (Session)",
+                    allowPendingIntent
+                ).build()
+            )
+        } else {
+            emptyList()
+        }
 
         postNotification(
             context = context,
             notificationId = NOTIF_ID_CHANNEL,
             title = title,
-            message = message
+            message = message,
+            actions = actions
+        )
+    }
+
+    /**
+     * System notification for unapproved YouTube channel or AI blocked video fallback.
+     */
+    fun notifyChannelBlocked(context: Context, channelName: String) {
+        notifyAiVideoBlocked(
+            context = context,
+            channelName = channelName,
+            videoTitle = null,
+            reason = "Blocked by YouTube AI Study Guard"
         )
     }
 
@@ -223,7 +280,8 @@ object FocusShieldBlockNotificationHelper {
         context: Context,
         notificationId: Int,
         title: String,
-        message: String
+        message: String,
+        actions: List<NotificationCompat.Action> = emptyList()
     ) {
         val contentIntent = createContentIntent(context)
 
@@ -231,7 +289,7 @@ object FocusShieldBlockNotificationHelper {
             context.resources,
             R.drawable.ic_focus_shield_app_icon
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_BLOCKS)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_BLOCKS)
             .setSmallIcon(R.drawable.ic_focus_notification)
             .setLargeIcon(largeIcon)
             .setColor(0xFF6E18E6.toInt())
@@ -243,10 +301,11 @@ object FocusShieldBlockNotificationHelper {
             .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .build()
+
+        actions.forEach { builder.addAction(it) }
 
         try {
-            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            NotificationManagerCompat.from(context).notify(notificationId, builder.build())
         } catch (_: SecurityException) {}
     }
 }

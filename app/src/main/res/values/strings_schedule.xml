@@ -74,7 +74,7 @@
     <string name="schedule_strict_label">Strict mode</string>
     <string name="schedule_strict_body">You cannot end the session early.</string>
     <string name="schedule_youtube_label">YouTube study mode</string>
-    <string name="schedule_youtube_body">Allow approved study channels while blocking the feed and Shorts.</string>
+    <string name="schedule_youtube_body">Auto-allow educational channels while blocking entertainment and Shorts.</string>
     <string name="schedule_browser_label">Browser study mode</string>
     <string name="schedule_browser_body">Block distracting websites while allowing study portals.</string>
     <string name="schedule_notifications_label">Silence notifications</string>

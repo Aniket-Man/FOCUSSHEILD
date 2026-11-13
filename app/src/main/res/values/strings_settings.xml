@@ -10,8 +10,8 @@
     <string name="settings_strict_mode_body">Review session protections, uninstall protection and multi-window rules.</string>
     <string name="settings_websites">Website blocker</string>
     <string name="settings_websites_body">Choose adult-content protection and custom blocked websites.</string>
-    <string name="settings_channels">Study channels</string>
-    <string name="settings_channels_body">Manage approved YouTube channels for study mode.</string>
+    <string name="settings_channels">YouTube Study Guard</string>
+    <string name="settings_channels_body">Review AI-learned allowed and blocked YouTube channels.</string>
     <string name="settings_permissions_section">Android permissions</string>
     <string name="settings_accessibility">Accessibility blocker service</string>
     <string name="settings_accessibility_body">Open Android accessibility settings to turn the FocusShield service on or off.</string>

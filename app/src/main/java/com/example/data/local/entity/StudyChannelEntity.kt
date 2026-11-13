@@ -14,5 +14,8 @@ data class StudyChannelEntity(
     val channelUrl: String,
     val thumbnailUrl: String = "",
     val isApproved: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val verifiedByAi: Boolean = false,
+    val category: String = "",
+    val aiReason: String = ""
 )

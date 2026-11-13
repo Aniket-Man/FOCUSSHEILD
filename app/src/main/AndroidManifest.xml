@@ -172,6 +172,14 @@
         </receiver>
 
         <receiver
+            android:name=".feature.youtube.receiver.YouTubeAllowAnywayReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.focusshield.ACTION_YOUTUBE_ALLOW_ANYWAY" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".feature.session.notification.BootAndDailyResetReceiver"
             android:exported="true">
             <intent-filter>

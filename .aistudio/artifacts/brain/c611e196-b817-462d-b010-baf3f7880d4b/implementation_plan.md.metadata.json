@@ -1,6 +1,0 @@
-{
-  "summary":  "Architectural and UX overhaul plan for the Schedule Planner so schedules operate as true wall-clock Start-to-End windows (starting at Start Time or immediately for remaining time if already inside the window, and strictly stopping at End Time while tracking actual focused study time separately from breaks/pauses), with a streamlined Start-to-End editor and live window status indicators.",
-  "updatedAt":  "2026-10-30T16:57:09.323298192Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

@@ -95,6 +95,10 @@ class FocusAccessibilityService : AccessibilityService() {
         lastAppLimitCheckTimestamps.remove(packageName)
     }
 
+    fun clearLastBlockedYouTubeVideoKey() {
+        lastBlockedYouTubeVideoKey = null
+    }
+
     /**
      * Approved-content watch-time capture. Every call site treats a missing tracker as "no capture"
      * rather than an error — blocking must never depend on analytics being available.
@@ -172,10 +176,28 @@ class FocusAccessibilityService : AccessibilityService() {
                     com.example.feature.youtube.overlay.YouTubeHomeFeedOverlayManager.hideHomeFeedPopup()
                     YouTubeContentBlockEngine.reset()
                     homeFeedPopupDismissed = false
+                    if (state != com.example.feature.session.domain.SessionState.PAUSED) {
+                        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.syncActiveSessionId(null)
+                    }
                     // The session a segment belongs to is over, so close it before `activeSession` is
                     // cleared — the tracker stamps the segment with the session it opened under.
                     dwellTracker()?.flush("session ended")
+                } else {
+                    val activeId = com.example.feature.session.engine.FocusSessionManager.instance.activeSession.value?.id
+                    com.example.feature.youtube.ai.YouTubeAiStudyClassifier.syncActiveSessionId(activeId)
+                    com.example.feature.youtube.ai.YouTubeAiStudyClassifier.warmUpModel()
                 }
+            }
+        }
+
+        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.registerAsyncVerdictListener(aiVerdictListener)
+    }
+
+    private val aiVerdictListener: (com.example.feature.youtube.ai.YouTubeAiVerdict) -> Unit = { _ ->
+        mainThreadHandler.post {
+            val fg = lastForegroundPackage ?: "com.google.android.youtube"
+            if (YouTubeDetectionRules.isYouTubePackage(fg)) {
+                scheduleYouTubePostClickVerifications(fg)
             }
         }
     }
@@ -659,6 +681,8 @@ class FocusAccessibilityService : AccessibilityService() {
                                 event = event,
                                 approvedChannelIds = protectionState.approvedChannelIds,
                                 approvedChannelNames = protectionState.approvedChannelNames,
+                                blockedChannelIds = protectionState.blockedChannelIds,
+                                blockedChannelNames = protectionState.blockedChannelNames,
                                 currentTime = now
                             )
                         }
@@ -695,7 +719,11 @@ class FocusAccessibilityService : AccessibilityService() {
                             approvedChannelIds = protectionState.approvedChannelIds,
                             approvedChannelNames = protectionState.approvedChannelNames,
                             blockUnknownContent = protectionState.blockUnknownContent,
-                            currentTime = now
+                            currentTime = now,
+                            activeSubject = protectionState.activeSubject,
+                            activeTopic = protectionState.activeTopic,
+                            blockedChannelIds = protectionState.blockedChannelIds,
+                            blockedChannelNames = protectionState.blockedChannelNames
                         )
 
                         if (decision.needsExitFullScreenForVerification) {
@@ -768,12 +796,43 @@ class FocusAccessibilityService : AccessibilityService() {
                                 }
                                 YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
                                 YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
-                                    val chan = decision.detectedChannel ?: "Unapproved Channel"
+                                    val chan = decision.detectedChannel ?: "YouTube Video"
                                     val videoKey = "${decision.detectedChannel.orEmpty()}|${decision.detectedTitle.orEmpty()}"
                                     val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode, videoKey)
                                     if (didBlock) {
-                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
-                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
+                                        val allowOnceAction: (() -> Unit)? = if (!decision.detectedChannel.isNullOrBlank()) {
+                                            {
+                                                com.example.feature.youtube.ai.YouTubeAiStudyClassifier.allowChannelForCurrentSession(
+                                                    channelId = null,
+                                                    channelName = chan,
+                                                    sessionId = protectionState.sessionId
+                                                )
+                                                lastBlockedYouTubeVideoKey = null
+                                                com.example.core.notification.FocusShieldBlockNotificationHelper
+                                                    .cancelAiBlockedNotification(this)
+                                                android.widget.Toast.makeText(
+                                                    applicationContext,
+                                                    "Allowed $chan for this focus session",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        } else {
+                                            null
+                                        }
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showAiVideoBlockedHud(
+                                            context = this,
+                                            channelName = chan,
+                                            reason = decision.reason,
+                                            latencyMs = decision.latencyMs,
+                                            onAllowAnyway = allowOnceAction
+                                        )
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyAiVideoBlocked(
+                                            context = this,
+                                            channelName = chan,
+                                            videoTitle = decision.detectedTitle,
+                                            reason = decision.reason,
+                                            sessionId = protectionState.sessionId
+                                        )
                                     }
                                 }
                                 else -> {
@@ -1176,6 +1235,8 @@ class FocusAccessibilityService : AccessibilityService() {
                                 event = null,
                                 approvedChannelIds = protectionState.approvedChannelIds,
                                 approvedChannelNames = protectionState.approvedChannelNames,
+                                blockedChannelIds = protectionState.blockedChannelIds,
+                                blockedChannelNames = protectionState.blockedChannelNames,
                                 currentTime = sweepNow
                             )
                             if (valid) return@postDelayed
@@ -1187,7 +1248,11 @@ class FocusAccessibilityService : AccessibilityService() {
                             approvedChannelIds = protectionState.approvedChannelIds,
                             approvedChannelNames = protectionState.approvedChannelNames,
                             blockUnknownContent = protectionState.blockUnknownContent,
-                            currentTime = sweepNow
+                            currentTime = sweepNow,
+                            activeSubject = protectionState.activeSubject,
+                            activeTopic = protectionState.activeTopic,
+                            blockedChannelIds = protectionState.blockedChannelIds,
+                            blockedChannelNames = protectionState.blockedChannelNames
                         )
 
                         if (decision.needsExitFullScreenForVerification) {
@@ -1228,12 +1293,43 @@ class FocusAccessibilityService : AccessibilityService() {
                                 }
                                 YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
                                 YouTubeBlockVerdict.BLOCK_UNKNOWN_CONTENT -> {
-                                    val chan = decision.detectedChannel ?: "Unapproved Channel"
+                                    val chan = decision.detectedChannel ?: "YouTube Video"
                                     val videoKey = "${decision.detectedChannel.orEmpty()}|${decision.detectedTitle.orEmpty()}"
                                     val didBlock = handleYouTubeUnapprovedChannelBlocked(rootNode, videoKey)
                                     if (didBlock) {
-                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showChannelBlockedHud(this, chan)
-                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyChannelBlocked(this, chan)
+                                        val allowOnceAction: (() -> Unit)? = if (!decision.detectedChannel.isNullOrBlank()) {
+                                            {
+                                                com.example.feature.youtube.ai.YouTubeAiStudyClassifier.allowChannelForCurrentSession(
+                                                    channelId = null,
+                                                    channelName = chan,
+                                                    sessionId = protectionState.sessionId
+                                                )
+                                                lastBlockedYouTubeVideoKey = null
+                                                com.example.core.notification.FocusShieldBlockNotificationHelper
+                                                    .cancelAiBlockedNotification(this)
+                                                android.widget.Toast.makeText(
+                                                    applicationContext,
+                                                    "Allowed $chan for this focus session",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        } else {
+                                            null
+                                        }
+                                        com.example.core.overlay.FocusDisplayOverlayNotificationManager.showAiVideoBlockedHud(
+                                            context = this,
+                                            channelName = chan,
+                                            reason = decision.reason,
+                                            latencyMs = decision.latencyMs,
+                                            onAllowAnyway = allowOnceAction
+                                        )
+                                        com.example.core.notification.FocusShieldBlockNotificationHelper.notifyAiVideoBlocked(
+                                            context = this,
+                                            channelName = chan,
+                                            videoTitle = decision.detectedTitle,
+                                            reason = decision.reason,
+                                            sessionId = protectionState.sessionId
+                                        )
                                     }
                                 }
                                 else -> {}
@@ -1640,6 +1736,7 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         isServiceRunning = false
         instance = null
+        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.unregisterAsyncVerdictListener(aiVerdictListener)
         // Tear down bind-scoped work: collectors in serviceScope and any pending delayed
         // runnables (post-back navigation, search click) must not run against an unbound
         // service. onServiceConnected rebuilds the scope on the next bind (issue #16).
@@ -1661,6 +1758,7 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         isServiceRunning = false
         instance = null
+        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.unregisterAsyncVerdictListener(aiVerdictListener)
         serviceScope.cancel()
         mainThreadHandler.removeCallbacksAndMessages(null)
         AccessibilityHelper.notifyServiceDisconnected()

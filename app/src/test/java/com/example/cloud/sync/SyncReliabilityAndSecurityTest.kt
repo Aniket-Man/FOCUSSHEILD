@@ -894,6 +894,9 @@ class SyncReliabilityAndSecurityTest {
             override suspend fun setApprovalStatus(id: String, isApproved: Boolean) {
                 channelsMap[id]?.let { channelsMap[id] = it.copy(isApproved = isApproved) }
             }
+            override suspend fun setApprovalStatusAndManual(id: String, isApproved: Boolean) {
+                channelsMap[id]?.let { channelsMap[id] = it.copy(isApproved = isApproved, verifiedByAi = false) }
+            }
             override suspend fun updateThumbnailUrl(id: String, thumbnailUrl: String) {
                 channelsMap[id]?.let { channelsMap[id] = it.copy(thumbnailUrl = thumbnailUrl) }
             }

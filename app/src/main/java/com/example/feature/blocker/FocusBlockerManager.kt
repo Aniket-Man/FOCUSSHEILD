@@ -110,6 +110,17 @@ class FocusBlockerManager private constructor(
 
         val approvedIds = studyChannelRepository?.getApprovedChannelIds() ?: emptySet()
         val approvedNames = studyChannelRepository?.getApprovedChannelNames() ?: emptySet()
+        val blockedIds = studyChannelRepository?.getBlockedChannelIds() ?: emptySet()
+        val blockedNames = studyChannelRepository?.getBlockedChannelNames() ?: emptySet()
+
+        val isActiveSessionState = state == SessionState.RUNNING || state == SessionState.PAUSED
+        com.example.feature.youtube.ai.YouTubeAiStudyClassifier.syncActiveSessionId(
+            if (isActiveSessionState) session?.id else null
+        )
+
+        if (state == SessionState.RUNNING && (session?.isStudyChannelsEnabled ?: true)) {
+            com.example.feature.youtube.ai.YouTubeAiStudyClassifier.warmUpModel()
+        }
 
         // Session choices are the source of truth for its one-time shield, so a just-started
         // session can block immediately without waiting for Room/Flow propagation. Permanent
@@ -120,6 +131,9 @@ class FocusBlockerManager private constructor(
         return FocusProtectionState(
             sessionId = session?.id,
             sessionState = state,
+            activeSubject = session?.subject.orEmpty(),
+            activeTopic = session?.topic.orEmpty(),
+            activeGoal = session?.goal.orEmpty(),
             isAppBlockingEnabled = session?.isAppBlockingEnabled ?: false,
             isStrictModeEnabled = session?.isStrictModeEnabled ?: false,
             strictModeConfig = session?.strictModeConfig ?: StrictModeConfig(),
@@ -129,6 +143,8 @@ class FocusBlockerManager private constructor(
             isYouTubeStudyModeEnabled = session?.isStudyChannelsEnabled ?: true,
             approvedChannelIds = approvedIds,
             approvedChannelNames = approvedNames,
+            blockedChannelIds = blockedIds,
+            blockedChannelNames = blockedNames,
             blockShorts = true,
             blockUnknownContent = true,
             isBrowserStudyModeEnabled = session?.isBrowserStudyModeEnabled ?: true

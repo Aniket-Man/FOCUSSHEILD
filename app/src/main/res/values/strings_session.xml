@@ -56,8 +56,8 @@
     <string name="session_setup_blocked_apps_body">Blocks the apps and sites you selected for this session</string>
     <string name="session_setup_strict_mode">Strict mode</string>
     <string name="session_setup_strict_body">Timer and Pomodoro cannot be paused or ended early, and strict Pomodoro focus phases cannot be skipped. Breaks remain available.</string>
-    <string name="session_setup_approved_channels">Approved study channels</string>
-    <string name="session_setup_approved_channels_body">Allow educational YouTube channels only</string>
+    <string name="session_setup_approved_channels">YouTube Study Guard</string>
+    <string name="session_setup_approved_channels_body">AI auto-allows educational channels &amp; blocks entertainment &amp; Shorts</string>
     <string name="session_setup_warning">Validation warning</string>
 
     <!-- Session setup sheet -->
@@ -189,7 +189,7 @@
     <string name="session_apps_search_desc">Search installed apps</string>
     <string name="session_apps_special">Special apps</string>
     <string name="session_apps_youtube">YouTube</string>
-    <string name="session_apps_youtube_study">Watch only study channels</string>
+    <string name="session_apps_youtube_study">Auto-Pilot AI Guard: educational allowed, Shorts blocked</string>
     <string name="session_apps_browser">Browser apps</string>
     <string name="session_apps_browser_study">Block adult and manually added sites in your browser</string>
     <string name="session_apps_distracting">Distracting apps</string>
@@ -237,7 +237,7 @@
     <string name="session_summary_distractions_label">Distractions intercepted</string>
     <string name="session_summary_distractions_detail">%1$d attempts blocked</string>
     <string name="session_summary_youtube_label">YouTube study mode</string>
-    <string name="session_summary_youtube_active">Study channels allowed, distracting videos blocked</string>
+    <string name="session_summary_youtube_active">Educational channels allowed, entertainment &amp; Shorts blocked</string>
     <string name="session_summary_app_shield">App and site shield</string>
     <plurals name="session_summary_apps_shielded">
         <item quantity="one">%1$d app shielded at session start</item>

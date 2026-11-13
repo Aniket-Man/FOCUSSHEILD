@@ -13,6 +13,9 @@ import java.util.Locale
 data class FocusProtectionState(
     val sessionId: String? = null,
     val sessionState: SessionState = SessionState.IDLE,
+    val activeSubject: String = "",
+    val activeTopic: String = "",
+    val activeGoal: String = "",
     val isAppBlockingEnabled: Boolean = true,
     val isStrictModeEnabled: Boolean = false,
     val strictModeConfig: StrictModeConfig = StrictModeConfig(),
@@ -22,6 +25,8 @@ data class FocusProtectionState(
     val isYouTubeStudyModeEnabled: Boolean = true,
     val approvedChannelIds: Set<String> = emptySet(),
     val approvedChannelNames: Set<String> = emptySet(),
+    val blockedChannelIds: Set<String> = emptySet(),
+    val blockedChannelNames: Set<String> = emptySet(),
     val blockShorts: Boolean = true,
     val blockUnknownContent: Boolean = true,
     val isBrowserStudyModeEnabled: Boolean = false

@@ -27,61 +27,72 @@ class StudyChannelRepository(
     // Fast in-memory sets for non-blocking AccessibilityService lookups without Room disk hits
     private val cachedApprovedChannelIds = ConcurrentHashMap.newKeySet<String>()
     private val cachedApprovedNormalizedNames = ConcurrentHashMap.newKeySet<String>()
+    private val cachedBlockedChannelIds = ConcurrentHashMap.newKeySet<String>()
+    private val cachedBlockedNormalizedNames = ConcurrentHashMap.newKeySet<String>()
 
     init {
         coroutineScope.launch {
             try {
-                val initialApproved = studyChannelDao.getApprovedChannels()
-                updateCache(initialApproved)
+                val initialAll = studyChannelDao.getAllChannels()
+                updateCache(initialAll)
             } catch (_: Exception) {}
 
-            studyChannelDao.getApprovedChannelsFlow().collectLatest { channels ->
+            studyChannelDao.getAllChannelsFlow().collectLatest { channels ->
                 updateCache(channels)
             }
         }
     }
 
     private fun updateCache(channels: List<StudyChannelEntity>) {
-        val newIds = mutableSetOf<String>()
-        val newNames = mutableSetOf<String>()
-        channels.forEach { ch ->
-            if (ch.isApproved) {
-                val normId = ch.channelId.trim().lowercase(Locale.ROOT)
-                newIds.add(normId)
-                val rawHandle = normId.removePrefix("@")
-                newIds.add(rawHandle)
-                newIds.add("@$rawHandle")
-                val cleanAlnumHandle = normalizeChannelName(rawHandle)
-                if (cleanAlnumHandle.isNotBlank()) {
-                    newIds.add(cleanAlnumHandle)
-                    newNames.add(cleanAlnumHandle)
-                }
+        val newApprovedIds = mutableSetOf<String>()
+        val newApprovedNames = mutableSetOf<String>()
+        val newBlockedIds = mutableSetOf<String>()
+        val newBlockedNames = mutableSetOf<String>()
 
-                val trimmedName = ch.channelName.trim()
-                newNames.add(trimmedName)
-                val normName = normalizeChannelName(trimmedName)
-                if (normName.isNotBlank()) {
-                    newNames.add(normName)
-                    newIds.add(normName)
-                    newIds.add("@$normName")
-                }
-                // Index distinct brand clauses separated by hyphen/pipe/bullet (e.g. "Physics Wallah - Alakh Pandey")
-                val clauses = trimmedName.split(Regex("\\s*[\\-|•·]+\\s*"))
-                    .map { normalizeChannelName(it) }
-                    .filter { it.length >= 4 }
-                newNames.addAll(clauses)
+        channels.forEach { ch ->
+            val targetIds = if (ch.isApproved) newApprovedIds else newBlockedIds
+            val targetNames = if (ch.isApproved) newApprovedNames else newBlockedNames
+
+            val normId = ch.channelId.trim().lowercase(Locale.ROOT)
+            targetIds.add(normId)
+            val rawHandle = normId.removePrefix("@")
+            targetIds.add(rawHandle)
+            targetIds.add("@$rawHandle")
+            val cleanAlnumHandle = normalizeChannelName(rawHandle)
+            if (cleanAlnumHandle.isNotBlank()) {
+                targetIds.add(cleanAlnumHandle)
+                targetNames.add(cleanAlnumHandle)
             }
+
+            val trimmedName = ch.channelName.trim()
+            targetNames.add(trimmedName)
+            val normName = normalizeChannelName(trimmedName)
+            if (normName.isNotBlank()) {
+                targetNames.add(normName)
+                targetIds.add(normName)
+                targetIds.add("@$normName")
+            }
+            // Index distinct brand clauses separated by hyphen/pipe/bullet (e.g. "Physics Wallah - Alakh Pandey")
+            val clauses = trimmedName.split(Regex("\\s*[\\-|•·]+\\s*"))
+                .map { normalizeChannelName(it) }
+                .filter { it.length >= 4 }
+            targetNames.addAll(clauses)
         }
         cachedApprovedChannelIds.clear()
-        cachedApprovedChannelIds.addAll(newIds)
+        cachedApprovedChannelIds.addAll(newApprovedIds)
         cachedApprovedNormalizedNames.clear()
-        cachedApprovedNormalizedNames.addAll(newNames)
+        cachedApprovedNormalizedNames.addAll(newApprovedNames)
+
+        cachedBlockedChannelIds.clear()
+        cachedBlockedChannelIds.addAll(newBlockedIds)
+        cachedBlockedNormalizedNames.clear()
+        cachedBlockedNormalizedNames.addAll(newBlockedNames)
     }
 
     suspend fun refreshApprovedCache() {
         try {
-            val approved = studyChannelDao.getApprovedChannels()
-            updateCache(approved)
+            val all = studyChannelDao.getAllChannels()
+            updateCache(all)
         } catch (_: Exception) {}
     }
 
@@ -143,7 +154,10 @@ class StudyChannelRepository(
         channelName: String,
         channelUrl: String = "",
         isApproved: Boolean = true,
-        thumbnailUrl: String = ""
+        thumbnailUrl: String = "",
+        verifiedByAi: Boolean = false,
+        category: String = "",
+        aiReason: String = ""
     ): Result<StudyChannelEntity> {
         val trimmedName = channelName.trim()
         if (trimmedName.isBlank()) {
@@ -157,17 +171,17 @@ class StudyChannelRepository(
         val normInputName = normalizeChannelName(trimmedName)
         val existing = studyChannelDao.getChannelByChannelId(channelId)
         if (existing != null) {
-            if (!existing.isApproved && isApproved) {
-                studyChannelDao.setApprovalStatus(existing.id, true)
-                val updated = existing.copy(isApproved = true)
+            if (existing.isApproved != isApproved) {
+                studyChannelDao.setApprovalStatusAndManual(existing.id, isApproved)
+                val updated = existing.copy(isApproved = isApproved, verifiedByAi = false)
                 SyncTracker.enqueueUpsert(
                     SyncTables.STUDY_CHANNELS,
                     updated.id,
                     CloudJson.studyChannelToJson(updated).toString()
                 )
                 try {
-                    val approved = studyChannelDao.getApprovedChannels()
-                    updateCache(approved)
+                    val all = studyChannelDao.getAllChannels()
+                    updateCache(all)
                 } catch (_: Exception) {}
                 return Result.success(updated)
             }
@@ -181,7 +195,10 @@ class StudyChannelRepository(
             channelUrl = formattedUrl,
             thumbnailUrl = thumbnailUrl,
             isApproved = isApproved,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            verifiedByAi = verifiedByAi,
+            category = category,
+            aiReason = aiReason
         )
 
         studyChannelDao.insertChannel(entity)
@@ -192,21 +209,21 @@ class StudyChannelRepository(
             CloudJson.studyChannelToJson(entity).toString()
         )
 
-        if (isApproved) {
+        try {
+            val all = studyChannelDao.getAllChannels()
+            updateCache(all)
+        } catch (_: Exception) {
+            val targetIds = if (isApproved) cachedApprovedChannelIds else cachedBlockedChannelIds
+            val targetNames = if (isApproved) cachedApprovedNormalizedNames else cachedBlockedNormalizedNames
             val normId = channelId.trim().lowercase(Locale.ROOT)
-            cachedApprovedChannelIds.add(normId)
+            targetIds.add(normId)
             val rawHandle = normId.removePrefix("@")
-            cachedApprovedChannelIds.add(rawHandle)
-            cachedApprovedChannelIds.add("@$rawHandle")
-
-            cachedApprovedNormalizedNames.add(trimmedName)
+            targetIds.add(rawHandle)
+            targetIds.add("@$rawHandle")
+            targetNames.add(trimmedName)
             if (normInputName.isNotBlank()) {
-                cachedApprovedNormalizedNames.add(normInputName)
+                targetNames.add(normInputName)
             }
-            val words = trimmedName.split(Regex("[\\s\\-_|•·]+"))
-                .map { normalizeChannelName(it) }
-                .filter { it.length >= 2 }
-            cachedApprovedNormalizedNames.addAll(words)
         }
 
         // Cache logo to local storage and update Room with permanent local URI
@@ -226,8 +243,8 @@ class StudyChannelRepository(
         studyChannelDao.deleteChannelById(id)
         SyncTracker.enqueueDelete(SyncTables.STUDY_CHANNELS, id)
         try {
-            val approved = studyChannelDao.getApprovedChannels()
-            updateCache(approved)
+            val all = studyChannelDao.getAllChannels()
+            updateCache(all)
         } catch (_: Exception) {}
     }
 
@@ -245,19 +262,21 @@ class StudyChannelRepository(
         studyChannelDao.deleteAllChannels()
         cachedApprovedChannelIds.clear()
         cachedApprovedNormalizedNames.clear()
+        cachedBlockedChannelIds.clear()
+        cachedBlockedNormalizedNames.clear()
         channels.forEach { channel ->
             SyncTracker.enqueueDelete(SyncTables.STUDY_CHANNELS, channel.id)
         }
     }
 
     /**
-     * Enables or disables approval status for a channel.
+     * Enables or disables approval status for a channel (marks as manual user choice).
      */
     suspend fun toggleChannelApproval(id: String, isApproved: Boolean) {
-        studyChannelDao.setApprovalStatus(id, isApproved)
+        studyChannelDao.setApprovalStatusAndManual(id, isApproved)
         try {
-            val approved = studyChannelDao.getApprovedChannels()
-            updateCache(approved)
+            val all = studyChannelDao.getAllChannels()
+            updateCache(all)
         } catch (_: Exception) {}
         // Read back the full row so the reconcile pull never reverts an unpushed toggle.
         val updated = studyChannelDao.getChannelById(id)
@@ -268,6 +287,114 @@ class StudyChannelRepository(
                 CloudJson.studyChannelToJson(updated).toString()
             )
         }
+    }
+
+    /**
+     * Automatically records an AI-verified Educational or Entertainment channel so repeat visits
+     * resolve locally in 0ms using 0 AI credits. Never overwrites a user's existing channel entry.
+     */
+    suspend fun recordAiLearnedChannel(
+        channelName: String,
+        channelHandle: String? = null,
+        isApproved: Boolean,
+        category: String,
+        aiReason: String
+    ): StudyChannelEntity? {
+        val rawName = channelName.trim()
+        val rawHandle = channelHandle?.trim().orEmpty()
+        val displayName = rawName.ifBlank { rawHandle }
+        if (displayName.isBlank() || displayName.lowercase(Locale.ROOT) in IGNORED_GENERIC_CHANNEL_NAMES) {
+            return null
+        }
+
+        val identityInput = rawHandle.ifBlank { displayName }
+        val (channelId, formattedUrl) = extractChannelIdentity(identityInput)
+        val normName = normalizeChannelName(displayName)
+
+        val existingById = studyChannelDao.getChannelByChannelId(channelId)
+        if (existingById != null) return existingById
+
+        val existingByName = try {
+            studyChannelDao.getAllChannels().firstOrNull { ch ->
+                val chNorm = normalizeChannelName(ch.channelName)
+                val chIdNorm = normalizeChannelName(ch.channelId.removePrefix("@"))
+                normName.isNotBlank() && (chNorm == normName || chIdNorm == normName)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        if (existingByName != null) return existingByName
+
+        val cleanCategory = category.trim().ifBlank {
+            if (isApproved) "Educational" else "Entertainment"
+        }
+        val entity = StudyChannelEntity(
+            id = UUID.randomUUID().toString(),
+            channelId = channelId,
+            channelName = displayName,
+            channelUrl = formattedUrl,
+            thumbnailUrl = "",
+            isApproved = isApproved,
+            createdAt = System.currentTimeMillis(),
+            verifiedByAi = true,
+            category = cleanCategory,
+            aiReason = aiReason.trim()
+        )
+        studyChannelDao.insertChannel(entity)
+        SyncTracker.enqueueUpsert(
+            SyncTables.STUDY_CHANNELS,
+            entity.id,
+            CloudJson.studyChannelToJson(entity).toString()
+        )
+        try {
+            val all = studyChannelDao.getAllChannels()
+            updateCache(all)
+        } catch (_: Exception) {}
+
+        if (context != null) {
+            coroutineScope.launch {
+                ChannelLogoStorageManager.cacheAndPersistToDatabase(context, entity, studyChannelDao)
+            }
+        }
+        return entity
+    }
+
+    /**
+     * One-tap helper from the Recent AI Verdicts feed to mark a channel as Trusted (Always Allow)
+     * or Blocked (Always Deny) override.
+     */
+    suspend fun setChannelOverride(channelName: String, isTrusted: Boolean): Result<StudyChannelEntity> {
+        val trimmed = channelName.trim()
+        if (trimmed.isBlank()) {
+            return Result.failure(IllegalArgumentException("Channel name cannot be empty"))
+        }
+        val (channelId, formattedUrl) = extractChannelIdentity(trimmed)
+        val existing = studyChannelDao.getChannelByChannelId(channelId)
+        if (existing != null) {
+            toggleChannelApproval(existing.id, isTrusted)
+            return Result.success(existing.copy(isApproved = isTrusted, verifiedByAi = false))
+        }
+        return addChannel(
+            channelName = trimmed,
+            channelUrl = formattedUrl,
+            isApproved = isTrusted,
+            verifiedByAi = false,
+            category = if (isTrusted) "Manual Study" else "Manual Block"
+        )
+    }
+
+    companion object {
+        private val IGNORED_GENERIC_CHANNEL_NAMES = setOf(
+            "unknown channel",
+            "youtube",
+            "youtube channel",
+            "youtube creator",
+            "youtube video",
+            "ai verified study",
+            "approved channel",
+            "blocked channel",
+            "unapproved channel"
+        )
     }
 
     /**
@@ -295,12 +422,12 @@ class StudyChannelRepository(
     }
 
     fun getApprovedChannelIds(): Set<String> {
-        if (cachedApprovedChannelIds.isEmpty()) {
+        if (cachedApprovedChannelIds.isEmpty() && cachedBlockedChannelIds.isEmpty()) {
             try {
                 kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                    val approved = studyChannelDao.getApprovedChannels()
-                    if (approved.isNotEmpty()) {
-                        updateCache(approved)
+                    val all = studyChannelDao.getAllChannels()
+                    if (all.isNotEmpty()) {
+                        updateCache(all)
                     }
                 }
             } catch (_: Exception) {}
@@ -309,18 +436,22 @@ class StudyChannelRepository(
     }
 
     fun getApprovedChannelNames(): Set<String> {
-        if (cachedApprovedNormalizedNames.isEmpty()) {
+        if (cachedApprovedNormalizedNames.isEmpty() && cachedBlockedNormalizedNames.isEmpty()) {
             try {
                 kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                    val approved = studyChannelDao.getApprovedChannels()
-                    if (approved.isNotEmpty()) {
-                        updateCache(approved)
+                    val all = studyChannelDao.getAllChannels()
+                    if (all.isNotEmpty()) {
+                        updateCache(all)
                     }
                 }
             } catch (_: Exception) {}
         }
         return cachedApprovedNormalizedNames.toSet()
     }
+
+    fun getBlockedChannelIds(): Set<String> = cachedBlockedChannelIds.toSet()
+
+    fun getBlockedChannelNames(): Set<String> = cachedBlockedNormalizedNames.toSet()
 
     /**
      * Normalizes channel names for tolerant comparison (case, spaces, symbols).
@@ -332,31 +463,18 @@ class StudyChannelRepository(
     }
 
     /**
-     * Seeds initial curated educational channels if empty on first launch.
+     * Context-Aware AI Study Mode is now the primary authority for YouTube videos.
+     * Cleans up the legacy auto-seeded 'chan_pw' entry so the channel override list starts clean.
      */
     suspend fun initializeDefaultChannelsIfEmpty() {
-        if (studyChannelDao.getChannelCount() == 0) {
-            val defaults = listOf(
-                StudyChannelEntity(
-                    id = "chan_pw",
-                    channelId = "@PhysicsWallah",
-                    channelName = "Physics Wallah - Alakh Pandey",
-                    channelUrl = "https://www.youtube.com/@PhysicsWallah",
-                    thumbnailUrl = "https://yt3.googleusercontent.com/ytc/AIdro_k6P07VvjV81tP4z9K82vK9Y-xM5oA=s176-c-k-c0x00ffffff-no-rj",
-                    isApproved = true
-                )
-            )
-            studyChannelDao.insertAll(defaults)
-            defaults.forEach {
-                SyncTracker.enqueueUpsert(
-                    SyncTables.STUDY_CHANNELS,
-                    it.id,
-                    CloudJson.studyChannelToJson(it).toString()
-                )
-                cachedApprovedChannelIds.add(it.channelId.trim().lowercase(Locale.ROOT))
-                cachedApprovedNormalizedNames.add(normalizeChannelName(it.channelName))
+        try {
+            val legacyDefault = studyChannelDao.getChannelById("chan_pw")
+            if (legacyDefault != null) {
+                studyChannelDao.deleteChannelById("chan_pw")
+                val remaining = studyChannelDao.getAllChannels()
+                updateCache(remaining)
             }
-        }
+        } catch (_: Exception) {}
     }
 }
 

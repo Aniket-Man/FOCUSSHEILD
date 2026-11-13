@@ -37,6 +37,9 @@ interface StudyChannelDao {
     @Query("UPDATE study_channels SET isApproved = :isApproved WHERE id = :id")
     suspend fun setApprovalStatus(id: String, isApproved: Boolean)
 
+    @Query("UPDATE study_channels SET isApproved = :isApproved, verifiedByAi = 0 WHERE id = :id")
+    suspend fun setApprovalStatusAndManual(id: String, isApproved: Boolean)
+
     @Query("UPDATE study_channels SET thumbnailUrl = :thumbnailUrl WHERE id = :id")
     suspend fun updateThumbnailUrl(id: String, thumbnailUrl: String)
 

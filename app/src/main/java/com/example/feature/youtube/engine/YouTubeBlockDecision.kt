@@ -24,7 +24,9 @@ data class YouTubeBlockDecision(
     val matchedKeyword: String? = null,
     val isShorts: Boolean = false,
     val isAdPlaying: Boolean = false,
-    val needsExitFullScreenForVerification: Boolean = false
+    val needsExitFullScreenForVerification: Boolean = false,
+    val aiCategory: String? = null,
+    val latencyMs: Long? = null
 ) {
     companion object {
         val ALLOW_NAVIGATION = YouTubeBlockDecision(
@@ -49,6 +51,40 @@ data class YouTubeBlockDecision(
             detectedTitle = title,
             detectedChannel = channel,
             isAdPlaying = isAdPlaying
+        )
+
+        fun approvedByAi(
+            channel: String?,
+            title: String?,
+            reason: String,
+            category: String? = null,
+            latencyMs: Long? = null,
+            isAdPlaying: Boolean = false
+        ): YouTubeBlockDecision = YouTubeBlockDecision(
+            verdict = YouTubeBlockVerdict.ALLOW,
+            reason = reason,
+            detectedTitle = title,
+            detectedChannel = channel,
+            isAdPlaying = isAdPlaying,
+            aiCategory = category,
+            latencyMs = latencyMs
+        )
+
+        fun blockedByAi(
+            channel: String?,
+            title: String?,
+            reason: String,
+            category: String? = null,
+            latencyMs: Long? = null,
+            matchedKeyword: String? = null
+        ): YouTubeBlockDecision = YouTubeBlockDecision(
+            verdict = YouTubeBlockVerdict.BLOCK_UNAPPROVED_CHANNEL,
+            reason = reason,
+            detectedTitle = title,
+            detectedChannel = channel,
+            matchedKeyword = matchedKeyword,
+            aiCategory = category,
+            latencyMs = latencyMs
         )
 
         fun blockedChannel(channel: String?, keyword: String? = null): YouTubeBlockDecision = YouTubeBlockDecision(

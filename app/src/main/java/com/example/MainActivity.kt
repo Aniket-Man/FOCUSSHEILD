@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MyApplication)
         super.onCreate(savedInstanceState)
+        com.example.cloud.ai.configureAppCheck(this, intent)
         enableEdgeToEdge()
         handleIncomingIntent(intent)
 

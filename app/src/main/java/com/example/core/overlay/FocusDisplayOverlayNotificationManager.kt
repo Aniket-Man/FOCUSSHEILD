@@ -75,6 +75,29 @@ object FocusDisplayOverlayNotificationManager {
     }
 
     /**
+     * Show compact bottom HUD when Auto-Pilot AI Study Guard blocks a non-study video.
+     */
+    fun showAiVideoBlockedHud(
+        context: Context,
+        channelName: String,
+        reason: String,
+        latencyMs: Long? = null,
+        onAllowAnyway: (() -> Unit)? = null
+    ) {
+        val speedBadge = if (latencyMs != null && latencyMs >= 0L) " (${latencyMs}ms)" else ""
+        val cleanReason = reason.trim().ifBlank { "$channelName blocked as entertainment." }
+        showHud(
+            context = context,
+            title = "AI Study Guard Blocked$speedBadge",
+            message = cleanReason,
+            accentColor = Color.parseColor("#8B5CF6"),
+            durationMs = if (onAllowAnyway != null) 4500L else 2800L,
+            actionLabel = if (onAllowAnyway != null) "Allow Anyway" else null,
+            onActionClick = onAllowAnyway
+        )
+    }
+
+    /**
      * Show compact bottom HUD when an adult website is blocked.
      */
     fun showAdultSiteBlockedHud(context: Context, domain: String) {
@@ -123,6 +146,15 @@ object FocusDisplayOverlayNotificationManager {
     }
 
     /**
+     * Dismisses any currently visible HUD overlay safely from any thread.
+     */
+    fun dismissHud() {
+        mainHandler.post {
+            dismissActiveHud()
+        }
+    }
+
+    /**
      * Renders a compact floating HUD pill banner at the bottom of the screen or falls back to standard Toast.
      */
     fun showHud(
@@ -130,12 +162,22 @@ object FocusDisplayOverlayNotificationManager {
         title: String,
         message: String,
         accentColor: Int = Color.parseColor("#38BDF8"),
-        durationMs: Long = 2800L
+        durationMs: Long = 2800L,
+        actionLabel: String? = null,
+        onActionClick: (() -> Unit)? = null
     ) {
         mainHandler.post {
             try {
                 if (Settings.canDrawOverlays(context)) {
-                    renderWindowOverlay(context, title, message, accentColor, durationMs)
+                    renderWindowOverlay(
+                        context = context,
+                        title = title,
+                        message = message,
+                        accentColor = accentColor,
+                        durationMs = durationMs,
+                        actionLabel = actionLabel,
+                        onActionClick = onActionClick
+                    )
                 } else {
                     // Fallback to stylized Toast if overlay permission is not granted
                     Toast.makeText(
@@ -162,7 +204,9 @@ object FocusDisplayOverlayNotificationManager {
         title: String,
         message: String,
         accentColor: Int,
-        durationMs: Long
+        durationMs: Long,
+        actionLabel: String? = null,
+        onActionClick: (() -> Unit)? = null
     ) {
         dismissActiveHud()
 
@@ -171,16 +215,17 @@ object FocusDisplayOverlayNotificationManager {
 
         val density = context.resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
+        val hasAction = !actionLabel.isNullOrBlank() && onActionClick != null
 
         // Square card with small rounded corners and white background
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(12), dp(10), dp(16), dp(10))
+            setPadding(dp(12), dp(10), dp(14), dp(10))
             gravity = Gravity.CENTER_VERTICAL
 
             val bg = GradientDrawable().apply {
                 setColor(Color.WHITE) // Pure white background
-                cornerRadius = dp(10).toFloat() // Small rounded corners (square card shape)
+                cornerRadius = dp(12).toFloat()
                 setStroke(dp(1), Color.parseColor("#E2E8F0")) // Subtle clean border
             }
             background = bg
@@ -189,7 +234,7 @@ object FocusDisplayOverlayNotificationManager {
 
         // Left accent strip indicator for visual hierarchy
         val accentStrip = View(context).apply {
-            val stripParams = LinearLayout.LayoutParams(dp(4), dp(32)).apply {
+            val stripParams = LinearLayout.LayoutParams(dp(4), dp(34)).apply {
                 marginEnd = dp(10)
             }
             layoutParams = stripParams
@@ -203,7 +248,7 @@ object FocusDisplayOverlayNotificationManager {
 
         // Official FocusShield logo with the white open-book mark
         val appLogoView = ImageView(context).apply {
-            val logoSize = dp(32)
+            val logoSize = dp(30)
             layoutParams = LinearLayout.LayoutParams(logoSize, logoSize).apply {
                 marginEnd = dp(10)
             }
@@ -215,10 +260,14 @@ object FocusDisplayOverlayNotificationManager {
         // Text content container
         val textContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = if (hasAction) {
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            } else {
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
         }
 
         val titleView = TextView(context).apply {
@@ -227,6 +276,7 @@ object FocusDisplayOverlayNotificationManager {
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         textContainer.addView(titleView)
 
@@ -235,13 +285,48 @@ object FocusDisplayOverlayNotificationManager {
             setTextColor(Color.parseColor("#475569")) // Medium dark slate for readability on white
             textSize = 11.5f
             setPadding(0, dp(1), 0, 0)
-            maxLines = 1
+            maxLines = if (hasAction) 2 else 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         textContainer.addView(messageView)
 
         rootLayout.addView(textContainer)
 
-        // Tap to dismiss
+        if (hasAction) {
+            val actionButton = TextView(context).apply {
+                text = actionLabel
+                setTextColor(Color.parseColor("#6D28D9"))
+                textSize = 11.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                minHeight = dp(36)
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                val btnBg = GradientDrawable().apply {
+                    setColor(Color.parseColor("#F3E8FF"))
+                    cornerRadius = dp(18).toFloat()
+                    setStroke(dp(1), Color.parseColor("#DDD6FE"))
+                }
+                background = btnBg
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginStart = dp(10)
+                }
+                setOnClickListener {
+                    try {
+                        onActionClick?.invoke()
+                    } finally {
+                        dismissActiveHud()
+                    }
+                }
+            }
+            rootLayout.addView(actionButton)
+        }
+
+        // Tap card body to dismiss
         rootLayout.setOnClickListener {
             dismissActiveHud()
         }
@@ -253,8 +338,14 @@ object FocusDisplayOverlayNotificationManager {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        val overlayWidth = if (hasAction) {
+            (context.resources.displayMetrics.widthPixels - dp(24)).coerceAtMost(dp(440))
+        } else {
+            WindowManager.LayoutParams.WRAP_CONTENT
+        }
+
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayWidth,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -263,7 +354,7 @@ object FocusDisplayOverlayNotificationManager {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dp(48) // Positioned neatly near the bottom of the screen
+            y = dp(56) // Positioned cleanly above bottom gesture bar
         }
 
         // Animate entrance: Slide up subtly from bottom

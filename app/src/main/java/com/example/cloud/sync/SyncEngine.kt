@@ -446,6 +446,9 @@ class SyncEngine(
             val thumbnailUrl = doc.readString("thumbnailUrl") ?: ""
             val isApproved = doc.readBoolean("isApproved") ?: true
             val createdAt = doc.readMillis("createdAt") ?: System.currentTimeMillis()
+            val verifiedByAi = doc.readBoolean("verifiedByAi") ?: false
+            val category = doc.readString("category") ?: ""
+            val aiReason = doc.readString("aiReason") ?: ""
 
             remoteChannelIdsSeen.add(id)
 
@@ -461,7 +464,10 @@ class SyncEngine(
                     channelUrl = channelUrl,
                     thumbnailUrl = thumbnailUrl,
                     isApproved = isApproved,
-                    createdAt = createdAt
+                    createdAt = createdAt,
+                    verifiedByAi = verifiedByAi,
+                    category = category,
+                    aiReason = aiReason
                 )
                 database.studyChannelDao().insertChannel(restoredChannel)
                 if (appContext != null) {
@@ -475,12 +481,19 @@ class SyncEngine(
                     }
                 }
             } else if (existing.id !in locallyModifiedChannelIds) {
-                if (existing.isApproved != isApproved || existing.channelName != channelName) {
+                if (existing.isApproved != isApproved ||
+                    existing.channelName != channelName ||
+                    existing.verifiedByAi != verifiedByAi ||
+                    existing.category != category
+                ) {
                     val updatedChannel = existing.copy(
                         channelName = channelName,
                         channelUrl = channelUrl.ifBlank { existing.channelUrl },
                         thumbnailUrl = existing.thumbnailUrl.ifBlank { thumbnailUrl },
-                        isApproved = isApproved
+                        isApproved = isApproved,
+                        verifiedByAi = verifiedByAi,
+                        category = category.ifBlank { existing.category },
+                        aiReason = aiReason.ifBlank { existing.aiReason }
                     )
                     database.studyChannelDao().updateChannel(updatedChannel)
                 }
@@ -1440,6 +1453,9 @@ class SyncEngine(
             "channelUrl" to channel.channelUrl,
             "thumbnailUrl" to remoteThumb,
             "isApproved" to channel.isApproved,
+            "verifiedByAi" to channel.verifiedByAi,
+            "category" to channel.category,
+            "aiReason" to channel.aiReason,
             "createdAt" to Timestamp(Date(channel.createdAt)),
             "updatedAt" to Timestamp(Date(System.currentTimeMillis()))
         )

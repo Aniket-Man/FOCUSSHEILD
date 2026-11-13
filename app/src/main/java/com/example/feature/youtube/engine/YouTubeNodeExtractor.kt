@@ -95,7 +95,9 @@ object YouTubeNodeExtractor {
         "$YT:id/watch_title_text",
         "$YT:id/watch_metadata_title",
         "$YT:id/title_and_badge",
-        "$YT:id/headline_title"
+        "$YT:id/headline_title",
+        "$YT:id/player_video_title_view",
+        "$YT:id/watch_header_title"
     )
 
     private val TITLE_VIEW_IDS = listOf(
@@ -103,6 +105,10 @@ object YouTubeNodeExtractor {
         "$YT:id/watch_metadata_title",
         "$YT:id/title_and_badge",
         "$YT:id/headline_title",
+        "$YT:id/player_video_title_view",
+        "$YT:id/watch_header_title",
+        "$YT:id/video_title",
+        "$YT:id/title_text",
         "$YT:id/title"
     )
 
@@ -552,7 +558,8 @@ object YouTubeNodeExtractor {
 
     /**
      * Extracts the title of the video currently on the watch page.
-     * Strictly prioritizes dedicated watch header title views and ignores recommendation cards.
+     * Prioritizes dedicated watch header title views, then falls back to scanning the
+     * upper Litho watch metadata header while strictly ignoring recommendation cards.
      */
     fun extractVideoTitle(rootNode: AccessibilityNodeInfo?): String? {
         if (rootNode == null) return null
@@ -563,11 +570,14 @@ object YouTubeNodeExtractor {
         }
         if (strictHeaderTitle != null) return strictHeaderTitle
 
-        return findFirstMatching(rootNode, TITLE_VIEW_IDS) { node ->
+        val genericTitle = findFirstMatching(rootNode, TITLE_VIEW_IDS) { node ->
             if (isInsideExcludedContainer(node)) return@findFirstMatching null
-            val text = node.text?.toString()?.trim()
+            val text = node.text?.toString()?.trim() ?: node.contentDescription?.toString()?.trim()
             if (!text.isNullOrBlank() && text.length >= 3) text else null
         }
+        if (genericTitle != null) return genericTitle
+
+        return extractLithoWatchTitle(rootNode)
     }
 
     /**
@@ -580,6 +590,127 @@ object YouTubeNodeExtractor {
             val text = node.text?.toString()?.trim() ?: node.contentDescription?.toString()?.trim()
             if (!text.isNullOrBlank() && text.length >= 3) text else null
         }
+    }
+
+    private val IGNORED_LITHO_HEADER_LABELS = setOf(
+        "subscribe", "subscribed", "unsubscribe", "join", "share", "remix", "download",
+        "clip", "save", "report", "stop ads", "comments", "top comments", "newest first",
+        "all", "related", "for you", "from your search", "watched", "live chat",
+        "transcript", "more", "less", "show more", "show less", "play video", "pause video",
+        "play", "pause", "enter full screen", "exit full screen", "full screen", "mute",
+        "unmute", "captions", "subtitles", "settings", "video quality", "playback speed",
+        "autoplay is on", "autoplay is off", "previous video", "next video", "minimize",
+        "close", "collapse", "expand", "like", "dislike", "action menu", "navigate up"
+    )
+
+    /**
+     * Extracts the video title from modern YouTube Litho watch headers that do not expose
+     * `watch_title_text` or `watch_metadata_title` resource IDs.
+     * Scans only the watch header / upper watch container before any recommendation card.
+     */
+    fun extractLithoWatchTitle(rootNode: AccessibilityNodeInfo?): String? {
+        if (rootNode == null || isFullScreenVideoPlayback(rootNode)) return null
+        try {
+            val watchContainer = findFirstMatching(rootNode, WATCH_CONTAINER_VIEW_IDS) { it } ?: rootNode
+            val identity = extractChannelIdentity(rootNode)
+            val knownChannelName = identity.channelName?.trim()
+            val knownHandle = identity.channelHandle?.trim()
+
+            val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+            queue.add(watchContainer to 0)
+            var visited = 0
+            while (queue.isNotEmpty() && visited < 120) {
+                val (node, depth) = queue.removeFirst()
+                visited++
+
+                val resId = node.viewIdResourceName ?: ""
+                val rawResId = resId.substringAfterLast(":id/").substringAfterLast("/")
+                if (YouTubeDetectionRules.EXCLUDED_RECOMMENDATION_VIEW_IDS.any { resId.contains(it, ignoreCase = true) }) {
+                    continue
+                }
+                if (isInsideExcludedContainer(node)) {
+                    continue
+                }
+                val isChannelOrControlNode = rawResId.contains("channel", ignoreCase = true) ||
+                        rawResId.contains("owner", ignoreCase = true) ||
+                        rawResId.contains("subscribe", ignoreCase = true) ||
+                        rawResId.contains("byline", ignoreCase = true) ||
+                        rawResId.contains("time_bar", ignoreCase = true) ||
+                        rawResId.contains("player_control", ignoreCase = true)
+
+                if (!isChannelOrControlNode) {
+                    val candidates = listOfNotNull(
+                        node.text?.toString()?.trim(),
+                        node.contentDescription?.toString()?.trim()
+                    )
+                    for (raw in candidates) {
+                        val cleaned = cleanLithoWatchTitleCandidate(raw, knownChannelName, knownHandle)
+                        if (cleaned != null) {
+                            return cleaned
+                        }
+                    }
+                }
+
+                if (depth >= 12) continue
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child to depth + 1)
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    internal fun cleanLithoWatchTitleCandidate(
+        raw: String,
+        knownChannelName: String?,
+        knownHandle: String?
+    ): String? {
+        if (raw.isBlank()) return null
+        // Skip feed/recommendation card accessibility strings
+        if (raw.contains(" - Go to channel - ", ignoreCase = true) ||
+            raw.endsWith("- play video", ignoreCase = true)
+        ) {
+            return null
+        }
+        var text = raw
+            .substringBefore(" • ")
+            .substringBefore(" · ")
+            .trim()
+        if (text.length < 6 || text.length > 220) return null
+        val lower = text.lowercase()
+        if (lower in IGNORED_LITHO_HEADER_LABELS) return null
+        if (lower.startsWith("subscribe to ") ||
+            lower.startsWith("subscribed to ") ||
+            lower.startsWith("go to channel ") ||
+            lower.startsWith("like this video") ||
+            lower.startsWith("dislike this video") ||
+            lower.startsWith("save to playlist") ||
+            lower.startsWith("share video") ||
+            lower.startsWith("@")
+        ) {
+            return null
+        }
+        if (HANDLE_REGEX.matches(text)) return null
+        if (isViewCount(text) || isDuration(text)) return null
+        // Reject view count + timestamp metadata lines like "12K views 2 days ago #physics"
+        if (Regex("^[0-9][0-9.,]*\\s*[KMkm]?\\s*(views?|subscribers?|likes?|comments?)\\b.*", RegexOption.IGNORE_CASE).matches(text)) {
+            return null
+        }
+        if (Regex("^[0-9]+\\s+(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\\s+ago\\b.*", RegexOption.IGNORE_CASE).matches(text)) {
+            return null
+        }
+        // Do not confuse the channel's own name or handle with the video title
+        if (!knownChannelName.isNullOrBlank() && text.equals(knownChannelName, ignoreCase = true)) {
+            return null
+        }
+        if (!knownHandle.isNullOrBlank() && text.equals(knownHandle.removePrefix("@"), ignoreCase = true)) {
+            return null
+        }
+        // Require at least 2 words or a title >= 10 chars with letters
+        val wordCount = text.split(Regex("\\s+")).count { it.any { ch -> ch.isLetter() } }
+        if (wordCount < 2 && text.length < 12) return null
+        return text
     }
 
     /**
@@ -844,6 +975,18 @@ object YouTubeNodeExtractor {
                     if (!cleanedChannel.isNullOrBlank()) {
                         return cleanedChannel to titlePart.takeIf { it.isNotBlank() }
                     }
+                }
+            }
+
+            // Fallback for Litho cards that expose "<Title> - play video" or a multi-word video title on click
+            for (raw in candidates) {
+                val cleanedTitle = cleanLithoWatchTitleCandidate(
+                    raw = raw.removeSuffix("- play video").removeSuffix(" - play video").trim(),
+                    knownChannelName = null,
+                    knownHandle = null
+                )
+                if (!cleanedTitle.isNullOrBlank() && cleanedTitle.length >= 8) {
+                    return null to cleanedTitle
                 }
             }
         } catch (_: Exception) {}
@@ -1348,5 +1491,43 @@ object YouTubeNodeExtractor {
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    /**
+     * Extracts up to 5 visible video card (title, channelName) pairs on YouTube Search Results
+     * or Channel pages in a bounded BFS pass (max 120 nodes) so [YouTubeAiStudyClassifier]
+     * can speculatively pre-warm verdicts in the background before the user taps a video.
+     */
+    fun extractVisibleSearchCandidateTitles(rootNode: AccessibilityNodeInfo?): List<Pair<String, String?>> {
+        if (rootNode == null) return emptyList()
+        val results = mutableListOf<Pair<String, String?>>()
+        try {
+            val queue = ArrayDeque<AccessibilityNodeInfo>()
+            queue.add(rootNode)
+            var visited = 0
+            val marker = " - Go to channel - "
+            while (queue.isNotEmpty() && visited < 120 && results.size < 5) {
+                val node = queue.removeFirst()
+                visited++
+                val desc = node.contentDescription?.toString()?.trim() ?: ""
+                if (desc.isNotEmpty()) {
+                    val idx = desc.indexOf(marker, ignoreCase = true)
+                    if (idx > 3) {
+                        val beforeMarker = desc.substring(0, idx).trim()
+                        val afterMarker = desc.substring(idx + marker.length).trim()
+                        val channelPart = cleanChannelName(afterMarker.substringBefore(" - ").trim())
+                        val titlePart = beforeMarker.substringBeforeLast(" - ").trim().ifEmpty { beforeMarker }
+                        if (titlePart.length >= 5 && results.none { it.first.equals(titlePart, ignoreCase = true) }) {
+                            results.add(titlePart to channelPart)
+                        }
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = try { node.getChild(i) } catch (_: Exception) { null }
+                    if (child != null) queue.add(child)
+                }
+            }
+        } catch (_: Exception) {}
+        return results
     }
 }

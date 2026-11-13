@@ -315,6 +315,9 @@ object CloudJson {
         .put("thumbnailUrl", e.thumbnailUrl)
         .put("isApproved", e.isApproved)
         .put("createdAt", e.createdAt)
+        .put("verifiedByAi", e.verifiedByAi)
+        .put("category", e.category)
+        .put("aiReason", e.aiReason)
 
     fun studyChannelFromCloud(j: JSONObject): StudyChannelEntity = StudyChannelEntity(
         id = j.identity(SyncTables.STUDY_CHANNELS, "id"),
@@ -324,7 +327,10 @@ object CloudJson {
         channelUrl = j.text(SyncTables.STUDY_CHANNELS, "channelUrl", ""),
         thumbnailUrl = j.text(SyncTables.STUDY_CHANNELS, "thumbnailUrl", ""),
         isApproved = j.bool("isApproved", true),
-        createdAt = j.requiredLng(SyncTables.STUDY_CHANNELS, "createdAt")
+        createdAt = j.requiredLng(SyncTables.STUDY_CHANNELS, "createdAt"),
+        verifiedByAi = j.bool("verifiedByAi", false),
+        category = j.optString("category", ""),
+        aiReason = j.optString("aiReason", "")
     )
 
     // ---- study_subjects --------------------------------------------------------------
