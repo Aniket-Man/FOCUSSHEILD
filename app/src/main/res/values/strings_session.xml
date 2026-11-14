@@ -122,6 +122,23 @@
     <string name="session_sheet_floating">Block floating windows</string>
     <string name="session_sheet_floating_body">Prevents blocked apps from opening in floating windows</string>
     <string name="session_sheet_start_now">Start focus now</string>
+    <string name="session_sheet_continue">Continue</string>
+    <plurals name="session_channels_added">
+        <item quantity="one">%1$d channel added</item>
+        <item quantity="other">%1$d channels added</item>
+    </plurals>
+    <string name="session_ultra_focus">Ultra focus</string>
+    <string name="session_ultra_focus_body">Achieve non-stop focus</string>
+    <string name="session_ultra_focus_settings">Ultra Focus Settings</string>
+    <string name="session_ultra_strict">Strict mode</string>
+    <string name="session_ultra_strict_body">You cannot quit till timer ends</string>
+    <string name="session_ultra_youtube">YouTube Study Mode</string>
+    <string name="session_ultra_favorite">♥ Students’ favorite feature</string>
+    <string name="session_ultra_uninstall">Uninstall Protection</string>
+    <string name="session_ultra_uninstall_body">Cannot uninstall FocusShield</string>
+    <string name="session_ultra_notifications">Block Notifications</string>
+    <string name="session_ultra_notifications_body">Block notifications from apps</string>
+    <string name="session_ultra_home">Block home screen</string>
 
     <!-- Protection setup dialog -->
     <string name="session_protection_title">FocusShield setup</string>
@@ -184,7 +201,7 @@
     <string name="session_break_continue">Continue studying</string>
 
     <!-- Select apps sheet -->
-    <string name="session_apps_title">Select apps to block</string>
+    <string name="session_apps_title">Select Apps to Block</string>
     <string name="session_apps_search">Search apps</string>
     <string name="session_apps_search_desc">Search installed apps</string>
     <string name="session_apps_special">Special apps</string>
@@ -198,8 +215,14 @@
     <string name="session_apps_limit_set">App limit set</string>
     <string name="session_apps_block_all">Block completely</string>
     <string name="session_apps_allow_all">Allow completely</string>
-    <string name="session_apps_study_mode">Study mode</string>
+    <string name="session_apps_study_mode">Study Mode</string>
     <string name="session_apps_toggle_section">Expand or collapse this section</string>
+    <string name="session_apps_block_shorts">Block Shorts</string>
+    <string name="session_apps_block_homepage">Block homepage</string>
+    <string name="session_apps_block_adult">Block adult content</string>
+    <string name="session_apps_websites_allowed">Manage allowed websites</string>
+    <string name="session_apps_distracting_short">Distracting</string>
+    <string name="session_apps_others">Others</string>
 
     <!-- Session summary -->
     <string name="session_summary_title">Session summary</string>

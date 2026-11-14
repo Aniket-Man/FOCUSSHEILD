@@ -237,6 +237,8 @@ fun FocusScheduleDialog(
     val app = remember(context) { context.applicationContext as FocusShieldApp }
     val preferencesRepository = remember(app) { app.preferencesRepository }
     val subjectRepository = remember(app) { app.subjectRepository }
+    val approvedChannels by app.studyChannelRepository.approvedChannels
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val coroutineScope = rememberCoroutineScope()
     val scheduleKey = initialSchedule?.id ?: "new_schedule"
 
@@ -501,6 +503,7 @@ fun FocusScheduleDialog(
                         browserOption = browserOption,
                         isDistractingMasterEnabled = isDistractingMasterEnabled,
                         blockedAppPackages = selectedBlockedPackages,
+                        approvedChannelCount = approvedChannels.size,
                         onYoutubeOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(

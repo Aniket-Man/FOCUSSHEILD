@@ -1,16 +1,12 @@
 package com.example.feature.session.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,38 +14,33 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,17 +50,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.core.design.FocusColors
-import com.example.core.design.FocusShapes
 import com.example.core.design.FocusSpacing
 import com.example.core.ui.FocusSearchField
 import com.example.core.util.InstalledAppItem
@@ -82,6 +74,7 @@ fun SelectAppsToBlockSheet(
     browserOption: SpecialAppOption,
     isDistractingMasterEnabled: Boolean,
     blockedAppPackages: Set<String>,
+    approvedChannelCount: Int = 0,
     onYoutubeOptionChange: (SpecialAppOption) -> Unit,
     onBrowserOptionChange: (SpecialAppOption) -> Unit,
     onToggleDistractingMaster: (Boolean, Set<String>) -> Unit,
@@ -94,8 +87,13 @@ fun SelectAppsToBlockSheet(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var installedBrowsers by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
+    var installedApps by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
+    var hasScannedApps by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
-    val handleClose: () -> Unit = {
+    val close: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
         onClose()
@@ -108,599 +106,486 @@ fun SelectAppsToBlockSheet(
         }
     }
 
-    var searchQuery by remember { mutableStateOf("") }
-
-    var installedBrowsers by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
-    var installedUserApps by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
-    var hasScannedApps by remember { mutableStateOf(false) }
-
-    var isSpecialAppsExpanded by remember { mutableStateOf(true) }
-    var isDistractingExpanded by remember { mutableStateOf(true) }
-
-    // The YouTube channel manager and the website blocker are pages of the single setup sheet
-    // (SetupSubView.YOUTUBE_CHANNELS / SetupSubView.WEBSITE_BLOCKER), so this screen only reports
-    // the navigation intent upward (issue #52).
-
     LaunchedEffect(Unit) {
-        val limitEntities = try {
+        val appLimitPackages = runCatching {
             com.example.FocusShieldApp.instance.appLimitRepository.getAllLimits()
-        } catch (e: Exception) {
-            emptyList()
-        }
-        val limitPkgs = limitEntities.filter { it.isEnabled }.map { it.packageName }.toSet()
-
-        // One off-main-thread pass for both inventories (the provider also avoids querying the
-        // browser list twice). Icons arrive already rasterised; the UI only draws the bitmaps.
-        val snapshot = InstalledAppsProvider.getInstalledAppsSnapshot(context, limitPkgs)
+                .filter { it.isEnabled }
+                .mapTo(mutableSetOf()) { it.packageName }
+        }.getOrElse { mutableSetOf() }
+        val snapshot = InstalledAppsProvider.getInstalledAppsSnapshot(context, appLimitPackages)
         installedBrowsers = snapshot.browsers
-        installedUserApps = snapshot.userApps
+        installedApps = snapshot.userApps
         hasScannedApps = true
-        // Daily app limits only label rows here. Session blocking stays an explicit choice and
-        // never inherits (or silently adds) app-limit packages.
+
+        // A daily limit is a strong signal that the app is distracting. Mirror it into this
+        // session draft only; the permanent blocked-app repository is never changed here.
+        snapshot.userApps
+            .filter { it.hasAppLimit && it.packageName !in blockedAppPackages }
+            .forEach { onToggleAppBlocked(it.packageName, true) }
     }
 
-    val filteredUserApps = remember(installedUserApps, searchQuery) {
-        if (searchQuery.isBlank()) {
-            installedUserApps
-        } else {
-            installedUserApps.filter { it.appName.contains(searchQuery, ignoreCase = true) }
+    val visibleApps = remember(installedApps, searchQuery) {
+        if (searchQuery.isBlank()) installedApps else installedApps.filter {
+            it.appName.contains(searchQuery, ignoreCase = true) ||
+                it.packageName.contains(searchQuery, ignoreCase = true)
         }
     }
-
-    val allUserAppPackages = remember(installedUserApps) {
-        installedUserApps.map { it.packageName }.toSet()
+    val distractingApps = remember(visibleApps) { visibleApps.filter(::isLikelyDistracting) }
+    val otherApps = remember(visibleApps, distractingApps) {
+        val distractingPackages = distractingApps.mapTo(mutableSetOf()) { it.packageName }
+        visibleApps.filterNot { it.packageName in distractingPackages }
     }
-
-    val searchLabel = stringResource(R.string.session_apps_search)
-    val distractingAppsLabel = stringResource(R.string.session_apps_distracting)
-    val clearSearchLabel = stringResource(R.string.action_clear_search)
-    val toggleSectionLabel = stringResource(R.string.session_apps_toggle_section)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.84f)
-            .background(FocusColors.Surface)
-            .padding(horizontal = FocusSpacing.screenHorizontal, vertical = 16.dp)
+            .fillMaxHeight(0.94f)
+            .background(FocusColors.Background)
+            .padding(horizontal = FocusSpacing.screenHorizontal)
+            .padding(top = 12.dp)
     ) {
-        // Header Row: Back + Title + Close Button
+        Box(
+            Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(44.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(FocusColors.ControlBorder)
+        )
+        Spacer(Modifier.height(16.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                IconButton(
-                    onClick = handleClose,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = stringResource(R.string.action_back),
-                        tint = FocusColors.TextPrimary
-                    )
-                }
-
-                Text(
-                    text = stringResource(R.string.session_apps_title),
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        color = FocusColors.TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 19.sp
-                    )
-                )
-            }
-
-            IconButton(
-                onClick = handleClose,
+            Text(
+                text = stringResource(R.string.session_apps_title),
+                color = FocusColors.TextPrimary,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(FocusColors.SurfaceVariant)
-            ) {
+                    .weight(1f)
+                    .semantics { heading() }
+            )
+            IconButton(onClick = close) {
                 Icon(
-                    imageVector = Icons.Rounded.Close,
+                    Icons.Rounded.Close,
                     contentDescription = stringResource(R.string.action_close),
-                    tint = FocusColors.TextPrimary,
-                    modifier = Modifier.size(20.dp)
+                    tint = FocusColors.TextSecondary
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
+        Spacer(Modifier.height(10.dp))
         FocusSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            label = searchLabel,
+            label = stringResource(R.string.session_apps_search),
             onSearch = {
                 focusManager.clearFocus()
                 keyboardController?.hide()
             },
             modifier = Modifier.testTag("blocked_apps_search_field")
         )
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // SECTION 1: Special Apps (YouTube & Browsers)
-            if (
-                searchQuery.isBlank() ||
-                "youtube".contains(searchQuery, ignoreCase = true) ||
-                "browser".contains(searchQuery, ignoreCase = true)
-            ) {
+            if (searchQuery.isBlank() || "youtube".contains(searchQuery, true)) {
+                item(key = "youtube") {
+                    YouTubeSettingsCard(
+                        option = youtubeOption,
+                        channelCount = approvedChannelCount,
+                        onOptionChange = onYoutubeOptionChange,
+                        onOpenChannels = onOpenYouTubeChannels
+                    )
+                }
+            }
+            if (searchQuery.isBlank() || "browser apps".contains(searchQuery, true)) {
+                item(key = "browsers") {
+                    BrowserSettingsCard(
+                        browsers = installedBrowsers,
+                        option = browserOption,
+                        onOptionChange = onBrowserOptionChange,
+                        onOpenWebsiteBlocker = onOpenWebsiteBlocker
+                    )
+                }
+            }
+
+            if (distractingApps.isNotEmpty()) {
+                item(key = "distracting") {
+                    AppGroupCard(
+                        title = stringResource(R.string.session_apps_distracting_short),
+                        apps = distractingApps,
+                        blockedPackages = blockedAppPackages,
+                        fallbackGroupChecked = isDistractingMasterEnabled,
+                        onToggleGroup = onToggleDistractingMaster,
+                        onToggleApp = onToggleAppBlocked
+                    )
+                }
+            }
+            if (otherApps.isNotEmpty()) {
+                item(key = "others") {
+                    AppGroupCard(
+                        title = stringResource(R.string.session_apps_others),
+                        apps = otherApps,
+                        blockedPackages = blockedAppPackages,
+                        fallbackGroupChecked = false,
+                        onToggleGroup = onToggleDistractingMaster,
+                        onToggleApp = onToggleAppBlocked
+                    )
+                }
+            }
+            if (hasScannedApps && visibleApps.isEmpty() && searchQuery.isNotBlank()) {
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(FocusColors.SurfaceVariant)
-                            .padding(16.dp)
-                    ) {
-                        // Section Header
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(role = Role.Button) {
-                                    isSpecialAppsExpanded = !isSpecialAppsExpanded
-                                },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = stringResource(R.string.session_apps_special),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = FocusColors.TextPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                            )
-
-                            Icon(
-                                imageVector = if (isSpecialAppsExpanded) {
-                                    Icons.Rounded.KeyboardArrowUp
-                                } else {
-                                    Icons.Rounded.KeyboardArrowDown
-                                },
-                                contentDescription = toggleSectionLabel,
-                                tint = FocusColors.TextMuted
-                            )
-                        }
-
-                        AnimatedVisibility(
-                            visible = isSpecialAppsExpanded,
-                            // Fade only: animating expand/shrink re-measures the whole sheet every
-                            // frame while the launcher icons settle, which is visible as a stutter.
-                            enter = fadeIn(tween(150)),
-                            exit = fadeOut(tween(120))
-                        ) {
-                            Column {
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                // Item 1: YouTube
-                                SpecialAppCard(
-                                    title = stringResource(R.string.session_apps_youtube),
-                                    leftIcon = {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFFF0000)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.PlayArrow,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    },
-                                    selectedOption = youtubeOption,
-                                    onOptionSelect = onYoutubeOptionChange,
-                                    studyModeSubtext = stringResource(R.string.session_apps_youtube_study),
-                                    onSubtextClick = onOpenYouTubeChannels
-                                )
-
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Divider(color = FocusColors.CardBorderSubtle, thickness = 1.dp)
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                // Item 2: Browser Apps
-                                SpecialAppCard(
-                                    title = stringResource(R.string.session_apps_browser),
-                                    leftIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Language,
-                                            contentDescription = null,
-                                            tint = FocusColors.Primary,
-                                            modifier = Modifier.size(32.dp)
-                                        )
-                                    },
-                                    titleSuffix = {
-                                        if (installedBrowsers.isNotEmpty()) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(start = 8.dp)
-                                            ) {
-                                                installedBrowsers.forEach { browser ->
-                                                    val browserIcon = browser.iconBitmap
-                                                    if (browserIcon != null) {
-                                                        Image(
-                                                            bitmap = browserIcon,
-                                                            contentDescription = null,
-                                                            modifier = Modifier
-                                                                .size(24.dp)
-                                                                .clip(CircleShape)
-                                                                .border(
-                                                                    1.5.dp,
-                                                                    FocusColors.SurfaceVariant,
-                                                                    CircleShape
-                                                                )
-                                                        )
-                                                        Spacer(modifier = Modifier.width((-6).dp))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                    selectedOption = browserOption,
-                                    onOptionSelect = onBrowserOptionChange,
-                                    studyModeSubtext = stringResource(R.string.session_apps_browser_study),
-                                    onSubtextClick = onOpenWebsiteBlocker
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = stringResource(R.string.session_apps_no_results),
+                        color = FocusColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = 24.dp)
+                    )
+                }
+            } else if (!hasScannedApps) {
+                item {
+                    Text(
+                        text = stringResource(R.string.session_apps_scanning),
+                        color = FocusColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = 24.dp)
+                    )
                 }
             }
+        }
+    }
+}
 
-            // SECTION 2: Distracting Apps
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(FocusColors.SurfaceVariant)
-                        .padding(16.dp)
+@Composable
+private fun YouTubeSettingsCard(
+    option: SpecialAppOption,
+    channelCount: Int,
+    onOptionChange: (SpecialAppOption) -> Unit,
+    onOpenChannels: () -> Unit
+) {
+    val studyMode = option == SpecialAppOption.STUDY_MODE
+    SpecialSettingsCard {
+        AppHeaderSwitch(
+            title = stringResource(R.string.session_apps_youtube),
+            checked = option == SpecialAppOption.BLOCK_COMPLETELY,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.BLOCK_COMPLETELY else SpecialAppOption.ALLOW_COMPLETELY)
+            },
+            icon = {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF0033)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Header with Master Toggle Switch
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable(role = Role.Button) {
-                                    isDistractingExpanded = !isDistractingExpanded
-                                }
-                        ) {
-                            Text(
-                                text = distractingAppsLabel,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = FocusColors.TextPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = if (isDistractingExpanded) {
-                                    Icons.Rounded.KeyboardArrowUp
-                                } else {
-                                    Icons.Rounded.KeyboardArrowDown
-                                },
-                                contentDescription = toggleSectionLabel,
-                                tint = FocusColors.TextMuted
-                            )
-                        }
-
-                        Switch(
-                            checked = isDistractingMasterEnabled,
-                            onCheckedChange = {
-                                onToggleDistractingMaster(it, allUserAppPackages)
-                            },
-                            colors = FocusColors.SwitchColors,
-                            modifier = Modifier.semantics {
-                                contentDescription = distractingAppsLabel
-                            }
-                        )
-                    }
-
-                    AnimatedVisibility(
-                        visible = isDistractingExpanded,
-                        // Fade only — see the Special Apps section above. This one holds the full
-                        // installed-app list, so a height animation is especially expensive.
-                        enter = fadeIn(tween(150)),
-                        exit = fadeOut(tween(120))
-                    ) {
-                        Column {
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            if (filteredUserApps.isEmpty()) {
-                                Text(
-                                    text = stringResource(
-                                        if (searchQuery.isNotBlank() || hasScannedApps) {
-                                            R.string.session_apps_no_results
-                                        } else {
-                                            R.string.session_apps_scanning
-                                        }
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = FocusColors.TextSecondary
-                                    ),
-                                    modifier = Modifier.padding(vertical = 12.dp)
-                                )
-                            } else {
-                                filteredUserApps.forEach { app ->
-                                    val isBlocked = blockedAppPackages.contains(app.packageName)
-                                    val appIcon = app.iconBitmap
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .toggleable(
-                                                value = isBlocked,
-                                                role = Role.Switch,
-                                                onValueChange = {
-                                                    onToggleAppBlocked(app.packageName, it)
-                                                }
-                                            )
-                                            .padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            if (appIcon != null) {
-                                                Image(
-                                                    bitmap = appIcon,
-                                                    contentDescription = null,
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                )
-                                            } else {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .background(FocusColors.PrimaryContainer),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = app.appName.take(1).uppercase(),
-                                                        style = MaterialTheme.typography.titleMedium.copy(
-                                                            color = FocusColors.Primary
-                                                        )
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.width(12.dp))
-
-                                            Column {
-                                                Text(
-                                                    text = app.appName,
-                                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                                        color = FocusColors.TextPrimary,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                )
-                                                if (app.hasAppLimit) {
-                                                    Text(
-                                                        text = stringResource(R.string.session_apps_limit_set),
-                                                        style = MaterialTheme.typography.labelSmall.copy(
-                                                            color = FocusColors.Primary
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Switch(
-                                            checked = isBlocked,
-                                            onCheckedChange = null,
-                                            colors = FocusColors.SwitchColors,
-                                            modifier = Modifier.clearAndSetSemantics { }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(21.dp))
                 }
             }
-        }
+        )
+        ThinDivider()
+        NestedSwitchRow(
+            label = stringResource(R.string.session_apps_block_shorts),
+            checked = studyMode,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.STUDY_MODE else SpecialAppOption.ALLOW_COMPLETELY)
+            }
+        )
+        NestedSwitchRow(
+            label = stringResource(R.string.session_apps_block_homepage),
+            checked = studyMode,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.STUDY_MODE else SpecialAppOption.ALLOW_COMPLETELY)
+            }
+        )
+        NestedSwitchRow(
+            label = stringResource(R.string.session_apps_study_mode),
+            checked = studyMode,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.STUDY_MODE else SpecialAppOption.ALLOW_COMPLETELY)
+            },
+            supportingContent = {
+                CountLink(
+                    text = pluralStringResource(
+                        R.plurals.session_channels_added,
+                        channelCount,
+                        channelCount
+                    ),
+                    onClick = onOpenChannels
+                )
+            }
+        )
     }
 }
 
 @Composable
-private fun SpecialAppCard(
-    title: String,
-    leftIcon: @Composable () -> Unit,
-    titleSuffix: (@Composable () -> Unit)? = null,
-    selectedOption: SpecialAppOption,
-    onOptionSelect: (SpecialAppOption) -> Unit,
-    studyModeSubtext: String,
-    onSubtextClick: (() -> Unit)? = null
+private fun BrowserSettingsCard(
+    browsers: List<InstalledAppItem>,
+    option: SpecialAppOption,
+    onOptionChange: (SpecialAppOption) -> Unit,
+    onOpenWebsiteBlocker: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // App Title Row
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            leftIcon()
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    color = FocusColors.TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+    val studyMode = option == SpecialAppOption.STUDY_MODE
+    SpecialSettingsCard {
+        AppHeaderSwitch(
+            title = stringResource(R.string.session_apps_browser),
+            checked = option == SpecialAppOption.BLOCK_COMPLETELY,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.BLOCK_COMPLETELY else SpecialAppOption.ALLOW_COMPLETELY)
+            },
+            supportingText = when {
+                option == SpecialAppOption.BLOCK_COMPLETELY -> stringResource(R.string.session_apps_block_all)
+                option == SpecialAppOption.STUDY_MODE -> stringResource(R.string.session_apps_study_mode)
+                browsers.any { it.hasAppLimit } -> stringResource(R.string.session_apps_limit_set)
+                else -> null
+            },
+            icon = {
+                val icon = browsers.firstOrNull()?.iconBitmap
+                if (icon != null) {
+                    Image(
+                        bitmap = icon,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.Language,
+                        contentDescription = null,
+                        tint = FocusColors.CyanBlue,
+                        modifier = Modifier.size(34.dp)
+                    )
+                }
+            }
+        )
+        ThinDivider()
+        NestedSwitchRow(
+            label = stringResource(R.string.session_apps_block_adult),
+            checked = studyMode,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.STUDY_MODE else SpecialAppOption.ALLOW_COMPLETELY)
+            }
+        )
+        NestedSwitchRow(
+            label = stringResource(R.string.session_apps_study_mode),
+            checked = studyMode,
+            onCheckedChange = {
+                onOptionChange(if (it) SpecialAppOption.STUDY_MODE else SpecialAppOption.ALLOW_COMPLETELY)
+            },
+            supportingContent = {
+                CountLink(
+                    text = stringResource(R.string.session_apps_websites_allowed),
+                    onClick = onOpenWebsiteBlocker
                 )
-            )
-            if (titleSuffix != null) {
-                titleSuffix()
+            }
+        )
+    }
+}
+
+@Composable
+private fun SpecialSettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        color = FocusColors.SurfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), content = content)
+    }
+}
+
+@Composable
+private fun AppHeaderSwitch(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    icon: @Composable () -> Unit,
+    supportingText: String? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        icon()
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = FocusColors.TextPrimary, fontWeight = FontWeight.Bold)
+            if (supportingText != null) {
+                Text(supportingText, color = FocusColors.TextSecondary, fontSize = 11.sp)
             }
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        SpecialAppRadioRow(
-            text = stringResource(R.string.session_apps_block_all),
-            isSelected = selectedOption == SpecialAppOption.BLOCK_COMPLETELY,
-            onClick = { onOptionSelect(SpecialAppOption.BLOCK_COMPLETELY) }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        SpecialAppRadioRow(
-            text = stringResource(R.string.session_apps_allow_all),
-            isSelected = selectedOption == SpecialAppOption.ALLOW_COMPLETELY,
-            onClick = { onOptionSelect(SpecialAppOption.ALLOW_COMPLETELY) }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        SpecialAppRadioRow(
-            text = stringResource(R.string.session_apps_study_mode),
-            subtext = studyModeSubtext,
-            isSelected = selectedOption == SpecialAppOption.STUDY_MODE,
-            onClick = { onOptionSelect(SpecialAppOption.STUDY_MODE) },
-            onSubtextClick = onSubtextClick
-        )
+        SessionSwitch(checked)
     }
 }
 
 @Composable
-private fun SpecialAppRadioRow(
-    text: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    subtext: String? = null,
-    onSubtextClick: (() -> Unit)? = null
+private fun NestedSwitchRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    supportingContent: (@Composable () -> Unit)? = null
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(FocusShapes.small)
-                .selectable(
-                    selected = isSelected,
-                    role = Role.RadioButton,
-                    onClick = onClick
-                )
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .toggleable(checked, role = Role.Switch, onValueChange = onCheckedChange)
+                .padding(start = 42.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = text,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    color = FocusColors.TextPrimary,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    fontSize = 16.sp
-                ),
+                label,
+                color = FocusColors.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
-
-            RadioButton(
-                selected = isSelected,
-                onClick = null,
-                colors = RadioButtonDefaults.colors(
-                    selectedColor = FocusColors.Primary,
-                    unselectedColor = FocusColors.TextMuted
-                ),
-                modifier = Modifier.clearAndSetSemantics { }
-            )
+            SessionSwitch(checked)
         }
-
-        if (subtext != null) {
-            if (onSubtextClick != null) {
-                TextButton(
-                    onClick = onSubtextClick,
-                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = subtext,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = FocusColors.Primary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.ChevronRight,
-                        contentDescription = null,
-                        tint = FocusColors.Primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            } else {
-                Text(
-                    text = subtext,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusColors.TextSecondary,
-                        fontSize = 13.sp
-                    ),
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                )
+        if (supportingContent != null) {
+            Box(modifier = Modifier.padding(start = 42.dp, bottom = 5.dp)) {
+                supportingContent()
             }
         }
     }
 }
 
-data class PresetChannel(
-    val name: String,
-    val handle: String,
-    val category: String
-)
+@Composable
+private fun CountLink(text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, color = FocusColors.TextSecondary, fontSize = 11.sp)
+        Icon(Icons.Rounded.ChevronRight, null, tint = FocusColors.TextMuted, modifier = Modifier.size(14.dp))
+    }
+}
 
-val PRESET_STUDY_CHANNELS = listOf(
-    // JEE & NEET Prep
-    PresetChannel("Physics Wallah", "@PhysicsWallah", "JEE / NEET"),
-    PresetChannel("Unacademy JEE", "@UnacademyJEE", "JEE / NEET"),
-    PresetChannel("Vedantu JEE", "@VedantuJEE", "JEE / NEET"),
-    PresetChannel("Mohit Tyagi", "@MohitTyagi", "JEE / NEET"),
-    PresetChannel("Physics Galaxy", "@PhysicsGalaxyOfficial", "JEE / NEET"),
-    PresetChannel("Competishun", "@Competishun", "JEE / NEET"),
+@Composable
+private fun AppGroupCard(
+    title: String,
+    apps: List<InstalledAppItem>,
+    blockedPackages: Set<String>,
+    fallbackGroupChecked: Boolean,
+    onToggleGroup: (Boolean, Set<String>) -> Unit,
+    onToggleApp: (String, Boolean) -> Unit
+) {
+    val packages = remember(apps) { apps.mapTo(mutableSetOf()) { it.packageName } }
+    val allSelected = if (packages.isEmpty()) fallbackGroupChecked else packages.all { it in blockedPackages }
+    Surface(
+        color = FocusColors.SurfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(allSelected, role = Role.Switch) { onToggleGroup(it, packages) }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    title,
+                    color = FocusColors.TextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                SessionSwitch(allSelected)
+            }
+            apps.forEach { app ->
+                val checked = app.packageName in blockedPackages
+                AppToggleRow(app, checked) { onToggleApp(app.packageName, it) }
+            }
+        }
+    }
+}
 
-    // CS & Programming
-    PresetChannel("freeCodeCamp.org", "@freecodecamp", "Coding"),
-    PresetChannel("Fireship", "@Fireship", "Coding"),
-    PresetChannel("CodeWithHarry", "@CodeWithHarry", "Coding"),
-    PresetChannel("takeUforward (Striver)", "@takeUforward", "Coding"),
-    PresetChannel("Gate Smashers", "@GateSmashers", "Coding"),
-    PresetChannel("Apna College", "@ApnaCollegeOfficial", "Coding"),
-    PresetChannel("CS50", "@cs50", "Coding"),
-    PresetChannel("Traversy Media", "@TraversyMedia", "Coding"),
+@Composable
+private fun AppToggleRow(app: InstalledAppItem, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val label = if (app.hasAppLimit) {
+        stringResource(R.string.session_apps_limit_set)
+    } else null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .toggleable(checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val icon = app.iconBitmap
+        if (icon != null) {
+            Image(
+                bitmap = icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(9.dp))
+            )
+        } else {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(FocusColors.SurfaceSubtle),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(app.appName.take(1).uppercase(), color = FocusColors.TextPrimary, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                app.appName,
+                color = FocusColors.TextPrimary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (label != null) Text(label, color = FocusColors.TextSecondary, fontSize = 10.sp)
+        }
+        SessionSwitch(checked)
+    }
+}
 
-    // Math & Science
-    PresetChannel("Khan Academy", "@KhanAcademy", "Math & Science"),
-    PresetChannel("3Blue1Brown", "@3blue1brown", "Math & Science"),
-    PresetChannel("Veritasium", "@veritasium", "Math & Science"),
-    PresetChannel("MinutePhysics", "@minutephysics", "Math & Science"),
+@Composable
+private fun SessionSwitch(checked: Boolean) {
+    Switch(
+        checked = checked,
+        onCheckedChange = null,
+        colors = FocusColors.SwitchColors,
+        modifier = Modifier.clearAndSetSemantics { }
+    )
+}
 
-    // Academics & Exams
-    PresetChannel("MIT OpenCourseWare", "@mitocw", "Academics"),
-    PresetChannel("NPTEL", "@nptelhrd", "Academics"),
-    PresetChannel("CrashCourse", "@crashcourse", "Academics"),
-    PresetChannel("StudyIQ Education", "@StudyIQEducation", "Academics"),
-    PresetChannel("TED-Ed", "@TEDEd", "Academics"),
+@Composable
+private fun ThinDivider() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(FocusColors.CardBorderSubtle)
+    )
+}
 
-    // Medical & Biology
-    PresetChannel("Osmosis", "@osmosis", "Medical"),
-    PresetChannel("Ninja Nerd", "@NinjaNerdLectures", "Medical")
+private fun isLikelyDistracting(app: InstalledAppItem): Boolean {
+    if (app.hasAppLimit) return true
+    val value = "${app.appName} ${app.packageName}".lowercase()
+    return DISTRACTING_TERMS.any(value::contains)
+}
+
+private val DISTRACTING_TERMS = listOf(
+    "instagram", "facebook", "snapchat", "tiktok", "twitter", "reddit", "netflix",
+    "hotstar", "prime video", "shopping", "flipkart", "amazon", "meesho", "game",
+    "free fire", "pubg", "spotify", "music", "telegram", "discord"
 )

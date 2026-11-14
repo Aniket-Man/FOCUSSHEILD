@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -209,13 +210,13 @@ fun YouTubeStudyChannelContent(
     val approvedChannelsState = repo?.allChannels?.collectAsState(initial = emptyList())
     val existingChannels = (approvedChannelsState?.value ?: emptyList()).filter { it.isApproved }
 
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<YouTubeChannelSearchResult>>(emptyList()) }
     var suggestedChannels by remember {
-        mutableStateOf<List<YouTubeChannelSearchResult>>(YouTubeChannelSearchEngine.CURATED_CATALOG.take(5))
+        mutableStateOf<List<YouTubeChannelSearchResult>>(YouTubeChannelSearchEngine.CURATED_CATALOG)
     }
     var isSearching by remember { mutableStateOf(false) }
-    var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var showDeleteAllDialog by rememberSaveable { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
     var feedbackIsError by remember { mutableStateOf(false) }
     var addingChannels by remember { mutableStateOf(emptySet<String>()) }
@@ -396,12 +397,23 @@ fun YouTubeStudyChannelContent(
 
                 if (existingChannels.isEmpty()) {
                     item {
-                        Text(
-                            text = stringResource(R.string.channel_list_empty),
-                            color = textSecondary,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .dashedBorder(
+                                    color = FocusColors.OverlayBorder,
+                                    cornerRadius = 12.dp
+                                )
+                                .padding(horizontal = 20.dp, vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.channel_list_empty),
+                                color = textSecondary,
+                                fontSize = 14.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
                     }
                 } else {
                     items(existingChannels, key = { it.id }) { channel ->
@@ -635,7 +647,7 @@ fun YouTubeChannelCard(
     val textSecondary = FocusColors.OverlayTextSecondary
     val addLabel = stringResource(R.string.channel_add_named, channel.channelName)
 
-    Box(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
@@ -647,83 +659,81 @@ fun YouTubeChannelCard(
                 dashLength = 7.dp,
                 gapLength = 5.dp
             )
-            .padding(horizontal = 16.dp, vertical = 13.dp)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FocusSpacing.md)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            StudyChannelAvatar(
-                name = channel.channelName,
-                handle = channel.handle,
-                thumbnailUrl = channel.avatarUrl,
-                size = 50.dp
+        StudyChannelAvatar(
+            name = channel.channelName,
+            handle = channel.handle,
+            thumbnailUrl = channel.avatarUrl,
+            size = 46.dp
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = channel.channelName,
+                color = textPrimary,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = channel.channelName,
-                    color = textPrimary,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = channel.subscriberCount.ifBlank { channel.handle },
-                    color = textSecondary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = channel.subscriberCount.ifBlank { channel.handle },
+                color = textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1
+            )
         }
 
-            if (!isApproved) {
-                Button(
-                    onClick = onAdd,
-                    enabled = !isAdding,
-                    shape = FocusShapes.pill,
-                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
-                        .semantics { contentDescription = addLabel }
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(if (isAdding) R.string.channel_adding else R.string.channel_add_action),
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+        Spacer(modifier = Modifier.width(8.dp))
+        if (!isApproved) {
+            Button(
+                onClick = onAdd,
+                enabled = !isAdding,
+                shape = FocusShapes.pill,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .heightIn(min = 42.dp)
+                    .semantics { contentDescription = addLabel }
+            ) {
+                Text(
+                    text = stringResource(if (isAdding) R.string.channel_adding else R.string.channel_add_action),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                if (!isAdding) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .heightIn(min = 36.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(FocusColors.EmeraldLight)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                        .align(Alignment.End),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(R.string.channel_added_status),
-                            color = FocusColors.EmeraldText,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = null,
-                            tint = FocusColors.EmeraldText,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(FocusColors.EmeraldLight)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.channel_added_status),
+                        color = FocusColors.EmeraldText,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Check,
+                        contentDescription = null,
+                        tint = FocusColors.EmeraldText,
+                        modifier = Modifier.size(15.dp)
+                    )
                 }
             }
         }

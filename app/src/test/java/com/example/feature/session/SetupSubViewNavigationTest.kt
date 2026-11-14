@@ -51,6 +51,7 @@ class SetupSubViewNavigationTest {
         assertEquals(SetupSubView.MAIN, SetupSubView.FOCUS_TIME.backTarget())
         assertEquals(SetupSubView.MAIN, SetupSubView.BREAK.backTarget())
         assertEquals(SetupSubView.MAIN, SetupSubView.SELECT_APPS.backTarget())
+        assertEquals(SetupSubView.MAIN, SetupSubView.ULTRA_FOCUS.backTarget())
     }
 
     @Test
@@ -93,5 +94,8 @@ class SetupSubViewNavigationTest {
         assertEquals(1, SetupSubView.FOCUS_TIME.ordinal)
         assertEquals(2, SetupSubView.BREAK.ordinal)
         assertEquals(3, SetupSubView.SELECT_APPS.ordinal)
+        assertEquals(4, SetupSubView.WEBSITE_BLOCKER.ordinal)
+        assertEquals(5, SetupSubView.YOUTUBE_CHANNELS.ordinal)
+        assertEquals(6, SetupSubView.ULTRA_FOCUS.ordinal)
     }
 }

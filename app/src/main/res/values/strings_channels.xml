@@ -1,16 +1,16 @@
 <resources>
-    <string name="channel_sheet_title">Add study channels manually or from packs</string>
-    <string name="channel_search_label">Search study channels</string>
-    <string name="channel_search_example" translatable="false">Khan Academy or @PhysicsWallah</string>
-    <string name="channel_list_title">Study channels</string>
-    <string name="channel_list_empty">No study channels yet. Search above or add a suggested channel below.</string>
-    <string name="channel_suggested_title">Suggested channels</string>
+    <string name="channel_sheet_title">Add channels you study from and block the rest</string>
+    <string name="channel_search_label">Search channel to add</string>
+    <string name="channel_search_example" translatable="false">Search channel to add</string>
+    <string name="channel_list_title">Your Study Mode Channels</string>
+    <string name="channel_list_empty">Add now or while watching in YouTube Study mode</string>
+    <string name="channel_suggested_title">Suggested for you</string>
     <string name="channel_results_title">Results for “%1$s”</string>
     <string name="channel_searching">Searching YouTube channels…</string>
     <string name="channel_no_results">No channels match “%1$s”. Try another name or an exact @handle.</string>
     <string name="channel_search_error">Unable to search online. Check your connection and search again. Any available local results are shown below.</string>
     <string name="channel_repository_error">Unable to open your study channels. Close this sheet and reopen it.</string>
-    <string name="channel_add_action">Add channel</string>
+    <string name="channel_add_action">Add</string>
     <string name="channel_add_named">Add channel: %1$s</string>
     <string name="channel_adding">Adding…</string>
     <string name="channel_added_status">Added</string>

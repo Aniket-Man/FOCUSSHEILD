@@ -74,6 +74,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.example.FocusShieldApp
 import com.example.R
 import com.example.core.accessibility.AccessibilityFeaturePromptInfo
 import com.example.core.accessibility.AccessibilityHelper
@@ -118,7 +119,8 @@ internal enum class SetupSubView {
     BREAK,
     SELECT_APPS,
     WEBSITE_BLOCKER,
-    YOUTUBE_CHANNELS
+    YOUTUBE_CHANNELS,
+    ULTRA_FOCUS
 }
 
 /**
@@ -133,7 +135,8 @@ internal fun SetupSubView.backTarget(): SetupSubView? = when (this) {
     SetupSubView.MAIN -> null
     SetupSubView.FOCUS_TIME,
     SetupSubView.BREAK,
-    SetupSubView.SELECT_APPS -> SetupSubView.MAIN
+    SetupSubView.SELECT_APPS,
+    SetupSubView.ULTRA_FOCUS -> SetupSubView.MAIN
     SetupSubView.WEBSITE_BLOCKER,
     SetupSubView.YOUTUBE_CHANNELS -> SetupSubView.SELECT_APPS
 }
@@ -160,6 +163,8 @@ fun FocusSessionSetupSheet(
     val protectionError by viewModel.protectionError.collectAsStateWithLifecycle()
     val customSubjects by viewModel.customSubjects.collectAsStateWithLifecycle()
     val isSavingProtection by viewModel.isSavingProtection.collectAsStateWithLifecycle()
+    val approvedChannels by FocusShieldApp.instance.studyChannelRepository.approvedChannels
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val youtubePromptTitle = stringResource(R.string.session_sheet_youtube_prompt)
     val youtubePromptReason = stringResource(R.string.session_sheet_youtube_reason)
@@ -276,83 +281,19 @@ fun FocusSessionSetupSheet(
         ) { subView ->
             when (subView) {
                 SetupSubView.MAIN -> {
-                    FocusSetupMainContent(
+                    ReferenceSessionSetupContent(
                         setupState = setupState,
-                        customSubjects = customSubjects,
                         onModeSelected = { viewModel.selectMode(it) },
-                        onToggleSubjectTag = { viewModel.toggleSubjectTag(it) },
-                        onAddSubjectTag = { viewModel.addCustomSubjectTag(it) },
-                        onRenameSubjectTag = { subject, newName -> viewModel.renameCustomSubjectTag(subject, newName) },
-                        onDeleteSubjectTag = { viewModel.deleteCustomSubjectTag(it) },
-                        onTopicChange = { viewModel.setTopic(it) },
                         onOpenFocusTimePicker = { activeSubView = SetupSubView.FOCUS_TIME },
                         onOpenBreakPicker = { activeSubView = SetupSubView.BREAK },
                         onOpenSelectApps = { activeSubView = SetupSubView.SELECT_APPS },
-                        onToggleStrictMode = { viewModel.toggleStrictMode(it) },
-                        onToggleYouTubeStudyMode = { enabled ->
-                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = youtubePromptTitle,
-                                    description = youtubePromptReason,
-                                    onGranted = { viewModel.toggleYouTubeStudyMode(true) }
-                                )
-                            } else {
-                                viewModel.toggleYouTubeStudyMode(enabled)
-                            }
-                        },
-                        onToggleBrowserStudyMode = { enabled ->
-                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = browserPromptTitle,
-                                    description = browserPromptReason,
-                                    onGranted = { viewModel.toggleBrowserStudyMode(true) }
-                                )
-                            } else {
-                                viewModel.toggleBrowserStudyMode(enabled)
-                            }
-                        },
-                        onToggleBlockHomeScreen = { viewModel.toggleBlockHomeScreen(it) },
-                        onToggleBlockUninstall = { enabled ->
-                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = uninstallPromptTitle,
-                                    description = uninstallPromptReason,
-                                    onGranted = { viewModel.toggleBlockUninstall(true) }
-                                )
-                            } else {
-                                viewModel.toggleBlockUninstall(enabled)
-                            }
-                        },
-                        onToggleBlockSplitScreen = { enabled ->
-                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = splitPromptTitle,
-                                    description = splitPromptReason,
-                                    onGranted = { viewModel.toggleBlockSplitScreen(true) }
-                                )
-                            } else {
-                                viewModel.toggleBlockSplitScreen(enabled)
-                            }
-                        },
-                        onToggleBlockFloatingWindow = { enabled ->
-                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
-                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
-                                    title = floatingPromptTitle,
-                                    description = floatingPromptReason,
-                                    onGranted = { viewModel.toggleBlockFloatingWindow(true) }
-                                )
-                            } else {
-                                viewModel.toggleBlockFloatingWindow(enabled)
-                            }
-                        },
-                        onToggleDeepFocusExpanded = { viewModel.toggleDeepFocusExpanded() },
-                        isSavingProtection = isSavingProtection,
+                        onOpenUltraFocus = { activeSubView = SetupSubView.ULTRA_FOCUS },
                         errorMessage = protectionError ?: setupState.validationError,
                         onDismissError = {
                             viewModel.clearProtectionError()
                             viewModel.clearSetupError()
                         },
-                        onStartFocusNow = {
+                        onContinue = {
                             val started = viewModel.startSession()
                             if (started) {
                                 onStartFocus()
@@ -395,6 +336,7 @@ fun FocusSessionSetupSheet(
                         browserOption = setupState.browserOption,
                         isDistractingMasterEnabled = setupState.isDistractingMasterEnabled,
                         blockedAppPackages = setupState.blockedAppPackages,
+                        approvedChannelCount = approvedChannels.size,
                         onYoutubeOptionChange = { option ->
                             if (option == SpecialAppOption.STUDY_MODE && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
                                 pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
@@ -443,6 +385,46 @@ fun FocusSessionSetupSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(0.84f)
+                    )
+                }
+
+                SetupSubView.ULTRA_FOCUS -> {
+                    UltraFocusSettingsContent(
+                        setupState = setupState,
+                        isSaving = isSavingProtection,
+                        onToggleStrict = viewModel::toggleStrictMode,
+                        onToggleStudyMode = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = youtubePromptTitle,
+                                    description = youtubePromptReason,
+                                    onGranted = { viewModel.toggleYouTubeStudyMode(true) }
+                                )
+                            } else {
+                                viewModel.toggleYouTubeStudyMode(enabled)
+                            }
+                        },
+                        onToggleUninstall = { enabled ->
+                            if (enabled && !AccessibilityHelper.isAccessibilityServiceEnabled(context)) {
+                                pendingAccessibilityPrompt = AccessibilityFeaturePromptInfo(
+                                    title = uninstallPromptTitle,
+                                    description = uninstallPromptReason,
+                                    onGranted = { viewModel.toggleBlockUninstall(true) }
+                                )
+                            } else {
+                                viewModel.toggleBlockUninstall(enabled)
+                            }
+                        },
+                        onToggleNotifications = viewModel::toggleBlockNotifications,
+                        onToggleHomeScreen = viewModel::toggleBlockHomeScreen,
+                        errorMessage = protectionError ?: setupState.validationError,
+                        onDismissError = {
+                            viewModel.clearProtectionError()
+                            viewModel.clearSetupError()
+                        },
+                        onStartFocus = {
+                            if (viewModel.startSession()) onStartFocus()
+                        }
                     )
                 }
             }

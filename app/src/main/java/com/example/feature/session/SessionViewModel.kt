@@ -40,6 +40,8 @@ enum class SpecialAppOption {
     STUDY_MODE
 }
 
+private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+
 data class SessionSetupState(
     val selectedMode: SessionMode = SessionMode.TIMER,
     val durationMinutes: Int = 25,
@@ -126,10 +128,8 @@ class SessionViewModel(
 
     private fun applyProtectionPreferences(prefs: FocusPreferences) {
         _setupState.update { state -> state.copy(
-            isAppBlockingEnabled = if (state.planId == null) prefs.isAppBlockingDefault else state.isAppBlockingEnabled,
             isStrictModeEnabled = prefs.isStrictModeDefault,
             strictModeConfig = state.strictModeConfig.copy(enabled = prefs.isStrictModeDefault),
-            isStudyChannelsEnabled = prefs.isStudyChannelsDefault,
             isBlockUninstallEnabled = prefs.isBlockUninstallEnabled,
             isBlockSplitScreenEnabled = prefs.isBlockSplitScreenEnabled,
             isBlockFloatingWindowEnabled = prefs.isBlockFloatingWindowEnabled,
@@ -191,29 +191,44 @@ class SessionViewModel(
                 // Ignore in isolated unit test environments without Application context
             }
         }
-        // Observe global preferences to keep setup state in sync
+        // Take one default snapshot. After setup opens, its app choices are session-scoped and
+        // must not be overwritten by later repository emissions.
         viewModelScope.launch {
             try {
-                FocusShieldApp.instance.preferencesRepository.preferencesFlow.collectLatest { prefs ->
-                    applyProtectionPreferences(prefs)
+                val prefs = FocusShieldApp.instance.preferencesRepository.preferencesFlow.first()
+                applyProtectionPreferences(prefs)
+                _setupState.update { it.copy(isLoadingPreferences = true) }
+                val packages = FocusShieldApp.instance.blockedAppRepository.enabledBlockedApps
+                    .first()
+                    .mapTo(mutableSetOf()) { it.packageName }
+                _setupState.update { state ->
+                    if (state.planId != null) {
+                        state.copy(isLoadingPreferences = false)
+                    } else {
+                        val studyMode = prefs.isStudyChannelsDefault
+                        state.copy(
+                            blockedAppPackages = packages,
+                            isAppBlockingEnabled = prefs.isAppBlockingDefault || packages.isNotEmpty() || studyMode,
+                            isYouTubeStudyModeEnabled = studyMode,
+                            isStudyChannelsEnabled = studyMode,
+                            isLoadingPreferences = false,
+                            youtubeOption = when {
+                                studyMode -> SpecialAppOption.STUDY_MODE
+                                YOUTUBE_PACKAGE in packages -> SpecialAppOption.BLOCK_COMPLETELY
+                                else -> SpecialAppOption.ALLOW_COMPLETELY
+                            },
+                            browserOption = if (packages.any(com.example.core.detector.BrowserUrlDetector::isBrowserPackage)) {
+                                SpecialAppOption.BLOCK_COMPLETELY
+                            } else {
+                                SpecialAppOption.ALLOW_COMPLETELY
+                            }
+                        )
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (exception: Exception) {
                 _setupState.update { it.copy(isLoadingPreferences = false) }
                 android.util.Log.e("SessionViewModel", "Protection preferences are unavailable", exception)
-            }
-        }
-
-        // Session blocks and daily app limits are independent. Never add app-limit packages here.
-        viewModelScope.launch {
-            try {
-                FocusShieldApp.instance.blockedAppRepository.enabledBlockedApps.collectLatest { apps ->
-                    _setupState.update { state ->
-                        if (state.planId == null) state.copy(blockedAppPackages = apps.map { it.packageName }.toSet()) else state
-                    }
-                }
-            } catch (e: Exception) {
-                // Ignore in isolated unit test environments without Application context
             }
         }
 
@@ -520,7 +535,10 @@ class SessionViewModel(
     }
 
     fun toggleAppBlocking(enabled: Boolean) {
-        changeProtection(weakening = !enabled) { FocusShieldApp.instance.preferencesRepository.updateAppBlockingDefault(enabled) }
+        changeProtection(weakening = !enabled) {
+            FocusShieldApp.instance.preferencesRepository.updateAppBlockingDefault(enabled)
+            _setupState.update { it.copy(isAppBlockingEnabled = enabled) }
+        }
     }
 
     fun toggleStrictMode(enabled: Boolean) {
@@ -533,7 +551,22 @@ class SessionViewModel(
     }
 
     fun toggleStudyChannels(enabled: Boolean) {
-        changeProtection(weakening = !enabled) { FocusShieldApp.instance.preferencesRepository.updateStudyChannelsDefault(enabled) }
+        changeProtection(weakening = !enabled) {
+            FocusShieldApp.instance.preferencesRepository.updateStudyChannelsDefault(enabled)
+            _setupState.update {
+                it.copy(
+                    isStudyChannelsEnabled = enabled,
+                    isYouTubeStudyModeEnabled = enabled,
+                    youtubeOption = if (enabled) SpecialAppOption.STUDY_MODE else SpecialAppOption.BLOCK_COMPLETELY,
+                    blockedAppPackages = if (enabled) {
+                        it.blockedAppPackages - YOUTUBE_PACKAGE
+                    } else {
+                        it.blockedAppPackages + YOUTUBE_PACKAGE
+                    },
+                    isAppBlockingEnabled = if (enabled) true else it.isAppBlockingEnabled
+                )
+            }
+        }
     }
 
     fun setNumberOfBreaks(count: Int) {
@@ -550,7 +583,13 @@ class SessionViewModel(
             it.copy(
                 youtubeOption = option,
                 isYouTubeStudyModeEnabled = isStudyMode,
-                isStudyChannelsEnabled = isStudyMode
+                isStudyChannelsEnabled = isStudyMode,
+                isAppBlockingEnabled = if (option != SpecialAppOption.ALLOW_COMPLETELY) true else it.isAppBlockingEnabled,
+                blockedAppPackages = if (option == SpecialAppOption.BLOCK_COMPLETELY) {
+                    it.blockedAppPackages + YOUTUBE_PACKAGE
+                } else {
+                    it.blockedAppPackages - YOUTUBE_PACKAGE
+                }
             )
         }
     }
@@ -562,6 +601,12 @@ class SessionViewModel(
             it.copy(
                 browserOption = option,
                 isBrowserStudyModeEnabled = isStudyMode,
+                isAppBlockingEnabled = if (option != SpecialAppOption.ALLOW_COMPLETELY) true else it.isAppBlockingEnabled,
+                blockedAppPackages = if (option == SpecialAppOption.BLOCK_COMPLETELY) {
+                    it.blockedAppPackages + com.example.core.detector.BrowserUrlDetector.KNOWN_BROWSER_PACKAGES
+                } else {
+                    it.blockedAppPackages - com.example.core.detector.BrowserUrlDetector.KNOWN_BROWSER_PACKAGES
+                },
                 validationError = null
             )
         }
@@ -614,7 +659,11 @@ class SessionViewModel(
             } else {
                 it.blockedAppPackages - allAppPackages
             }
-            it.copy(isDistractingMasterEnabled = enabled, blockedAppPackages = newBlocked)
+            it.copy(
+                isDistractingMasterEnabled = enabled,
+                blockedAppPackages = newBlocked,
+                isAppBlockingEnabled = if (enabled) true else it.isAppBlockingEnabled
+            )
         }
     }
 
@@ -625,19 +674,15 @@ class SessionViewModel(
             } else {
                 it.blockedAppPackages - packageName
             }
-            it.copy(blockedAppPackages = updated)
+            it.copy(
+                blockedAppPackages = updated,
+                isAppBlockingEnabled = if (isBlocked) true else it.isAppBlockingEnabled
+            )
         }
     }
 
     fun toggleYouTubeStudyMode(enabled: Boolean) {
-        _setupState.update {
-            val newOpt = if (enabled) SpecialAppOption.STUDY_MODE else SpecialAppOption.BLOCK_COMPLETELY
-            it.copy(
-                isYouTubeStudyModeEnabled = enabled,
-                youtubeOption = newOpt,
-                isStudyChannelsEnabled = enabled
-            )
-        }
+        setYoutubeOption(if (enabled) SpecialAppOption.STUDY_MODE else SpecialAppOption.BLOCK_COMPLETELY)
     }
 
     fun toggleBrowserStudyMode(enabled: Boolean) {
@@ -647,6 +692,11 @@ class SessionViewModel(
             it.copy(
                 isBrowserStudyModeEnabled = enabled,
                 browserOption = newOpt,
+                blockedAppPackages = if (enabled) {
+                    it.blockedAppPackages - com.example.core.detector.BrowserUrlDetector.KNOWN_BROWSER_PACKAGES
+                } else {
+                    it.blockedAppPackages + com.example.core.detector.BrowserUrlDetector.KNOWN_BROWSER_PACKAGES
+                },
                 validationError = null
             )
         }
@@ -661,6 +711,10 @@ class SessionViewModel(
 
     fun toggleBlockHomeScreen(enabled: Boolean) {
         _setupState.update { it.copy(isBlockHomeScreenEnabled = enabled) }
+    }
+
+    fun toggleBlockNotifications(enabled: Boolean) {
+        _setupState.update { it.copy(blockNotifications = enabled) }
     }
 
     fun toggleBlockUninstall(enabled: Boolean) {
