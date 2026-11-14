@@ -1,0 +1,35 @@
+<resources>
+    <string name="usage_stats_title">Usage Stats</string>
+    <string name="usage_tab_daily">Daily</string>
+    <string name="usage_tab_weekly">Weekly</string>
+    <string name="usage_filter_all">All apps</string>
+    <string name="usage_filter_distracting">Distracting</string>
+    <string name="usage_filter_productive">Productive</string>
+    <string name="usage_filter_others">Others</string>
+    <string name="usage_search_placeholder">Search apps</string>
+    <string name="usage_avg_suffix">%1$s (avg)</string>
+    <string name="usage_show_zero_apps">Show apps with 0m of usage</string>
+    <string name="usage_hide_zero_apps">Hide apps with 0m of usage</string>
+    <string name="usage_prev_period">Previous</string>
+    <string name="usage_next_period">Next</string>
+    <string name="usage_today_prefix">Today - %1$s</string>
+    <string name="usage_yesterday_prefix">Yesterday - %1$s</string>
+    <string name="usage_vs_last_week_down">– %1$d%% vs last week</string>
+    <string name="usage_vs_last_week_up">+ %1$d%% vs last week</string>
+    <string name="usage_vs_last_week_same">0% vs last week</string>
+    <string name="usage_help_title">Usage Stats guide</string>
+    <string name="usage_help_body">Switch between Daily and Weekly views to track screen time across Distracting, Productive, and Others apps. Tap any day bar or arrow to inspect another day or week, and tap any app to adjust its category or set a daily limit.</string>
+    <string name="usage_permission_title">Usage access required</string>
+    <string name="usage_permission_body">Grant Usage Access so FocusShield can display real daily and weekly app usage breakdowns.</string>
+    <string name="usage_permission_cta">Grant Usage Access</string>
+    <string name="usage_empty_filter">No apps recorded in this category for the selected period.</string>
+    <string name="usage_empty_search">No apps match “%1$s”.</string>
+    <string name="usage_detail_category_title">App category</string>
+    <string name="usage_detail_reset_auto">Reset to auto</string>
+    <string name="usage_detail_daily_total">Selected day</string>
+    <string name="usage_detail_weekly_total">This week</string>
+    <string name="usage_detail_launches">App opens</string>
+    <string name="usage_detail_set_limit">Set daily app limit</string>
+    <string name="usage_detail_edit_limit">Edit daily app limit (%1$d min)</string>
+    <string name="usage_detail_app_info">Android app info</string>
+</resources>
